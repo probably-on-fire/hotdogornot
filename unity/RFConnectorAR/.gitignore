@@ -33,3 +33,7 @@ Thumbs.db
 *.aab
 *.ipa
 *.unitypackage
+
+# Test runner output
+test-results.xml
+test-run.log
