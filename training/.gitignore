@@ -1,0 +1,25 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Data and models
+data/raw/
+data/synthetic/
+data/labeled/
+data/processed/
+runs/
+*.pt
+*.onnx
+*.bin
+!test_data/**/*.bin
+
+# Environment
+.env
+.env.local
