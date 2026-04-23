@@ -1,0 +1,22 @@
+model:
+  embedding_dim: 128
+  backbone: "mobilevitv2_100"
+  pretrained: true
+
+training:
+  image_size: 384
+  batch_size: 32
+  samples_per_class_per_batch: 4   # balanced sampling for triplet mining
+  num_epochs: 40
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  margin: 0.3
+  warmup_epochs: 2
+
+data:
+  root: "data/labeled/embedder"
+  classes_yaml: "configs/classes.yaml"
+
+output:
+  dir: "runs/embedder"
+  checkpoint_name: "embedder.pt"
