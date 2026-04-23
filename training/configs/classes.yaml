@@ -1,0 +1,82 @@
+# Each connector has:
+#   id: integer label used in training
+#   name: short display name
+#   family: one of [sma, precision]
+#   gender: male | female
+#   inner_pin_diameter_mm: nominal inner conductor diameter (for metrology)
+#   frequency_ghz_max: max rated frequency
+#   impedance_ohms: 50
+#   mating_torque_in_lb: manufacturer-recommended mating torque
+
+classes:
+  - id: 0
+    name: "SMA-M"
+    family: "sma"
+    gender: "male"
+    inner_pin_diameter_mm: 0.91
+    frequency_ghz_max: 18.0
+    impedance_ohms: 50
+    mating_torque_in_lb: 8.0
+
+  - id: 1
+    name: "SMA-F"
+    family: "sma"
+    gender: "female"
+    inner_pin_diameter_mm: 1.27
+    frequency_ghz_max: 18.0
+    impedance_ohms: 50
+    mating_torque_in_lb: 8.0
+
+  - id: 2
+    name: "3.5mm-M"
+    family: "precision"
+    gender: "male"
+    inner_pin_diameter_mm: 1.52
+    frequency_ghz_max: 34.0
+    impedance_ohms: 50
+    mating_torque_in_lb: 8.0
+
+  - id: 3
+    name: "3.5mm-F"
+    family: "precision"
+    gender: "female"
+    inner_pin_diameter_mm: 1.52
+    frequency_ghz_max: 34.0
+    impedance_ohms: 50
+    mating_torque_in_lb: 8.0
+
+  - id: 4
+    name: "2.92mm-M"
+    family: "precision"
+    gender: "male"
+    inner_pin_diameter_mm: 1.27
+    frequency_ghz_max: 40.0
+    impedance_ohms: 50
+    mating_torque_in_lb: 8.0
+
+  - id: 5
+    name: "2.92mm-F"
+    family: "precision"
+    gender: "female"
+    inner_pin_diameter_mm: 1.27
+    frequency_ghz_max: 40.0
+    impedance_ohms: 50
+    mating_torque_in_lb: 8.0
+
+  - id: 6
+    name: "2.4mm-M"
+    family: "precision"
+    gender: "male"
+    inner_pin_diameter_mm: 1.04
+    frequency_ghz_max: 50.0
+    impedance_ohms: 50
+    mating_torque_in_lb: 8.0
+
+  - id: 7
+    name: "2.4mm-F"
+    family: "precision"
+    gender: "female"
+    inner_pin_diameter_mm: 1.04
+    frequency_ghz_max: 50.0
+    impedance_ohms: 50
+    mating_torque_in_lb: 8.0
