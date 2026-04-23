@@ -1,0 +1,7 @@
+# Ultralytics YOLO dataset spec
+path: data/labeled/detector     # relative to training/
+train: images/train
+val: images/val
+
+names:
+  0: connector
