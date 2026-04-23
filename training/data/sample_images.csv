@@ -1,0 +1,20 @@
+class_name,url
+# How to use:
+# 1. Browse Digikey (or Mouser, Amphenol etc.) in your normal browser.
+# 2. Find a product image that's a clean shot of the connector.
+# 3. Right-click the image → "Copy image address" (Chrome) / "Copy image link" (Firefox).
+# 4. Paste a row below with the class label and the URL.
+# 5. Run: python scripts/download_from_csv.py training/data/sample_images.csv
+#
+# Lines starting with # are ignored, so this header block is safe.
+#
+# Class names must match training/configs/classes.yaml exactly:
+#   SMA-M, SMA-F, 3.5mm-M, 3.5mm-F, 2.92mm-M, 2.92mm-F, 2.4mm-M, 2.4mm-F
+#
+# A reasonable starter set is ~20 images per class (160 total). More is better.
+# It's fine if Digikey shows you cable assemblies — focus on connector A and
+# pick images where it's the prominent feature.
+#
+# Example rows (replace these with real URLs):
+# SMA-M,https://media.digikey.com/Photos/Amphenol%20Connex/901-143.jpg
+# SMA-F,https://media.digikey.com/Photos/Amphenol%20Connex/901-9519.jpg
