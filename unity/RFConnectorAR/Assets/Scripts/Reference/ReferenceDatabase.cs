@@ -1,21 +1,38 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using RFConnectorAR.Perception;
 
 namespace RFConnectorAR.Reference
 {
+    /// <summary>
+    /// Reads RFCE-format reference embeddings. Supports format v1 (one mean
+    /// vector per class) and v2 (N prototypes per class).
+    ///
+    /// File format (little-endian):
+    ///   magic  : 4 bytes ASCII "RFCE"
+    ///   ver    : u32  (1 or 2)
+    ///   count  : u32 number of classes
+    ///   dim    : u32 embedding dimension
+    ///   then `count` records:
+    ///     v1: id (i32) + name (64 bytes UTF-8 null-padded) + vector (dim × f32)
+    ///     v2: id (i32) + name (64 bytes UTF-8 null-padded)
+    ///         + n_prototypes (u32) + n_prototypes × (dim × f32)
+    /// </summary>
     public sealed class ReferenceDatabase : IMatcher
     {
         private readonly int[] _ids;
         private readonly string[] _names;
-        private readonly float[][] _vectors;
+        // For v2 each class can have multiple prototype vectors. For v1, _vectors[i]
+        // has exactly one entry.
+        private readonly float[][][] _vectors;
 
         public int Count => _ids.Length;
-        public int EmbeddingDim => _vectors.Length == 0 ? 0 : _vectors[0].Length;
+        public int EmbeddingDim { get; }
 
-        private ReferenceDatabase(int[] ids, string[] names, float[][] vectors)
+        private ReferenceDatabase(int[] ids, string[] names, float[][][] vectors, int dim)
         {
-            _ids = ids; _names = names; _vectors = vectors;
+            _ids = ids; _names = names; _vectors = vectors; EmbeddingDim = dim;
         }
 
         public static ReferenceDatabase Load(string path)
@@ -32,17 +49,17 @@ namespace RFConnectorAR.Reference
             }
 
             uint version = r.ReadUInt32();
-            if (version != 1)
+            if (version != 1 && version != 2)
             {
                 throw new InvalidDataException($"Unsupported RFCE version {version} in {path}");
             }
 
             uint count = r.ReadUInt32();
-            uint dim = r.ReadUInt32();
+            int dim = (int)r.ReadUInt32();
 
             var ids = new int[count];
             var names = new string[count];
-            var vectors = new float[count][];
+            var vectors = new float[count][][];
 
             for (int i = 0; i < count; i++)
             {
@@ -52,12 +69,17 @@ namespace RFConnectorAR.Reference
                 if (nameLen < 0) nameLen = 64;
                 names[i] = System.Text.Encoding.UTF8.GetString(nameBytes, 0, nameLen);
 
-                var v = new float[dim];
-                for (int j = 0; j < dim; j++) v[j] = r.ReadSingle();
-                vectors[i] = v;
+                int nProto = (version == 2) ? (int)r.ReadUInt32() : 1;
+                vectors[i] = new float[nProto][];
+                for (int p = 0; p < nProto; p++)
+                {
+                    var v = new float[dim];
+                    for (int j = 0; j < dim; j++) v[j] = r.ReadSingle();
+                    vectors[i][p] = v;
+                }
             }
 
-            return new ReferenceDatabase(ids, names, vectors);
+            return new ReferenceDatabase(ids, names, vectors, dim);
         }
 
         public Match MatchTop1(float[] embedding)
@@ -70,14 +92,16 @@ namespace RFConnectorAR.Reference
 
             int bestIdx = 0;
             float bestScore = float.MinValue;
-
             for (int i = 0; i < _vectors.Length; i++)
             {
-                float s = CosineSimilarity(embedding, _vectors[i]);
-                if (s > bestScore)
+                foreach (var proto in _vectors[i])
                 {
-                    bestScore = s;
-                    bestIdx = i;
+                    float s = CosineSimilarity(embedding, proto);
+                    if (s > bestScore)
+                    {
+                        bestScore = s;
+                        bestIdx = i;
+                    }
                 }
             }
 
