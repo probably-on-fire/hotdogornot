@@ -19,13 +19,29 @@ from typing import Any
 
 import numpy as np
 
-from rfconnectorai.synthetic.scene import RenderConfig
+from rfconnectorai.synthetic.scene import RenderConfig, DomainRandomizationConfig
+
+
+def _set_world_hdri(bpy, path: str, energy: float) -> None:
+    world = bpy.data.worlds["World"]
+    world.use_nodes = True
+    tree = world.node_tree
+    for n in list(tree.nodes):
+        tree.nodes.remove(n)
+    out = tree.nodes.new(type="ShaderNodeOutputWorld")
+    bg = tree.nodes.new(type="ShaderNodeBackground")
+    env = tree.nodes.new(type="ShaderNodeTexEnvironment")
+    env.image = bpy.data.images.load(path)
+    bg.inputs["Strength"].default_value = energy
+    tree.links.new(env.outputs["Color"], bg.inputs["Color"])
+    tree.links.new(bg.outputs["Background"], out.inputs["Surface"])
 
 
 def render_single(
     mesh_path: Path | str,
     out_dir: Path | str,
     config: RenderConfig,
+    dr_config: DomainRandomizationConfig | None = None,
     seed: int | None = None,
 ) -> dict[str, Any]:
     import bpy
@@ -107,6 +123,23 @@ def render_single(
     light = bpy.context.object
     light.data.energy = 50
     light.data.size = 0.1
+
+    # Domain randomization: optional HDRI world background.
+    if dr_config and dr_config.hdri_dir and Path(dr_config.hdri_dir).is_dir():
+        hdri_dir = Path(dr_config.hdri_dir)
+        hdris = list(hdri_dir.glob("*.exr")) + list(hdri_dir.glob("*.hdr"))
+        if hdris:
+            chosen = hdris[int(rng.integers(0, len(hdris)))]
+            try:
+                _set_world_hdri(
+                    bpy,
+                    str(chosen),
+                    energy=float(rng.uniform(*dr_config.hdri_energy_range)),
+                )
+            except Exception as e:
+                # World-node API occasionally shifts across bpy versions;
+                # fall back to default sky rather than failing the render.
+                print(f"[synth] HDRI setup failed ({e}); using default sky")
 
     # Render settings.
     scene = bpy.context.scene
