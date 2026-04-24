@@ -46,12 +46,13 @@ python -m rfconnectorai.inference.eval \
     --output "$RUNS/eval_report.json" \
     --device "$DEVICE"
 
-echo "[5/5] Exporting to ONNX"
+echo "[5/5] Exporting to ONNX (with INT8 quantized variants)"
 python -m rfconnectorai.export.onnx_export \
     --embedder-checkpoint "$RUNS/embedder/embedder.pt" \
     --embedder-out "$RUNS/embedder.onnx" \
     --detector-weights "$RUNS/detector/detector.pt" \
-    --detector-out "$RUNS/detector.onnx"
+    --detector-out "$RUNS/detector.onnx" \
+    --quantize
 
 echo "Done. Artifacts in $RUNS/:"
 ls -la "$RUNS/"*.onnx "$RUNS/reference_embeddings.bin" "$RUNS/eval_report.json"

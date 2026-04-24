@@ -10,6 +10,28 @@ from ultralytics import YOLO
 from rfconnectorai.models.embedder import RGBDEmbedder
 
 
+def quantize_int8(input_path: Path, output_path: Path) -> Path:
+    """
+    Apply INT8 dynamic quantization to an existing ONNX model.
+
+    Dynamic quantization stores weights as INT8 and computes activation scales
+    on the fly at inference. It's the simplest quantization mode (no calibration
+    data needed) and gives 2–4× speedup on phone CPU/NPU with typically <1%
+    accuracy loss for transformer-style backbones. Static quantization can do
+    better but needs a representative calibration set; that's a Phase 1 thing
+    once we have real connector data.
+    """
+    from onnxruntime.quantization import quantize_dynamic, QuantType
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    quantize_dynamic(
+        model_input=str(input_path),
+        model_output=str(output_path),
+        weight_type=QuantType.QInt8,
+    )
+    return output_path
+
+
 def export_embedder(checkpoint: Path, output: Path, image_size: int = 384) -> Path:
     """
     Export the RGBDEmbedder to ONNX.
@@ -65,6 +87,12 @@ def main():
     ap.add_argument("--detector-weights", type=Path)
     ap.add_argument("--detector-out", type=Path)
     ap.add_argument("--detector-size", type=int, default=640)
+    ap.add_argument(
+        "--quantize",
+        action="store_true",
+        help="Also produce INT8-quantized variants alongside the float models. "
+             "Output files are named <stem>_int8.onnx.",
+    )
     args = ap.parse_args()
 
     if args.embedder_checkpoint and args.embedder_out:
@@ -73,7 +101,11 @@ def main():
             output=args.embedder_out,
             image_size=args.embedder_size,
         )
-        print(f"embedder ONNX: {p}")
+        print(f"embedder ONNX: {p}  ({p.stat().st_size / 1024 / 1024:.1f} MB)")
+        if args.quantize:
+            q = p.with_name(p.stem + "_int8" + p.suffix)
+            quantize_int8(p, q)
+            print(f"embedder ONNX (INT8): {q}  ({q.stat().st_size / 1024 / 1024:.1f} MB)")
 
     if args.detector_weights and args.detector_out:
         p = export_detector(
@@ -81,7 +113,11 @@ def main():
             output=args.detector_out,
             image_size=args.detector_size,
         )
-        print(f"detector ONNX: {p}")
+        print(f"detector ONNX: {p}  ({p.stat().st_size / 1024 / 1024:.1f} MB)")
+        if args.quantize:
+            q = p.with_name(p.stem + "_int8" + p.suffix)
+            quantize_int8(p, q)
+            print(f"detector ONNX (INT8): {q}  ({q.stat().st_size / 1024 / 1024:.1f} MB)")
 
 
 if __name__ == "__main__":

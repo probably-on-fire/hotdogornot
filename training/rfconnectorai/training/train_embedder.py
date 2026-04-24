@@ -6,8 +6,10 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader, Sampler
 
+from rfconnectorai.data.classes import load_classes
 from rfconnectorai.data.dataset import RGBDConnectorDataset
 from rfconnectorai.models.embedder import RGBDEmbedder, recommended_image_size
+from rfconnectorai.training.arcface_loss import ArcFaceLoss
 from rfconnectorai.training.triplet_loss import batch_hard_triplet_loss
 
 
@@ -55,35 +57,58 @@ def train(
     device: str,
     backbone: str,
     pretrained: bool,
+    loss_name: str,
+    augment: bool,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ds = RGBDConnectorDataset(root=data_root, classes_yaml=classes_yaml, image_size=image_size)
+    ds = RGBDConnectorDataset(
+        root=data_root,
+        classes_yaml=classes_yaml,
+        image_size=image_size,
+        augment=augment,
+    )
     labels = [sample[1] for sample in ds.samples]
 
     sampler = PKSampler(labels, classes_per_batch=classes_per_batch, samples_per_class=samples_per_class)
     loader = DataLoader(ds, batch_sampler=sampler, num_workers=0)
 
     model = RGBDEmbedder(embedding_dim=128, pretrained=pretrained, backbone=backbone).to(device)
-    optim = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+
+    arcface = None
+    if loss_name == "arcface":
+        num_classes = len(load_classes(classes_yaml))
+        arcface = ArcFaceLoss(embedding_dim=128, num_classes=num_classes, margin=0.5, scale=30.0).to(device)
+        params = list(model.parameters()) + list(arcface.parameters())
+    else:
+        params = list(model.parameters())
+
+    optim = torch.optim.AdamW(params, lr=learning_rate, weight_decay=1e-4)
 
     steps_per_epoch = max(1, len(ds) // (classes_per_batch * samples_per_class))
 
     for epoch in range(num_epochs):
         model.train()
+        if arcface is not None:
+            arcface.train()
+        last_loss = float("nan")
         for _ in range(steps_per_epoch):
             batch = next(iter(loader))
             x, y = batch
             x, y = x.to(device), y.to(device)
 
             emb = model(x)
-            loss = batch_hard_triplet_loss(emb, y, margin=margin)
+            if arcface is not None:
+                loss = arcface(emb, y)
+            else:
+                loss = batch_hard_triplet_loss(emb, y, margin=margin)
 
             optim.zero_grad()
             loss.backward()
             optim.step()
+            last_loss = loss.item()
 
-        print(f"epoch {epoch + 1}/{num_epochs}  loss={loss.item():.4f}")
+        print(f"epoch {epoch + 1}/{num_epochs}  loss={last_loss:.4f}")
 
     ckpt = output_dir / "embedder.pt"
     torch.save(
@@ -92,6 +117,8 @@ def train(
             "embedding_dim": 128,
             "backbone": backbone,
             "image_size": image_size,
+            "loss": loss_name,
+            "augment": augment,
         },
         ckpt,
     )
@@ -121,6 +148,25 @@ def main():
     ap.add_argument("--classes-per-batch", type=int, default=4)
     ap.add_argument("--samples-per-class", type=int, default=4)
     ap.add_argument("--device", type=str, default="cpu")
+    ap.add_argument(
+        "--loss",
+        type=str,
+        default="arcface",
+        choices=["arcface", "triplet"],
+        help="Metric-learning loss. ArcFace generally outperforms triplet for fine-grained tasks.",
+    )
+    ap.add_argument(
+        "--augment",
+        action="store_true",
+        default=True,
+        help="Enable training-time augmentation (rotation, flip, color jitter, blur). On by default.",
+    )
+    ap.add_argument(
+        "--no-augment",
+        dest="augment",
+        action="store_false",
+        help="Disable augmentation (e.g. for ablation runs).",
+    )
     ap.add_argument(
         "--no-pretrained",
         action="store_true",
@@ -155,6 +201,8 @@ def main():
         device=args.device,
         backbone=args.backbone,
         pretrained=not args.no_pretrained,
+        loss_name=args.loss,
+        augment=args.augment,
     )
     print(f"checkpoint written to {ckpt}")
 

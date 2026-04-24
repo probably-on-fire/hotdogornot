@@ -73,3 +73,36 @@ def test_dataset_missing_class_directory_raises(tmp_path: Path, classes_yaml: Pa
     empty.mkdir()
     with pytest.raises(FileNotFoundError):
         RGBDConnectorDataset(root=empty, classes_yaml=classes_yaml, image_size=64)
+
+
+def test_dataset_with_augment_yields_different_outputs_per_call(
+    synthetic_image_dir: Path, classes_yaml: Path
+):
+    """
+    Augmented dataset should produce different RGB tensors across __getitem__
+    calls for the same index (rotation, color jitter etc. are stochastic).
+    """
+    ds = RGBDConnectorDataset(
+        root=synthetic_image_dir,
+        classes_yaml=classes_yaml,
+        image_size=64,
+        augment=True,
+    )
+    a, _ = ds[0]
+    b, _ = ds[0]
+    # RGB channels (0..2) should differ; depth (3) is deterministic per idx.
+    assert not torch.allclose(a[:3], b[:3])
+
+
+def test_dataset_without_augment_is_deterministic(
+    synthetic_image_dir: Path, classes_yaml: Path
+):
+    ds = RGBDConnectorDataset(
+        root=synthetic_image_dir,
+        classes_yaml=classes_yaml,
+        image_size=64,
+        augment=False,
+    )
+    a, _ = ds[0]
+    b, _ = ds[0]
+    assert torch.allclose(a, b)
