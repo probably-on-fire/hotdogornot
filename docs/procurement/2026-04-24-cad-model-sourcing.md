@@ -25,28 +25,31 @@
 ## Email template — Southwest Microwave
 
 **To:** sales@southwestmicrowave.com
-**Subject:** STEP files for 2.4/2.92/3.5 mm precision connectors — evaluating for Anduril program
+**Subject:** STEP file request — 2.4/2.92/3.5 mm precision connectors (AIRED R&D)
 
 > Hello,
 >
-> I'm evaluating your precision coaxial connectors as part of a vision-based
-> connector-identification R&D effort for an Anduril program, and I'd like to
-> request STEP files for the following connector families (both plug and jack):
+> I'm Chris at AIRED, working on a computer-vision R&D effort to identify
+> precision RF connectors from camera imagery. I'd like to request STEP
+> files for the following connector families (both plug and jack):
 >
-> - 2.4 mm (Southwest series, typical part family for SMPM-equivalent plug + jack)
-> - 2.92 mm (K Connector series — plug + jack)
-> - 3.5 mm (plug + jack)
+> - 2.4 mm precision (plug + jack)
+> - 2.92 mm / K Connector series (plug + jack)
+> - 3.5 mm precision (plug + jack)
 >
 > End-launch or panel-mount variants are fine; any accurate parametric STEP
-> of the mating-face geometry is what I need. The application is training a
-> synthetic-data pipeline, so geometric fidelity at the mating face
-> (bore + pin dimensions) is the primary concern.
+> of the mating-face geometry is what I need. The application is training
+> a synthetic-data pipeline, so geometric fidelity at the mating face
+> (bore + inner-pin dimensions) is the primary concern.
 >
-> If you have datasheets or drawings referencing those specific part numbers
-> I can include in my evaluation, that would also be helpful.
+> If you have datasheets or mechanical drawings for the specific parts you
+> send, I'd appreciate those as well — they help me verify dimensions
+> against the CAD before using it downstream.
 >
 > Thanks very much,
+>
 > Chris
+> AIRED
 > chris@aired.com
 
 Notes:
@@ -56,25 +59,30 @@ Notes:
 ## Email template — Rosenberger North America
 
 **To:** info.nam@rosenberger.com (or your regional sales contact)
-**Subject:** STEP file request — 02K / 03K / 04K series coaxial connectors (plug + jack)
+**Subject:** STEP file request — 02K / 03K / 04K series coaxial connectors (AIRED R&D)
 
 > Hello,
 >
-> I'm evaluating Rosenberger precision RF connectors for an R&D program and
-> would like to request STEP files for the following series (plug + jack):
+> I'm Chris at AIRED, working on a computer-vision R&D effort to identify
+> precision RF connectors from camera imagery. I'd like to request STEP
+> files for the following Rosenberger series, both plug and jack:
 >
 > - 04K series (2.4 mm)
 > - 02K series (2.92 mm)
 > - 03K series (3.5 mm)
 >
-> Any representative part from each series is fine. I'm primarily concerned
-> with accurate mating-face geometry for a synthetic-rendering pipeline, so
-> geometric fidelity at the interface is what matters most.
+> Any representative part from each series is fine — I'm primarily concerned
+> with accurate mating-face geometry for a synthetic-rendering pipeline,
+> so geometric fidelity at the interface matters most.
 >
-> Datasheets for each would also be welcome if you can include them.
+> If you can confirm the series codes above are still correct for these
+> sizes in your current catalog, and include datasheets with each STEP,
+> that would be helpful.
 >
 > Thanks,
+>
 > Chris
+> AIRED
 > chris@aired.com
 
 Notes:
@@ -84,19 +92,24 @@ Notes:
 ## Email template — Huber+Suhner
 
 **To:** info@hubersuhner.com
-**Subject:** STEP file request — 2.4 mm / 2.92 mm / 3.5 mm precision RF connectors
+**Subject:** STEP file request — 2.4 mm / 2.92 mm / 3.5 mm precision RF connectors (AIRED R&D)
 
 > Hello,
 >
-> I'd like to request STEP CAD files for your 2.4 mm, 2.92 mm, and 3.5 mm
-> precision coaxial connectors (both plug and jack). I'm building a
-> computer-vision system to identify these connector types in lab imagery,
-> and accurate mating-face geometry is critical for synthetic training data.
+> I'm Chris at AIRED, working on a computer-vision R&D effort to identify
+> precision RF connectors from camera imagery. I'd like to request STEP
+> CAD files for your 2.4 mm, 2.92 mm, and 3.5 mm precision coaxial connectors
+> (both plug and jack). Accurate mating-face geometry is critical for the
+> synthetic training data the pipeline generates.
 >
-> Any representative part from each size family is fine. Datasheets welcome.
+> Any representative part from each size family is fine. Datasheets alongside
+> the STEPs would also be welcome — I use the dimensioned drawings to
+> verify the CAD matches the real part before using it downstream.
 >
 > Thanks,
+>
 > Chris
+> AIRED
 > chris@aired.com
 
 ## SMA — direct download links
