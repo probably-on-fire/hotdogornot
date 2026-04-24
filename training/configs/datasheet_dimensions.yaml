@@ -1,0 +1,51 @@
+# Nominal datasheet dimensions for mating-face geometry.
+# Source each from the manufacturer datasheet referenced in the filename.
+# Values are in millimeters unless noted.
+#
+# bore_id_mm: inner diameter of the outer-conductor bore at the mating face
+# pin_od_mm: outer diameter of the inner-conductor pin/contact at the mating face
+# dielectric_visible: true for SMA (PTFE visible at face), false for air-line precision connectors
+
+classes:
+  - name: "SMA-M"
+    datasheet: "SMA-M_Amphenol_901-143.pdf"
+    bore_id_mm: 4.20
+    pin_od_mm: 0.91
+    dielectric_visible: true
+
+  - name: "SMA-F"
+    datasheet: "SMA-F_Amphenol_901-9519.pdf"
+    bore_id_mm: 4.20
+    pin_od_mm: 1.27
+    dielectric_visible: true
+
+  - name: "3.5mm-M"
+    datasheet: "3.5mm-M_SouthwestMicrowave_XXXX.pdf"  # update after acquisition
+    bore_id_mm: 3.50
+    pin_od_mm: 0.92
+    dielectric_visible: false
+
+  - name: "3.5mm-F"
+    bore_id_mm: 3.50
+    pin_od_mm: 1.52                                    # socket ID, not pin OD
+    dielectric_visible: false
+
+  - name: "2.92mm-M"
+    bore_id_mm: 2.92
+    pin_od_mm: 1.27
+    dielectric_visible: false
+
+  - name: "2.92mm-F"
+    bore_id_mm: 2.92
+    pin_od_mm: 1.27
+    dielectric_visible: false
+
+  - name: "2.4mm-M"
+    bore_id_mm: 2.40
+    pin_od_mm: 1.04
+    dielectric_visible: false
+
+  - name: "2.4mm-F"
+    bore_id_mm: 2.40
+    pin_od_mm: 1.04
+    dielectric_visible: false
