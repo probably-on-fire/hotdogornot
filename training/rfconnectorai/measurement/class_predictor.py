@@ -27,6 +27,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from rfconnectorai.measurement.aperture_detector import detect_aperture
+from rfconnectorai.measurement.aruco_detector import detect_aruco_marker
 from rfconnectorai.measurement.family_detector import detect_family
 from rfconnectorai.measurement.gender_detector import detect_gender
 from rfconnectorai.measurement.hex_detector import detect_hex
@@ -71,12 +72,26 @@ class Prediction:
 def predict_class(
     image: np.ndarray,
     assumed_pixels_per_mm: float | None = None,
+    aruco_marker_size_mm: float | None = 25.0,
 ) -> Prediction:
     """
     Full 8-class geometry-grounded prediction. Returns Prediction with
     class_name ∈ {SMA-M, SMA-F, 3.5mm-M, 3.5mm-F, 2.92mm-M, 2.92mm-F,
     2.4mm-M, 2.4mm-F, Unknown}.
+
+    Scale-resolution priority:
+      1. `assumed_pixels_per_mm` if explicitly provided
+      2. ArUco marker in frame (uses `aruco_marker_size_mm` to convert)
+      3. Hex-hypothesis enumeration (the only option when no marker is present)
+
+    Path 2 resolves the 2.92/2.4 ambiguity that path 3 cannot.
     """
+    # Scale prior: try ArUco first; falls back to hex-hypothesis enumeration.
+    if assumed_pixels_per_mm is None and aruco_marker_size_mm is not None:
+        aruco = detect_aruco_marker(image, marker_size_mm=aruco_marker_size_mm)
+        if aruco is not None:
+            assumed_pixels_per_mm = aruco.pixels_per_mm
+
     hex_det = detect_hex(image)
     if hex_det is None:
         return Prediction(class_name="Unknown", reason="no hex detected")
