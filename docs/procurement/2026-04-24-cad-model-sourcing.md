@@ -101,6 +101,8 @@ Notes:
 
 ## SMA — direct download links
 
+**Note on automation:** Amphenol RF's site (`amphenolrf.com`) is behind Cloudflare and returns HTTP 403 to direct `curl`/`wget` — automated scraping is not viable. Use a browser with normal cookies; the files themselves are free.
+
 Amphenol RF publishes STEPs directly. Search by part number at their 3D model library. Representative parts that are both widely available and have clean STEPs:
 
 - **SMA-M** (plug): part family `901-143` or any `SMA Plug, PCB-mount`
