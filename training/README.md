@@ -75,3 +75,13 @@ Produces under `runs/`:
 - On Windows, the synthetic-data renderer (`rfconnectorai.data.synthetic`) uses a PIL-based procedural generator instead of a GL-backed 3D rasterizer, because `pyrender` does not load a GL context cleanly on headless Windows. The trimesh mesh builder is retained for downstream geometric reasoning. On Linux with EGL available, a pyrender-based renderer could be swapped back in; Phase-0 proxy data does not depend on the higher-quality path.
 - The embedder projection head uses `nn.LayerNorm` rather than `nn.BatchNorm1d`. BatchNorm crashes on batch size 1 and leaks batch statistics in metric-learning setups; LayerNorm is the idiomatic choice.
 - ONNX export uses `torch.onnx.export(..., dynamo=False)` to stay on the legacy TorchScript exporter, which does not require the optional `onnxscript` dependency.
+
+## Synthetic-data rendering (Plan 3)
+
+CAD→Blender rendering uses `bpy`, the Blender-as-a-library package. `bpy`
+is heavyweight (~500 MB, bundles its own Python runtime for Blender internals).
+The `[dev]` install pulls it automatically.
+
+If the `bpy` install fails on your platform, fall back to Blender installed
+separately and `--python-bpy-executable /path/to/blender`. See
+`rfconnectorai/synthetic/render.py` for the flag.

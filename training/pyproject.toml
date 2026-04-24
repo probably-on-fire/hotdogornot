@@ -19,6 +19,7 @@ dependencies = [
     "scikit-learn>=1.4",
     "onnx>=1.16",
     "onnxruntime>=1.18",
+    "bpy>=4.2.0",
     "matplotlib>=3.8",
 ]
 
