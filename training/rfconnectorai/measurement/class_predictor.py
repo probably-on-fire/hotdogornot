@@ -1,50 +1,53 @@
 """
 Geometry-grounded class predictor for RF connector images.
 
-Combines hex detection and aperture detection to produce a class label. The
-pipeline:
+Full 8-class pipeline that combines four independent, training-free detectors:
 
-  1. Find the hex.  Its flat-to-flat size in pixels + known-in-mm gives
-     pixels-per-mm calibration.
-  2. Figure out which hex standard we're looking at — 6.35 mm (1/4 in)
-     indicates 2.4 mm family; 7.94 mm (5/16 in) indicates 3.5/2.92 mm family.
-     The hex alone tells us which family.
-  3. Measure the aperture in pixels at the hex center, convert to mm.
-  4. Threshold the aperture in mm to pick the specific class.
+  1. hex_detector          → coupling-nut flat-to-flat in pixels
+  2. aperture_detector     → inner bore diameter in pixels
+  3. family_detector       → SMA (PTFE dielectric visible) vs precision (air)
+  4. gender_detector       → male (pin visible in center) vs female (socket recessed)
 
-All distances are physical (mm), which means the predictor is robust across
-scale, rotation, and moderate perspective — as long as the hex is visible.
+From those four measurements we uniquely identify the connector class. Every
+step is interpretable; failures are labeled with reasons.
+
+Pipeline for a frontal mating-face image:
+
+    hex → pixels-per-mm           (scale calibration, no ambiguity once hex found)
+    aperture → mm                 (outer-conductor inner diameter at the face)
+    family (sma | precision)      (from bore annular brightness)
+    gender (male | female)        (from aperture central brightness)
+    class = build from (family, size-bucket(aperture_mm), gender)
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
 from rfconnectorai.measurement.aperture_detector import detect_aperture
+from rfconnectorai.measurement.family_detector import detect_family
+from rfconnectorai.measurement.gender_detector import detect_gender
 from rfconnectorai.measurement.hex_detector import detect_hex
 
 
-# Known hex flat-to-flat sizes for the precision connector families.
-HEX_SIZE_MM = {
-    "sma_precision_large": 7.94,  # 5/16 inch — 3.5 mm and 2.92 mm coupling nuts
-    "sma_precision_small": 6.35,  # 1/4 inch — 2.4 mm coupling nut
-}
-
-# Tolerance for matching a measured hex size to a known hex standard (mm).
+# Known hex flat-to-flat sizes (mm) for the coupling nut.
+HEX_SIZE_LARGE_MM = 7.94   # 5/16 inch — SMA, 3.5 mm, 2.92 mm
+HEX_SIZE_SMALL_MM = 6.35   # 1/4 inch  — 2.4 mm
 HEX_TOLERANCE_MM = 0.8
 
-# Nominal aperture diameters per class (female).
-CLASS_APERTURE_MM = {
-    "3.5mm-F": 3.5,
-    "2.92mm-F": 2.92,
-    "2.4mm-F": 2.4,
+# Precision-connector size buckets (mm).
+PRECISION_SIZE_BUCKETS = {
+    "3.5mm":  (3.50, 0.45),
+    "2.92mm": (2.92, 0.40),
+    "2.4mm":  (2.40, 0.35),
 }
 
-# How far an aperture measurement can be from the nominal before we stop
-# accepting the class as matching.
-APERTURE_TOLERANCE_MM = 0.45
+# SMA aperture is larger because PTFE fills the bore; the "aperture" we
+# measure is the outer-conductor bore, nominal ~4.2 mm on SMA.
+SMA_APERTURE_MM = 4.20
+SMA_APERTURE_TOLERANCE_MM = 0.7
 
 
 @dataclass
@@ -53,15 +56,11 @@ class Prediction:
     hex_flat_to_flat_mm: float | None = None
     aperture_mm: float | None = None
     pixels_per_mm: float | None = None
+    family: str | None = None
+    gender: str | None = None
+    dielectric_brightness: float | None = None
+    center_brightness: float | None = None
     reason: str = ""
-
-
-# Map class → required hex size (the hex family each class uses).
-CLASS_TO_HEX_MM = {
-    "3.5mm-F":  HEX_SIZE_MM["sma_precision_large"],
-    "2.92mm-F": HEX_SIZE_MM["sma_precision_large"],
-    "2.4mm-F":  HEX_SIZE_MM["sma_precision_small"],
-}
 
 
 def predict_class(
@@ -69,92 +68,116 @@ def predict_class(
     assumed_pixels_per_mm: float | None = None,
 ) -> Prediction:
     """
-    Predict the connector class from a single image.
-
-    Strategy: try each plausible hex hypothesis (7.94 mm or 6.35 mm). For
-    each hypothesis, compute the implied pixels-per-mm, convert the aperture
-    pixel size to mm, and see which connector class best fits. Pick the
-    hypothesis + class whose aperture mismatch is smallest and whose hex
-    family is consistent with the matched class.
-
-    `assumed_pixels_per_mm`, when provided, overrides the hex-hypothesis
-    search — useful when the capture pipeline has independent scale info.
+    Full 8-class geometry-grounded prediction. Returns Prediction with
+    class_name ∈ {SMA-M, SMA-F, 3.5mm-M, 3.5mm-F, 2.92mm-M, 2.92mm-F,
+    2.4mm-M, 2.4mm-F, Unknown}.
     """
     hex_det = detect_hex(image)
     if hex_det is None:
         return Prediction(class_name="Unknown", reason="no hex detected")
 
-    search_radius = hex_det.flat_to_flat_px * 0.5
-    aperture = detect_aperture(
+    aperture_det = detect_aperture(
         image,
         search_center=hex_det.center,
-        search_radius_px=search_radius,
+        search_radius_px=hex_det.flat_to_flat_px * 0.5,
     )
-    if aperture is None:
+    if aperture_det is None:
         return Prediction(
             class_name="Unknown",
             reason="hex detected but aperture not detected",
         )
 
-    # Hypotheses to consider: either the user-supplied scale, or each of the
-    # two standard hex sizes.
+    # Scale calibration: try each standard hex size and pick the hypothesis
+    # that yields a consistent downstream interpretation.
     if assumed_pixels_per_mm is not None:
         hypotheses = [(hex_det.flat_to_flat_px / assumed_pixels_per_mm, assumed_pixels_per_mm)]
     else:
         hypotheses = [
-            (hex_mm, hex_det.flat_to_flat_px / hex_mm)
-            for hex_mm in HEX_SIZE_MM.values()
+            (HEX_SIZE_LARGE_MM, hex_det.flat_to_flat_px / HEX_SIZE_LARGE_MM),
+            (HEX_SIZE_SMALL_MM, hex_det.flat_to_flat_px / HEX_SIZE_SMALL_MM),
         ]
+
+    family_det = detect_family(
+        image,
+        aperture_center=aperture_det.center,
+        aperture_radius_px=aperture_det.diameter_px / 2.0,
+        pin_radius_px=aperture_det.diameter_px / 2.0 * 0.25,
+    )
+
+    gender_det = detect_gender(
+        image,
+        aperture_center=aperture_det.center,
+        aperture_radius_px=aperture_det.diameter_px / 2.0,
+    )
 
     best: Prediction | None = None
     best_delta = float("inf")
 
     for hex_ff_mm, ppm in hypotheses:
-        aperture_mm = aperture.diameter_px / ppm
-        for class_name, nominal_ap_mm in CLASS_APERTURE_MM.items():
-            # Hex family must match the class.
-            expected_hex_mm = CLASS_TO_HEX_MM[class_name]
-            if abs(hex_ff_mm - expected_hex_mm) > HEX_TOLERANCE_MM:
+        aperture_mm = aperture_det.diameter_px / ppm
+
+        # Family determines which aperture interpretation we use.
+        if family_det.family == "sma":
+            # SMA expects ~4.2 mm bore with PTFE. Precision-size buckets don't
+            # apply. Hex must be the large size.
+            if abs(hex_ff_mm - HEX_SIZE_LARGE_MM) > HEX_TOLERANCE_MM:
                 continue
-            delta = abs(aperture_mm - nominal_ap_mm)
+            delta = abs(aperture_mm - SMA_APERTURE_MM)
+            if delta > SMA_APERTURE_TOLERANCE_MM:
+                continue
+            candidate = f"SMA-{'M' if gender_det.gender == 'male' else 'F'}"
             if delta < best_delta:
                 best_delta = delta
-                best = Prediction(
-                    class_name=class_name,
-                    hex_flat_to_flat_mm=hex_ff_mm,
-                    aperture_mm=aperture_mm,
-                    pixels_per_mm=ppm,
+                best = _build_prediction(
+                    candidate, hex_ff_mm, aperture_mm, ppm, family_det, gender_det
                 )
+        else:
+            # Precision: the aperture directly maps to a bucket (2.4/2.92/3.5).
+            # Validate hex-family consistency too.
+            for size_label, (nominal_mm, tolerance_mm) in PRECISION_SIZE_BUCKETS.items():
+                expected_hex = (
+                    HEX_SIZE_SMALL_MM if size_label == "2.4mm" else HEX_SIZE_LARGE_MM
+                )
+                if abs(hex_ff_mm - expected_hex) > HEX_TOLERANCE_MM:
+                    continue
+                delta = abs(aperture_mm - nominal_mm)
+                if delta > tolerance_mm:
+                    continue
+                candidate = f"{size_label}-{'M' if gender_det.gender == 'male' else 'F'}"
+                if delta < best_delta:
+                    best_delta = delta
+                    best = _build_prediction(
+                        candidate, hex_ff_mm, aperture_mm, ppm, family_det, gender_det
+                    )
 
-    if best is None or best_delta > APERTURE_TOLERANCE_MM:
+    if best is None:
         return Prediction(
             class_name="Unknown",
-            aperture_mm=(best.aperture_mm if best else None),
-            hex_flat_to_flat_mm=(best.hex_flat_to_flat_mm if best else None),
-            pixels_per_mm=(best.pixels_per_mm if best else None),
-            reason=f"no class within {APERTURE_TOLERANCE_MM} mm aperture tolerance",
+            family=family_det.family,
+            gender=gender_det.gender,
+            dielectric_brightness=family_det.dielectric_brightness,
+            center_brightness=gender_det.center_brightness,
+            reason="no (hex, aperture, family) hypothesis fits a known class",
         )
 
     return best
 
 
-def _closest_hex_standard(hex_flat_to_flat_px: float) -> tuple[float, float]:
-    """
-    Given a hex measurement in pixels, try both standard hex sizes and pick
-    the one that gives a plausible pixels-per-mm for a typical phone-captured
-    connector photo (roughly 20–80 px/mm).
-
-    Returns (hex_flat_to_flat_mm, pixels_per_mm).
-    """
-    candidates = []
-    for name, hex_mm in HEX_SIZE_MM.items():
-        ppm = hex_flat_to_flat_px / hex_mm
-        # Prefer candidates whose implied pixels-per-mm falls in a plausible
-        # range. If both plausible, we'll disambiguate at the aperture step
-        # by returning both and letting the class-fit decide — but here we
-        # just pick one to produce a deterministic first pass.
-        candidates.append((hex_mm, ppm, abs(ppm - 50)))  # 50 px/mm midpoint heuristic
-
-    candidates.sort(key=lambda t: t[2])
-    best_hex_mm, best_ppm, _ = candidates[0]
-    return best_hex_mm, best_ppm
+def _build_prediction(
+    class_name: str,
+    hex_ff_mm: float,
+    aperture_mm: float,
+    ppm: float,
+    family_det,
+    gender_det,
+) -> Prediction:
+    return Prediction(
+        class_name=class_name,
+        hex_flat_to_flat_mm=hex_ff_mm,
+        aperture_mm=aperture_mm,
+        pixels_per_mm=ppm,
+        family=family_det.family,
+        gender=gender_det.gender,
+        dielectric_brightness=family_det.dielectric_brightness,
+        center_brightness=gender_det.center_brightness,
+    )

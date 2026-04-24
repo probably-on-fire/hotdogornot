@@ -43,6 +43,10 @@ def measure_one(path: Path, expected: str | None = None) -> dict:
         "hex_mm": pred.hex_flat_to_flat_mm,
         "aperture_mm": pred.aperture_mm,
         "ppm": pred.pixels_per_mm,
+        "family": pred.family,
+        "gender": pred.gender,
+        "dielectric_brightness": pred.dielectric_brightness,
+        "center_brightness": pred.center_brightness,
         "reason": pred.reason,
         "correct": (expected is None) or (pred.class_name == expected),
     }
@@ -93,6 +97,10 @@ def run(target: Path, summary: bool, limit: int | None) -> int:
                 meas += f" hex={r['hex_mm']:.2f}mm"
             if r["aperture_mm"] is not None:
                 meas += f" ap={r['aperture_mm']:.2f}mm"
+            if r["family"] is not None:
+                meas += f" fam={r['family']}"
+            if r["gender"] is not None:
+                meas += f" gen={r['gender']}"
             reason = f"  [{r['reason']}]" if r["reason"] else ""
             print(f"  [{marker}] {r['path']:<55s} -> {r['predicted']}{meas}{exp}{reason}")
 
