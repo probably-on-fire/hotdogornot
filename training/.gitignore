@@ -16,6 +16,7 @@ data/labeled/
 data/processed/
 data/cad/
 data/field_test/
+data/synthetic_faces/
 runs/
 *.pt
 *.onnx
