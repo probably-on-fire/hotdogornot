@@ -10,6 +10,7 @@ from rfconnectorai.data.classes import load_classes
 from rfconnectorai.data.dataset import RGBDConnectorDataset
 from rfconnectorai.models.embedder import RGBDEmbedder, recommended_image_size
 from rfconnectorai.training.arcface_loss import ArcFaceLoss
+from rfconnectorai.training.hierarchical_loss import HierarchicalAuxLoss
 from rfconnectorai.training.triplet_loss import batch_hard_triplet_loss
 
 
@@ -59,6 +60,7 @@ def train(
     pretrained: bool,
     loss_name: str,
     augment: bool,
+    aux_hierarchical: bool = False,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -75,13 +77,39 @@ def train(
 
     model = RGBDEmbedder(embedding_dim=128, pretrained=pretrained, backbone=backbone).to(device)
 
+    classes_list = load_classes(classes_yaml)
+
     arcface = None
     if loss_name == "arcface":
-        num_classes = len(load_classes(classes_yaml))
-        arcface = ArcFaceLoss(embedding_dim=128, num_classes=num_classes, margin=0.5, scale=30.0).to(device)
+        arcface = ArcFaceLoss(
+            embedding_dim=128, num_classes=len(classes_list), margin=0.5, scale=30.0
+        ).to(device)
         params = list(model.parameters()) + list(arcface.parameters())
     else:
         params = list(model.parameters())
+
+    # Optional hierarchical auxiliary loss: family + gender heads on top of
+    # the embedding, trained jointly with the main metric loss.
+    aux: HierarchicalAuxLoss | None = None
+    class_to_family: torch.Tensor | None = None
+    class_to_gender: torch.Tensor | None = None
+    if aux_hierarchical:
+        family_to_id = {"sma": 0, "precision": 1}
+        gender_to_id = {"male": 0, "female": 1}
+        class_to_family = torch.tensor(
+            [family_to_id[c.family] for c in classes_list],
+            dtype=torch.long,
+            device=device,
+        )
+        class_to_gender = torch.tensor(
+            [gender_to_id[c.gender] for c in classes_list],
+            dtype=torch.long,
+            device=device,
+        )
+        aux = HierarchicalAuxLoss(
+            embedding_dim=128, n_families=2, n_genders=2
+        ).to(device)
+        params = params + list(aux.parameters())
 
     optim = torch.optim.AdamW(params, lr=learning_rate, weight_decay=1e-4)
 
@@ -103,6 +131,11 @@ def train(
             else:
                 loss = batch_hard_triplet_loss(emb, y, margin=margin)
 
+            if aux is not None:
+                fam = class_to_family[y]
+                gen = class_to_gender[y]
+                loss = loss + aux(emb, fam, gen)
+
             optim.zero_grad()
             loss.backward()
             optim.step()
@@ -119,6 +152,7 @@ def train(
             "image_size": image_size,
             "loss": loss_name,
             "augment": augment,
+            "aux_hierarchical": aux_hierarchical,
         },
         ckpt,
     )
@@ -173,6 +207,11 @@ def main():
         help="Skip downloading pretrained weights (forces random init; CI use only)",
     )
     ap.add_argument(
+        "--aux-hierarchical",
+        action="store_true",
+        help="Enable auxiliary family+gender classification loss alongside the main metric loss.",
+    )
+    ap.add_argument(
         "--smoke-test",
         action="store_true",
         help="Run 2 epochs at image_size=64 on tiny data. For CI only.",
@@ -203,6 +242,7 @@ def main():
         pretrained=not args.no_pretrained,
         loss_name=args.loss,
         augment=args.augment,
+        aux_hierarchical=args.aux_hierarchical,
     )
     print(f"checkpoint written to {ckpt}")
 
