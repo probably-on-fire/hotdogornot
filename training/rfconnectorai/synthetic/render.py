@@ -46,8 +46,12 @@ def render_single(
 ) -> dict[str, Any]:
     import bpy
 
-    mesh_path = Path(mesh_path)
-    out_dir = Path(out_dir)
+    # Resolve to absolute paths up front. Blender's render.filepath is
+    # interpreted relative to Blender's bundled home dir (e.g. C:\...) if a
+    # relative path is passed, which silently scatters output files. Using
+    # absolute paths everywhere keeps the output where the caller expects.
+    mesh_path = Path(mesh_path).resolve()
+    out_dir = Path(out_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
 
     rng = np.random.default_rng(seed)
