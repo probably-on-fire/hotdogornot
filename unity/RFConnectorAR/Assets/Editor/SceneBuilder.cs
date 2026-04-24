@@ -262,17 +262,27 @@ namespace RFConnectorAR.EditorTools
             // UI canvas.
             var canvas = BuildUICanvas();
             var hintText = BuildHudText(canvas, "HintText", TextAnchor.LowerCenter, fontSize: 36,
-                anchor: new Vector4(0.1f, 0f, 0.9f, 0.15f));
+                anchor: new Vector4(0.1f, 0.08f, 0.9f, 0.18f));
             var statusText = BuildHudText(canvas, "StatusText", TextAnchor.UpperLeft, fontSize: 20,
                 anchor: new Vector4(0.02f, 0.92f, 0.98f, 0.98f));
+
+            // Reticle — a ring graphic centred on the screen, driven by FramingGate.
+            var reticle = BuildReticle(canvas, "Reticle",
+                anchor: new Vector4(0.35f, 0.35f, 0.65f, 0.65f));
 
             // ScannerHUD on the canvas.
             var scannerHud = canvas.GetComponent<ScannerHUD>() ?? canvas.AddComponent<ScannerHUD>();
             SetPrivateField(scannerHud, "_hint", hintText);
             SetPrivateField(scannerHud, "_status", statusText);
 
-            // App GameObject with OverlayController + AppBootstrap.
+            // App GameObject with OverlayController + AppBootstrap + FramingGate.
             var app = new GameObject("App");
+
+            var cameraFrameSource = arCamera != null ? arCamera.GetComponent<CameraFrameSource>() : null;
+
+            var framingGate = app.AddComponent<FramingGate>();
+            SetPrivateField(framingGate, "_cameraFrameSource", cameraFrameSource);
+            SetPrivateField(framingGate, "_reticle", reticle);
 
             var overlay = app.AddComponent<OverlayController>();
             var ringPrefab = AssetDatabase.LoadAssetAtPath<GameObject>($"{PrefabsDir}/ConnectorRing.prefab");
@@ -282,10 +292,10 @@ namespace RFConnectorAR.EditorTools
             SetPrivateField(overlay, "_anchorManager", anchorMgr);
 
             var bootstrap = app.AddComponent<AppBootstrap>();
-            var cameraFrameSource = arCamera != null ? arCamera.GetComponent<CameraFrameSource>() : null;
             SetPrivateField(bootstrap, "_cameraFrameSource", cameraFrameSource);
             SetPrivateField(bootstrap, "_overlay", overlay);
             SetPrivateField(bootstrap, "_hud", scannerHud);
+            SetPrivateField(bootstrap, "_framingGate", framingGate);
 
             // ModeRouter + mode bar.
             var router = app.AddComponent<ModeRouter>();
@@ -323,14 +333,18 @@ namespace RFConnectorAR.EditorTools
             var startBtn = BuildButton(canvas, "StartButton", "Start",
                 anchor: new Vector4(0.72f, 0.80f, 0.9f, 0.88f));
 
+            // Reticle centred on screen — driven by FramingGate.
+            var reticle = BuildReticle(canvas, "Reticle",
+                anchor: new Vector4(0.35f, 0.35f, 0.65f, 0.65f));
+
             // Progress text.
             var progressText = BuildHudText(canvas, "ProgressText", TextAnchor.MiddleCenter, fontSize: 24,
-                anchor: new Vector4(0.1f, 0.45f, 0.9f, 0.6f));
+                anchor: new Vector4(0.1f, 0.2f, 0.9f, 0.28f));
             progressText.text = "Type a class name and press Start.";
 
             // Progress slider.
             var progressBar = BuildSlider(canvas, "ProgressBar",
-                anchor: new Vector4(0.2f, 0.35f, 0.8f, 0.4f));
+                anchor: new Vector4(0.2f, 0.14f, 0.8f, 0.19f));
 
             // EnrollHUD on canvas.
             var hud = canvas.AddComponent<EnrollHUD>();
@@ -339,12 +353,18 @@ namespace RFConnectorAR.EditorTools
             SetPrivateField(hud, "_progressText", progressText);
             SetPrivateField(hud, "_progressBar", progressBar);
 
-            // App with EnrollController + ModeRouter.
+            // App with EnrollController + FramingGate + ModeRouter.
             var app = new GameObject("App");
-            var controller = app.AddComponent<EnrollController>();
             var cameraFrameSource = arCamera != null ? arCamera.GetComponent<CameraFrameSource>() : null;
+
+            var framingGate = app.AddComponent<FramingGate>();
+            SetPrivateField(framingGate, "_cameraFrameSource", cameraFrameSource);
+            SetPrivateField(framingGate, "_reticle", reticle);
+
+            var controller = app.AddComponent<EnrollController>();
             SetPrivateField(controller, "_cameraFrameSource", cameraFrameSource);
             SetPrivateField(controller, "_hud", hud);
+            SetPrivateField(controller, "_framingGate", framingGate);
 
             var router = app.AddComponent<ModeRouter>();
             AddModeBar(canvas, router);
@@ -574,6 +594,40 @@ namespace RFConnectorAR.EditorTools
             var btn = go.GetComponent<Button>();
             btn.targetGraphic = img;
             return btn;
+        }
+
+        /// <summary>
+        /// Build a ring-shaped reticle UI element. FramingGate recolors its Image
+        /// component in response to the framing-detection signal. We use a simple
+        /// square Image with a thick border achieved via an Outline component +
+        /// transparent center; keeps the implementation free of texture assets.
+        /// </summary>
+        private static Image BuildReticle(GameObject canvas, string name, Vector4 anchor)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(canvas.transform, worldPositionStays: false);
+            var rect = go.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(anchor.x, anchor.y);
+            rect.anchorMax = new Vector2(anchor.z, anchor.w);
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+
+            var img = go.GetComponent<Image>();
+            img.color = new Color(0.7f, 0.7f, 0.7f, 0.6f);  // initial "unframed" gray
+
+            // Give it an Outline component so it reads as a ring rather than
+            // a solid rectangle — cheap visual polish without needing a custom
+            // texture.
+            var outline = go.AddComponent<UnityEngine.UI.Outline>();
+            outline.effectDistance = new Vector2(4, 4);
+            outline.effectColor = new Color(1, 1, 1, 0.85f);
+
+            // Knock the main fill down to near-transparent so the Outline is
+            // the dominant visual. FramingGate will color the Image directly,
+            // which Unity propagates as a tint to the whole graphic.
+            img.color = new Color(0.7f, 0.7f, 0.7f, 0.15f);
+
+            return img;
         }
 
         private static Slider BuildSlider(GameObject canvas, string name, Vector4 anchor)

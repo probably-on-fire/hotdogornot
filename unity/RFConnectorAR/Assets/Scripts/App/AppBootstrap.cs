@@ -12,6 +12,7 @@ namespace RFConnectorAR.App
         [SerializeField] private CameraFrameSource _cameraFrameSource;
         [SerializeField] private OverlayController _overlay;
         [SerializeField] private ScannerHUD _hud;
+        [SerializeField] private FramingGate _framingGate;
 
         private PerceptionPipeline _pipeline;
         private ConfirmationLog _log;
@@ -49,6 +50,17 @@ namespace RFConnectorAR.App
             if (_cameraFrameSource == null || !_cameraFrameSource.HasFrame)
             {
                 _hud?.SetState(ScannerHUD.ScanState.Searching);
+                return;
+            }
+
+            // Framing gate: before running the perception pipeline, check that
+            // the operator is actually pointing at something centrally framed.
+            // Without this gate the scanner commits verdicts on random scenery,
+            // which is both embarrassing and wrong.
+            if (_framingGate != null && !_framingGate.IsFramed)
+            {
+                _hud?.SetState(ScannerHUD.ScanState.Searching);
+                _overlay?.UpdateVerdicts(System.Array.Empty<Verdict>());
                 return;
             }
 

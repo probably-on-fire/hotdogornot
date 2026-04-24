@@ -9,6 +9,7 @@ namespace RFConnectorAR.Enroll
     {
         [SerializeField] private CameraFrameSource _cameraFrameSource;
         [SerializeField] private EnrollHUD _hud;
+        [SerializeField] private FramingGate _framingGate;
 
         [SerializeField] private int _targetFrames = 150;
         [SerializeField] private int _prototypesPerClass = 3;
@@ -53,6 +54,11 @@ namespace RFConnectorAR.Enroll
         {
             if (_session == null || _session.IsComplete) return;
             if (_cameraFrameSource == null || !_cameraFrameSource.HasFrame) return;
+
+            // Skip enrollment frames when the framing gate is red. This
+            // prevents bad frames (user's hand covering the connector, camera
+            // pointing away, etc.) from polluting the embedding buffer.
+            if (_framingGate != null && !_framingGate.IsFramed) return;
 
             var rgb = _cameraFrameSource.LatestRgb;
             var detections = _detector.Detect(rgb);
