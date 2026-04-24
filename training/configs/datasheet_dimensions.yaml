@@ -1,51 +1,72 @@
-# Nominal datasheet dimensions for mating-face geometry.
-# Source each from the manufacturer datasheet referenced in the filename.
+# Nominal datasheet dimensions for mating-face geometry + hex standards.
 # Values are in millimeters unless noted.
 #
-# bore_id_mm: inner diameter of the outer-conductor bore at the mating face
-# pin_od_mm: outer diameter of the inner-conductor pin/contact at the mating face
-# dielectric_visible: true for SMA (PTFE visible at face), false for air-line precision connectors
+# bore_id_mm:         inner diameter of the outer-conductor bore at the mating face
+# pin_od_mm:          outer diameter of the inner-conductor pin (male) or socket ID (female)
+# hex_flat_to_flat_mm: coupling-nut / body hex standard for this family
+#                      (5/16" = 7.94 mm for SMA / 3.5mm / 2.92mm;
+#                       1/4"  = 6.35 mm for 2.4mm)
+# body_od_mm:          outer diameter of the cylindrical connector body
+# dielectric_visible:  true for SMA (PTFE visible at face), false for air-line precision
+#
+# Used both by the measurement pipeline (scale reference) and the procedural-
+# CAD generator at rfconnectorai/synthetic/procedural_connectors.py.
 
 classes:
   - name: "SMA-M"
     datasheet: "SMA-M_Amphenol_901-143.pdf"
     bore_id_mm: 4.20
     pin_od_mm: 0.91
+    hex_flat_to_flat_mm: 7.94
+    body_od_mm: 6.35
     dielectric_visible: true
 
   - name: "SMA-F"
     datasheet: "SMA-F_Amphenol_901-9519.pdf"
     bore_id_mm: 4.20
     pin_od_mm: 1.27
+    hex_flat_to_flat_mm: 7.94
+    body_od_mm: 6.35
     dielectric_visible: true
 
   - name: "3.5mm-M"
-    datasheet: "3.5mm-M_SouthwestMicrowave_XXXX.pdf"  # update after acquisition
     bore_id_mm: 3.50
     pin_od_mm: 0.92
+    hex_flat_to_flat_mm: 7.94
+    body_od_mm: 6.35
     dielectric_visible: false
 
   - name: "3.5mm-F"
     bore_id_mm: 3.50
-    pin_od_mm: 1.52                                    # socket ID, not pin OD
+    pin_od_mm: 1.52                     # socket ID
+    hex_flat_to_flat_mm: 7.94
+    body_od_mm: 6.35
     dielectric_visible: false
 
   - name: "2.92mm-M"
     bore_id_mm: 2.92
     pin_od_mm: 1.27
+    hex_flat_to_flat_mm: 7.94
+    body_od_mm: 6.35
     dielectric_visible: false
 
   - name: "2.92mm-F"
     bore_id_mm: 2.92
-    pin_od_mm: 1.27
+    pin_od_mm: 1.27                     # socket ID
+    hex_flat_to_flat_mm: 7.94
+    body_od_mm: 6.35
     dielectric_visible: false
 
   - name: "2.4mm-M"
     bore_id_mm: 2.40
     pin_od_mm: 1.04
+    hex_flat_to_flat_mm: 6.35
+    body_od_mm: 5.08
     dielectric_visible: false
 
   - name: "2.4mm-F"
     bore_id_mm: 2.40
-    pin_od_mm: 1.04
+    pin_od_mm: 1.04                     # socket ID
+    hex_flat_to_flat_mm: 6.35
+    body_od_mm: 5.08
     dielectric_visible: false

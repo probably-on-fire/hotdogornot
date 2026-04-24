@@ -7,7 +7,7 @@ classes:
   - name: "SMA-M"
     family: "sma"
     gender: "male"
-    mesh_path: "SMA-M.obj"
+    mesh_path: "verified/SMA-M.glb"
     body_material: "brass"
     contact_material: "gold_plated"
     dielectric_material: "ptfe"
@@ -15,7 +15,7 @@ classes:
   - name: "SMA-F"
     family: "sma"
     gender: "female"
-    mesh_path: "SMA-F.obj"
+    mesh_path: "verified/SMA-F.glb"
     body_material: "brass"
     contact_material: "gold_plated"
     dielectric_material: "ptfe"
@@ -23,7 +23,7 @@ classes:
   - name: "3.5mm-M"
     family: "precision"
     gender: "male"
-    mesh_path: "3.5mm-M.obj"
+    mesh_path: "verified/3.5mm-M.glb"
     body_material: "stainless_steel"
     contact_material: "gold_plated"
     dielectric_material: null
@@ -31,7 +31,7 @@ classes:
   - name: "3.5mm-F"
     family: "precision"
     gender: "female"
-    mesh_path: "3.5mm-F.obj"
+    mesh_path: "verified/3.5mm-F.glb"
     body_material: "stainless_steel"
     contact_material: "gold_plated"
     dielectric_material: null
@@ -39,7 +39,7 @@ classes:
   - name: "2.92mm-M"
     family: "precision"
     gender: "male"
-    mesh_path: "2.92mm-M.obj"
+    mesh_path: "verified/2.92mm-M.glb"
     body_material: "stainless_steel"
     contact_material: "gold_plated"
     dielectric_material: null
@@ -47,7 +47,7 @@ classes:
   - name: "2.92mm-F"
     family: "precision"
     gender: "female"
-    mesh_path: "2.92mm-F.obj"
+    mesh_path: "verified/2.92mm-F.glb"
     body_material: "stainless_steel"
     contact_material: "gold_plated"
     dielectric_material: null
@@ -55,7 +55,7 @@ classes:
   - name: "2.4mm-M"
     family: "precision"
     gender: "male"
-    mesh_path: "2.4mm-M.obj"
+    mesh_path: "verified/2.4mm-M.glb"
     body_material: "stainless_steel"
     contact_material: "gold_plated"
     dielectric_material: null
@@ -63,7 +63,7 @@ classes:
   - name: "2.4mm-F"
     family: "precision"
     gender: "female"
-    mesh_path: "2.4mm-F.obj"
+    mesh_path: "verified/2.4mm-F.glb"
     body_material: "stainless_steel"
     contact_material: "gold_plated"
     dielectric_material: null
