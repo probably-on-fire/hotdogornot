@@ -280,9 +280,17 @@ INDEX_HTML = """<!doctype html>
 <body>
 <h1>RF Connector Labeler</h1>
 <div class="help">
-  Click <b>Fetch</b> on each class to auto-pull ~30 candidate images from Bing.
-  Hover any thumbnail and click the red X to remove it. You can also drag images
-  from a Digikey tab into a column, or paste an image URL.
+  Click <b>Fetch All</b> to pull ~30 candidate images for every class in parallel,
+  or use the per-class <b>Fetch 30</b> button for one at a time. Hover any
+  thumbnail and click the red X to remove it. You can also drag images from a
+  Digikey tab into a column or paste an image URL.
+</div>
+
+<div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
+  <button id="fetch-all" style="padding:8px 16px; border:1px solid #2a6e2a; background:#1d4d1d; color:#dfd; border-radius:4px; font-size:13px; font-weight:600; cursor:pointer;">
+    Fetch All (30 per class)
+  </button>
+  <span id="fetch-all-status" style="font-size:12px; color:#888;"></span>
 </div>
 
 <div class="grid" id="grid"></div>
@@ -340,6 +348,22 @@ function makeColumn(cls) {
 }
 
 CLASSES.forEach(cls => grid.appendChild(makeColumn(cls)));
+
+document.getElementById('fetch-all').addEventListener('click', async () => {
+  const btn = document.getElementById('fetch-all');
+  const status = document.getElementById('fetch-all-status');
+  btn.disabled = true;
+  status.textContent = 'starting...';
+  let started = 0;
+  for (const cls of CLASSES) {
+    const queryInput = document.getElementById('query-' + cls);
+    await fetchClass(cls, queryInput.value.trim());
+    started++;
+    status.textContent = `started ${started}/${CLASSES.length}`;
+  }
+  status.textContent = `started all ${CLASSES.length} — fetches running in parallel`;
+  btn.disabled = false;
+});
 
 async function fetchClass(cls, query) {
   const body = { n: 30 };
