@@ -1,6 +1,7 @@
 using RFConnectorAR.AR;
 using RFConnectorAR.Learning;
 using RFConnectorAR.Perception;
+using RFConnectorAR.Reference;
 using RFConnectorAR.UI;
 using UnityEngine;
 
@@ -18,10 +19,23 @@ namespace RFConnectorAR.App
 
         private void Awake()
         {
+            string refPath = System.IO.Path.Combine(Application.persistentDataPath, "references.bin");
+            var store = new RFConnectorAR.Reference.OnDeviceReferenceStore(refPath, embeddingDim: 128);
+
+            IMatcher matcher;
+            if (store.Count == 0)
+            {
+                matcher = new StubMatcher(classId: -1, className: "Unknown", cosine: 0.0f);
+            }
+            else
+            {
+                matcher = store.Database;
+            }
+
             _pipeline = new PerceptionPipeline(
                 detector: new StubDetector(score: 0.9f),
                 embedder: new StubEmbedder(),
-                matcher: new StubMatcher(classId: 1, className: "SMA-F", cosine: 0.9f),
+                matcher: matcher,
                 measurer: new StubMeasurer(diameterMm: null),
                 fuser: new ConfidenceFuser());
 
