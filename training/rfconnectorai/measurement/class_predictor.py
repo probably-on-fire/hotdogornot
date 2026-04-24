@@ -37,7 +37,12 @@ HEX_SIZE_LARGE_MM = 7.94   # 5/16 inch — SMA, 3.5 mm, 2.92 mm
 HEX_SIZE_SMALL_MM = 6.35   # 1/4 inch  — 2.4 mm
 HEX_TOLERANCE_MM = 0.8
 
-# Precision-connector size buckets (mm).
+# Precision-connector size buckets (mm). The 2.92 vs 2.4 boundary is
+# geometrically ambiguous in monocular images without absolute scale (the
+# aperture/hex ratios are nearly identical). Loose tolerances let borderline
+# correct cases through; the predictor emits Unknown when no bucket matches.
+# The fundamental ambiguity will need an ArUco marker or LiDAR depth to fully
+# resolve in the field.
 PRECISION_SIZE_BUCKETS = {
     "3.5mm":  (3.50, 0.45),
     "2.92mm": (2.92, 0.40),
@@ -97,11 +102,15 @@ def predict_class(
             (HEX_SIZE_SMALL_MM, hex_det.flat_to_flat_px / HEX_SIZE_SMALL_MM),
         ]
 
+    # The pin (or socket) occupies roughly 30-45% of the aperture radius
+    # depending on the family. Excluding 50% from the family-brightness
+    # measurement makes the metric robust to bright male pins bleeding into
+    # the annulus.
     family_det = detect_family(
         image,
         aperture_center=aperture_det.center,
         aperture_radius_px=aperture_det.diameter_px / 2.0,
-        pin_radius_px=aperture_det.diameter_px / 2.0 * 0.25,
+        pin_radius_px=aperture_det.diameter_px / 2.0 * 0.50,
     )
 
     gender_det = detect_gender(
