@@ -4,7 +4,16 @@
 EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
-  m_Scenes: []
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/Scanner.unity
+    guid: 819b5bbf626af0443aec37cb79a87628
+  - enabled: 1
+    path: Assets/Scenes/Enroll.unity
+    guid: e8284edc9a4310648bec7fafdda801d1
+  - enabled: 1
+    path: Assets/Scenes/Curate.unity
+    guid: 7d70037c29ba21e4a981ed50f9206340
   m_configObjects:
     UnityEditor.XR.ARCore.ARCoreSettings: {fileID: 11400000, guid: 9926e9a70b1fd7e40a22b89bccb52d68, type: 2}
     UnityEditor.XR.ARKit.ARKitSettings: {fileID: 11400000, guid: 89e41ef4fab2a764bba157da9ab987c4, type: 2}
