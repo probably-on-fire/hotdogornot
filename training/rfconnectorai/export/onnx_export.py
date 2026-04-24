@@ -19,7 +19,8 @@ def export_embedder(checkpoint: Path, output: Path, image_size: int = 384) -> Pa
     """
     ckpt = torch.load(checkpoint, map_location="cpu", weights_only=True)
     dim = ckpt["embedding_dim"]
-    model = RGBDEmbedder(embedding_dim=dim, pretrained=False)
+    backbone = ckpt.get("backbone", "mobilevitv2_100")
+    model = RGBDEmbedder(embedding_dim=dim, pretrained=False, backbone=backbone)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
 

@@ -29,7 +29,8 @@ def build_references(
 
     ckpt = torch.load(checkpoint, map_location=device, weights_only=True)
     embedding_dim = ckpt["embedding_dim"]
-    model = RGBDEmbedder(embedding_dim=embedding_dim, pretrained=False).to(device)
+    backbone = ckpt.get("backbone", "mobilevitv2_100")  # legacy ckpts default to mobilevit
+    model = RGBDEmbedder(embedding_dim=embedding_dim, pretrained=False, backbone=backbone).to(device)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
 

@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader, Sampler
 
 from rfconnectorai.data.dataset import RGBDConnectorDataset
-from rfconnectorai.models.embedder import RGBDEmbedder
+from rfconnectorai.models.embedder import RGBDEmbedder, recommended_image_size
 from rfconnectorai.training.triplet_loss import batch_hard_triplet_loss
 
 
@@ -53,17 +53,18 @@ def train(
     classes_per_batch: int,
     samples_per_class: int,
     device: str,
+    backbone: str,
+    pretrained: bool,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     ds = RGBDConnectorDataset(root=data_root, classes_yaml=classes_yaml, image_size=image_size)
     labels = [sample[1] for sample in ds.samples]
 
-    # One "batch" per sampler.__iter__, so we run many optimizer steps by re-iterating.
     sampler = PKSampler(labels, classes_per_batch=classes_per_batch, samples_per_class=samples_per_class)
     loader = DataLoader(ds, batch_sampler=sampler, num_workers=0)
 
-    model = RGBDEmbedder(embedding_dim=128, pretrained=False).to(device)
+    model = RGBDEmbedder(embedding_dim=128, pretrained=pretrained, backbone=backbone).to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
 
     steps_per_epoch = max(1, len(ds) // (classes_per_batch * samples_per_class))
@@ -85,7 +86,15 @@ def train(
         print(f"epoch {epoch + 1}/{num_epochs}  loss={loss.item():.4f}")
 
     ckpt = output_dir / "embedder.pt"
-    torch.save({"state_dict": model.state_dict(), "embedding_dim": 128}, ckpt)
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "embedding_dim": 128,
+            "backbone": backbone,
+            "image_size": image_size,
+        },
+        ckpt,
+    )
     return ckpt
 
 
@@ -94,13 +103,29 @@ def main():
     ap.add_argument("--data-root", type=Path, required=True)
     ap.add_argument("--classes-yaml", type=Path, required=True)
     ap.add_argument("--output-dir", type=Path, required=True)
-    ap.add_argument("--image-size", type=int, default=384)
+    ap.add_argument(
+        "--backbone",
+        type=str,
+        default="mobilevitv2_100",
+        help="timm model name, e.g. mobilevitv2_100 or vit_small_patch14_dinov2.lvd142m",
+    )
+    ap.add_argument(
+        "--image-size",
+        type=int,
+        default=None,
+        help="Input resolution. If unset, uses recommended size for the backbone.",
+    )
     ap.add_argument("--epochs", type=int, default=40)
     ap.add_argument("--lr", type=float, default=3e-4)
     ap.add_argument("--margin", type=float, default=0.3)
     ap.add_argument("--classes-per-batch", type=int, default=4)
     ap.add_argument("--samples-per-class", type=int, default=4)
     ap.add_argument("--device", type=str, default="cpu")
+    ap.add_argument(
+        "--no-pretrained",
+        action="store_true",
+        help="Skip downloading pretrained weights (forces random init; CI use only)",
+    )
     ap.add_argument(
         "--smoke-test",
         action="store_true",
@@ -114,6 +139,9 @@ def main():
         args.classes_per_batch = 2
         args.samples_per_class = 3
 
+    if args.image_size is None:
+        args.image_size = recommended_image_size(args.backbone)
+
     ckpt = train(
         data_root=args.data_root,
         classes_yaml=args.classes_yaml,
@@ -125,6 +153,8 @@ def main():
         classes_per_batch=args.classes_per_batch,
         samples_per_class=args.samples_per_class,
         device=args.device,
+        backbone=args.backbone,
+        pretrained=not args.no_pretrained,
     )
     print(f"checkpoint written to {ckpt}")
 
