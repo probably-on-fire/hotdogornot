@@ -85,3 +85,52 @@ The `[dev]` install pulls it automatically.
 If the `bpy` install fails on your platform, fall back to Blender installed
 separately and `--python-bpy-executable /path/to/blender`. See
 `rfconnectorai/synthetic/render.py` for the flag.
+
+## Synthetic data pipeline (Plan 3)
+
+Render thousands of dimensionally-exact training images per class from
+manufacturer CAD. Replaces catalog-scraped data as the primary backbone
+training source.
+
+### Prerequisites
+
+- Blender 4.x bpy pip-installed (pulled by `[dev]` extras).
+- Per-class mesh files (GLB preferred, STEP/OBJ also supported) in
+  `training/data/cad/`. Match paths in `configs/cad_sources.yaml`.
+- Optional: a directory of HDRI environment maps (.exr/.hdr) from
+  Poly Haven or similar, for realistic background randomization.
+
+See `docs/superpowers/plans/2026-04-24-plan-3-addendum-step-workflow.md` for
+the full STEP → verified GLB workflow including the mating-face repair
+guide (`docs/mating_face_repair_guide.md`).
+
+### Running
+
+Full pipeline for all 8 classes, 2000 samples each at 384×384:
+
+    bash scripts/render_synthetic.sh
+
+Partial run for debugging (one class, 100 samples, smaller size):
+
+    python -m rfconnectorai.synthetic.pipeline \
+        --only-class SMA-M \
+        --per-class 100 \
+        --image-size 128 \
+        --samples 8
+
+Output lands in `data/synthetic/<CLASS>/render_*.png`. The existing
+`RGBDConnectorDataset` reads this directory layout unchanged.
+
+### Training against synthetic data
+
+After rendering, train normally — pass `--data-root data/synthetic` and the
+new `--aux-hierarchical` flag for improved convergence:
+
+    python -m rfconnectorai.training.train_embedder \
+        --data-root data/synthetic \
+        --classes-yaml configs/classes.yaml \
+        --output-dir runs/embedder_synth \
+        --aux-hierarchical \
+        --epochs 40
+
+Then build references + eval + export ONNX exactly as before.
