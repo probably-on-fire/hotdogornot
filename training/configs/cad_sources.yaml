@@ -1,0 +1,69 @@
+# Per-class CAD mesh + metadata for the synthetic-render pipeline.
+# Mesh paths are relative to training/data/cad/.
+# This file is user-curated — you drop STEP/OBJ/STL files into data/cad/ and
+# update the paths here to match.
+
+classes:
+  - name: "SMA-M"
+    family: "sma"
+    gender: "male"
+    mesh_path: "SMA-M.obj"
+    body_material: "brass"
+    contact_material: "gold_plated"
+    dielectric_material: "ptfe"
+
+  - name: "SMA-F"
+    family: "sma"
+    gender: "female"
+    mesh_path: "SMA-F.obj"
+    body_material: "brass"
+    contact_material: "gold_plated"
+    dielectric_material: "ptfe"
+
+  - name: "3.5mm-M"
+    family: "precision"
+    gender: "male"
+    mesh_path: "3.5mm-M.obj"
+    body_material: "stainless_steel"
+    contact_material: "gold_plated"
+    dielectric_material: null
+
+  - name: "3.5mm-F"
+    family: "precision"
+    gender: "female"
+    mesh_path: "3.5mm-F.obj"
+    body_material: "stainless_steel"
+    contact_material: "gold_plated"
+    dielectric_material: null
+
+  - name: "2.92mm-M"
+    family: "precision"
+    gender: "male"
+    mesh_path: "2.92mm-M.obj"
+    body_material: "stainless_steel"
+    contact_material: "gold_plated"
+    dielectric_material: null
+
+  - name: "2.92mm-F"
+    family: "precision"
+    gender: "female"
+    mesh_path: "2.92mm-F.obj"
+    body_material: "stainless_steel"
+    contact_material: "gold_plated"
+    dielectric_material: null
+
+  - name: "2.4mm-M"
+    family: "precision"
+    gender: "male"
+    mesh_path: "2.4mm-M.obj"
+    body_material: "stainless_steel"
+    contact_material: "gold_plated"
+    dielectric_material: null
+
+  - name: "2.4mm-F"
+    family: "precision"
+    gender: "female"
+    mesh_path: "2.4mm-F.obj"
+    body_material: "stainless_steel"
+    contact_material: "gold_plated"
+    dielectric_material: null
