@@ -73,25 +73,92 @@ namespace RFConnectorAR.EditorTools
         private static void BuildConnectorRingPrefab()
         {
             string path = $"{PrefabsDir}/ConnectorRing.prefab";
+            string meshPath = $"{PrefabsDir}/ConnectorRingMesh.asset";
 
-            // Build the GameObject in a temp scene if necessary; here we create
-            // a torus primitive in the current scene, convert to prefab, destroy.
-            var ring = GameObject.CreatePrimitive(PrimitiveType.Cube); // placeholder — Torus needs mesh import
-            ring.name = "ConnectorRing";
-            // Torus primitives aren't in UnityEngine.PrimitiveType; we simulate with
-            // a flat thin disc. Real tuning happens in the editor after.
-            ring.transform.localScale = new Vector3(0.06f, 0.005f, 0.06f);
+            // Generate a procedural torus mesh (Unity's built-in primitives don't
+            // include Torus). Radii chosen so the ring visually wraps the detected
+            // connector at ~6 cm outer diameter, ~5 mm tube thickness.
+            Mesh torus = GenerateTorusMesh(
+                majorRadius: 0.030f,   // 6 cm outer diameter
+                minorRadius: 0.003f,   // 3 mm tube radius
+                majorSegments: 48,
+                minorSegments: 12);
+            AssetDatabase.CreateAsset(torus, meshPath);
 
-            var renderer = ring.GetComponent<MeshRenderer>();
+            var ring = new GameObject("ConnectorRing", typeof(MeshFilter), typeof(MeshRenderer));
+            ring.GetComponent<MeshFilter>().sharedMesh =
+                AssetDatabase.LoadAssetAtPath<Mesh>(meshPath);
+
             var mat = new Material(Shader.Find("Standard"));
             mat.color = new Color(0.2f, 0.9f, 0.4f);
             string matPath = $"{PrefabsDir}/RingGreen.mat";
             AssetDatabase.CreateAsset(mat, matPath);
-            renderer.sharedMaterial = AssetDatabase.LoadAssetAtPath<Material>(matPath);
+            ring.GetComponent<MeshRenderer>().sharedMaterial =
+                AssetDatabase.LoadAssetAtPath<Material>(matPath);
 
             PrefabUtility.SaveAsPrefabAsset(ring, path);
             Object.DestroyImmediate(ring);
             Debug.Log($"SceneBuilder: wrote {path}");
+        }
+
+        /// <summary>
+        /// Parametric torus mesh generator. Produces a closed torus centred on the
+        /// origin, lying flat on the XZ plane (like a ring sitting on a table).
+        /// </summary>
+        private static Mesh GenerateTorusMesh(
+            float majorRadius, float minorRadius, int majorSegments, int minorSegments)
+        {
+            var mesh = new Mesh { name = "ConnectorRingTorus" };
+            int vertCount = majorSegments * minorSegments;
+            var verts = new Vector3[vertCount];
+            var normals = new Vector3[vertCount];
+            var uvs = new Vector2[vertCount];
+            var tris = new int[majorSegments * minorSegments * 6];
+
+            for (int i = 0; i < majorSegments; i++)
+            {
+                float theta = (i / (float)majorSegments) * Mathf.PI * 2f;
+                float cosT = Mathf.Cos(theta);
+                float sinT = Mathf.Sin(theta);
+
+                for (int j = 0; j < minorSegments; j++)
+                {
+                    float phi = (j / (float)minorSegments) * Mathf.PI * 2f;
+                    float cosP = Mathf.Cos(phi);
+                    float sinP = Mathf.Sin(phi);
+
+                    int idx = i * minorSegments + j;
+                    verts[idx] = new Vector3(
+                        (majorRadius + minorRadius * cosP) * cosT,
+                        minorRadius * sinP,
+                        (majorRadius + minorRadius * cosP) * sinT);
+                    normals[idx] = new Vector3(cosP * cosT, sinP, cosP * sinT);
+                    uvs[idx] = new Vector2(i / (float)majorSegments, j / (float)minorSegments);
+                }
+            }
+
+            int triIdx = 0;
+            for (int i = 0; i < majorSegments; i++)
+            {
+                int iNext = (i + 1) % majorSegments;
+                for (int j = 0; j < minorSegments; j++)
+                {
+                    int jNext = (j + 1) % minorSegments;
+                    int a = i * minorSegments + j;
+                    int b = iNext * minorSegments + j;
+                    int c = iNext * minorSegments + jNext;
+                    int d = i * minorSegments + jNext;
+                    tris[triIdx++] = a; tris[triIdx++] = b; tris[triIdx++] = c;
+                    tris[triIdx++] = a; tris[triIdx++] = c; tris[triIdx++] = d;
+                }
+            }
+
+            mesh.vertices = verts;
+            mesh.normals = normals;
+            mesh.uv = uvs;
+            mesh.triangles = tris;
+            mesh.RecalculateBounds();
+            return mesh;
         }
 
         private static void BuildConnectorLabelPrefab()
