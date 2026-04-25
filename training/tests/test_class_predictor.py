@@ -93,3 +93,29 @@ def test_returns_unknown_when_no_hex():
     pred = predict_class(img)
     assert pred.class_name == "Unknown"
     assert pred.reason != ""
+
+
+def test_require_aruco_returns_unknown_when_no_marker():
+    # Valid connector face but no ArUco marker in frame; require_aruco=True
+    # should refuse to fall back to hex-hypothesis enumeration.
+    img = _make_connector_face(
+        image_size=500,
+        hex_flat_to_flat_mm=7.94,
+        aperture_diameter_mm=3.5,
+        pixels_per_mm=25.0,
+    )
+    pred = predict_class(img, require_aruco=True)
+    assert pred.class_name == "Unknown"
+    assert "aruco" in pred.reason.lower() or "marker" in pred.reason.lower()
+
+
+def test_require_aruco_uses_explicit_pixels_per_mm():
+    # If pixels_per_mm is provided explicitly, require_aruco shouldn't block.
+    img = _make_connector_face(
+        image_size=500,
+        hex_flat_to_flat_mm=7.94,
+        aperture_diameter_mm=3.5,
+        pixels_per_mm=25.0,
+    )
+    pred = predict_class(img, require_aruco=True, assumed_pixels_per_mm=25.0)
+    assert pred.class_name == "3.5mm-F"

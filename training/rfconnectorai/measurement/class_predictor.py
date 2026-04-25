@@ -73,6 +73,7 @@ def predict_class(
     image: np.ndarray,
     assumed_pixels_per_mm: float | None = None,
     aruco_marker_size_mm: float | None = 25.0,
+    require_aruco: bool = False,
 ) -> Prediction:
     """
     Full 8-class geometry-grounded prediction. Returns Prediction with
@@ -82,15 +83,24 @@ def predict_class(
     Scale-resolution priority:
       1. `assumed_pixels_per_mm` if explicitly provided
       2. ArUco marker in frame (uses `aruco_marker_size_mm` to convert)
-      3. Hex-hypothesis enumeration (the only option when no marker is present)
+      3. Hex-hypothesis enumeration (only when require_aruco=False)
 
-    Path 2 resolves the 2.92/2.4 ambiguity that path 3 cannot.
+    Path 2 resolves the 2.92/2.4 ambiguity that path 3 cannot. Setting
+    require_aruco=True turns Path 3 off and returns Unknown when no marker
+    is in frame — this is the high-accuracy mode used by the AR app and
+    the video-frame averager.
     """
     # Scale prior: try ArUco first; falls back to hex-hypothesis enumeration.
     if assumed_pixels_per_mm is None and aruco_marker_size_mm is not None:
         aruco = detect_aruco_marker(image, marker_size_mm=aruco_marker_size_mm)
         if aruco is not None:
             assumed_pixels_per_mm = aruco.pixels_per_mm
+
+    if require_aruco and assumed_pixels_per_mm is None:
+        return Prediction(
+            class_name="Unknown",
+            reason="ArUco marker required but not detected",
+        )
 
     hex_det = detect_hex(image)
     if hex_det is None:

@@ -53,6 +53,13 @@ def detect_hex(image: np.ndarray) -> HexDetection | None:
         blurred, 0, 255, cv2.THRESH_BINARY_INV | cv2.THRESH_OTSU
     )
 
+    # Morphological close fills in small bright holes (specular highlights, etc.)
+    # so the hex contour traces the true outer boundary instead of detouring
+    # around bright spots. Real metallic connectors have specular reflections
+    # in nearly every photo, so this matters even more on real captures.
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
+
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
