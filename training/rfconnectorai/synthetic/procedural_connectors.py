@@ -116,23 +116,25 @@ def build_connector(c: ClassDimensions) -> trimesh.Trimesh:
     """Build one connector mesh. Returns a closed trimesh oriented +Z toward mating face."""
     parts: list[trimesh.Trimesh] = []
 
+    # Body / hex finish: SMA bodies are brass-colored, precision (3.5/2.92/2.4)
+    # are stainless gray. Matches MATERIAL_COLORS in face_renderer.py so the 3D
+    # angled-renderer outputs harmonize with the PIL frontal renderer.
+    body_color = (170, 145, 95, 255) if c.dielectric_visible else (110, 113, 120, 255)
+
     # Cylindrical body (bulk).
     body = trimesh.creation.cylinder(
         radius=c.body_od_mm / 2.0,
         height=BODY_LENGTH_MM - HEX_LENGTH_MM,
         sections=64,
     )
-    # trimesh cylinders are centered on origin along Z. Translate so the
-    # back of the body sits at z=0 and the front (hex-nut end) at
-    # z = BODY_LENGTH_MM - HEX_LENGTH_MM.
     body.apply_translation([0, 0, (BODY_LENGTH_MM - HEX_LENGTH_MM) / 2.0])
+    body.visual.face_colors = body_color
     parts.append(body)
 
     # Hex coupling section sits on top of the body.
     hex_prism = _hex_prism(c.hex_flat_to_flat_mm, HEX_LENGTH_MM)
-    # extrude_polygon builds a mesh whose base is at z=0. Translate so it
-    # stacks on top of the cylindrical body.
     hex_prism.apply_translation([0, 0, BODY_LENGTH_MM - HEX_LENGTH_MM])
+    hex_prism.visual.face_colors = body_color
     parts.append(hex_prism)
 
     # Mating face is the top of the hex prism (at z = BODY_LENGTH_MM).
@@ -148,22 +150,26 @@ def build_connector(c: ClassDimensions) -> trimesh.Trimesh:
         height=bore_depth,
         sections=48,
     )
-    bore_cyl.apply_translation([0, 0, mating_face_z - bore_depth / 2.0])
-    # Recolor the bore so it reads as a visible feature in the render.
-    bore_cyl.visual.face_colors = [30, 30, 30, 255]
+    # Push the bore slightly above the hex top face so its top disc is the
+    # frontmost surface (no z-fighting with the coplanar hex top).
+    bore_lift = 0.05
+    bore_cyl.apply_translation([0, 0, mating_face_z - bore_depth / 2.0 + bore_lift])
+    bore_cyl.visual.face_colors = [20, 20, 22, 255]
     parts.append(bore_cyl)
 
     # Inner conductor: pin for male (protrudes past the mating face),
     # socket marker for female (sits flush with a recessed cylinder).
     if c.is_male:
+        pin_height = PIN_PROTRUSION_MM + bore_depth
         pin = trimesh.creation.cylinder(
             radius=c.pin_od_mm / 2.0,
-            height=PIN_PROTRUSION_MM + bore_depth,
+            height=pin_height,
             sections=32,
         )
-        pin.apply_translation(
-            [0, 0, mating_face_z - bore_depth + (PIN_PROTRUSION_MM + bore_depth) / 2.0]
-        )
+        # Pin top should sit clearly above the bore-top disc so we see it as
+        # the central protrusion rather than buried inside the hole.
+        pin_top_z = mating_face_z + bore_lift + PIN_PROTRUSION_MM
+        pin.apply_translation([0, 0, pin_top_z - pin_height / 2.0])
         pin.visual.face_colors = [240, 200, 120, 255]  # gold-ish
         parts.append(pin)
     else:
