@@ -115,6 +115,26 @@ with st.sidebar:
         st.write(f"- **{cls}**: {n}")
     st.write(f"_Total: {sum(counts.values())} images_")
 
+    st.divider()
+    st.markdown("### Bulk delete")
+    confirm_phrase = st.text_input(
+        f"Type `WIPE` to enable wiping `{src_root.name}`",
+        key=f"wipe_confirm_{src_root.name}",
+    )
+    if confirm_phrase == "WIPE":
+        if st.button(f"Delete ALL images under {src_root.name}", type="primary"):
+            removed = 0
+            for cls in CANONICAL_CLASSES:
+                class_dir = src_root / cls
+                for f in _list_class_files(class_dir):
+                    try:
+                        f.unlink()
+                        removed += 1
+                    except Exception:
+                        pass
+            st.success(f"Removed {removed} images from {src_root.name}")
+            st.rerun()
+
 st.markdown(f"### Source: `{src_root.relative_to(REPO_TRAINING)}`")
 
 class_tabs = st.tabs(CANONICAL_CLASSES)
@@ -124,16 +144,30 @@ for i, cls in enumerate(CANONICAL_CLASSES):
         class_dir = src_root / cls
         files = _list_class_files(class_dir)
 
-        col_a, col_b, col_c = st.columns([2, 1, 1])
+        col_a, col_b, col_c, col_d = st.columns([2, 1, 1, 1])
         col_a.metric(f"{cls}", f"{len(files)} images")
         if col_b.button("Open folder", key=f"open_{cls}"):
             _open_in_explorer(class_dir)
         run_eval = col_c.button("Run pipeline", key=f"eval_{cls}")
+        delete_all = col_d.button(
+            "Delete all", key=f"delall_{cls}", help="Remove every image in this class folder"
+        )
+
+        if delete_all and files:
+            removed = 0
+            for f in files:
+                try:
+                    f.unlink()
+                    removed += 1
+                except Exception:
+                    pass
+            st.success(f"Removed {removed} images from {cls}")
+            st.rerun()
 
         if run_eval and files:
             with st.spinner(f"Running pipeline on {len(files)} images..."):
                 correct = 0
-                unknown = 0
+                unknown_files = []
                 wrong = []
                 for f in files:
                     img = cv2.imread(str(f), cv2.IMREAD_COLOR)
@@ -144,19 +178,49 @@ for i, cls in enumerate(CANONICAL_CLASSES):
                     if pred.class_name == cls:
                         correct += 1
                     elif pred.class_name == "Unknown":
-                        unknown += 1
+                        unknown_files.append(f.name)
                     else:
                         wrong.append((f.name, pred.class_name))
                 total = len(files)
                 acc = (correct / total * 100) if total else 0
                 st.metric("Accuracy", f"{acc:.1f}%", help=f"{correct}/{total} correct")
                 col_x, col_y = st.columns(2)
-                col_x.write(f"**Unknown**: {unknown}")
+                col_x.write(f"**Unknown**: {len(unknown_files)}")
                 col_y.write(f"**Wrong**: {len(wrong)}")
                 if wrong:
                     with st.expander(f"{len(wrong)} wrong predictions"):
-                        for fn, pred_cls in wrong[:20]:
-                            st.write(f"- `{fn}` → `{pred_cls}`")
+                        for fn, pred_cls in wrong[:50]:
+                            st.write(f"- `{fn}` -> `{pred_cls}`")
+                        if st.button(
+                            f"Delete all {len(wrong)} wrong-prediction files",
+                            key=f"del_wrong_{cls}",
+                        ):
+                            removed = 0
+                            for fn, _ in wrong:
+                                try:
+                                    (class_dir / fn).unlink()
+                                    removed += 1
+                                except Exception:
+                                    pass
+                            st.success(f"Removed {removed} files")
+                            st.rerun()
+                if unknown_files:
+                    with st.expander(f"{len(unknown_files)} Unknown predictions"):
+                        for fn in unknown_files[:50]:
+                            st.write(f"- `{fn}`")
+                        if st.button(
+                            f"Delete all {len(unknown_files)} Unknown files",
+                            key=f"del_unk_{cls}",
+                        ):
+                            removed = 0
+                            for fn in unknown_files:
+                                try:
+                                    (class_dir / fn).unlink()
+                                    removed += 1
+                                except Exception:
+                                    pass
+                            st.success(f"Removed {removed} files")
+                            st.rerun()
 
         if not files:
             st.info(f"No images in `{class_dir}` yet.")
