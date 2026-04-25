@@ -27,11 +27,14 @@ import numpy as np
 import streamlit as st
 
 from rfconnectorai.data_fetch.video_frames import extract_frames
+from rfconnectorai.ensemble import EnsemblePredictor
+from rfconnectorai.ensemble_averager import average_ensemble
 from rfconnectorai.measurement.frame_averager import average_predictions
 
 
 REPO_TRAINING = Path(__file__).resolve().parents[2]
 DATA_ROOT = REPO_TRAINING / "data" / "labeled" / "embedder"
+DEFAULT_MODEL_DIR = REPO_TRAINING / "models" / "connector_classifier"
 
 CANONICAL_CLASSES = [
     "SMA-M", "SMA-F",
@@ -158,6 +161,19 @@ else:
             "first eyeball pass on video that doesn't have a marker yet."
         ),
     )
+
+    classifier_available = (DEFAULT_MODEL_DIR / "weights.pt").exists()
+    use_ensemble = st.checkbox(
+        "Use ensemble (measurement + classifier)",
+        value=classifier_available,
+        disabled=not classifier_available,
+        help=(
+            "Uses the trained ResNet-18 classifier alongside the measurement "
+            "pipeline and averages classifier softmax across frames. Requires "
+            "a trained model at models/connector_classifier/."
+        ),
+    )
+
     if st.button("Run averaged prediction"):
         with st.spinner(f"Predicting across {len(last_extracted)} frames…"):
             frames = []
@@ -166,7 +182,35 @@ else:
                 if img is None:
                     continue
                 frames.append(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-            result = average_predictions(frames, require_aruco=require_aruco)
+
+            if use_ensemble and classifier_available:
+                predictor = EnsemblePredictor.load(DEFAULT_MODEL_DIR)
+                ensemble = average_ensemble(
+                    frames, predictor, require_aruco=require_aruco,
+                )
+                # Normalize the two result types so the rendering code below
+                # works for either path.
+                result = type(
+                    "AvgShim", (),
+                    {
+                        "class_name": ensemble.class_name,
+                        "confidence": ensemble.confidence,
+                        "n_frames_total": ensemble.n_frames_total,
+                        "n_frames_used": ensemble.n_frames_used,
+                        "aperture_mm": ensemble.aperture_mm,
+                        "aperture_mm_stddev": ensemble.aperture_mm_stddev,
+                        "hex_flat_to_flat_mm": ensemble.hex_flat_to_flat_mm,
+                        "pixels_per_mm": ensemble.pixels_per_mm,
+                        "family": None,
+                        "gender": None,
+                        "per_class_votes": ensemble.per_class_votes,
+                        "reason": ensemble.reason,
+                        "_classifier_probabilities": ensemble.classifier_probabilities,
+                        "_per_frame_agreement": ensemble.per_frame_agreement,
+                    },
+                )
+            else:
+                result = average_predictions(frames, require_aruco=require_aruco)
 
         if result.class_name == "Unknown":
             st.error(f"**Result: Unknown** — {result.reason}")
@@ -197,8 +241,20 @@ else:
             st.write(f"**{k}:** {v}")
 
         if result.per_class_votes:
-            st.markdown("**Per-class vote breakdown**")
+            st.markdown("**Per-class vote breakdown** (hard votes from each frame)")
             for cls_name, n in sorted(
                 result.per_class_votes.items(), key=lambda kv: -kv[1]
             ):
                 st.write(f"- {cls_name}: {n}")
+
+        clf_probs = getattr(result, "_classifier_probabilities", None) or {}
+        if clf_probs:
+            st.markdown("**Averaged classifier softmax** (soft votes)")
+            for cls_name, prob in sorted(clf_probs.items(), key=lambda kv: -kv[1]):
+                st.write(f"- {cls_name}: {prob:.3f}")
+
+        agreement = getattr(result, "_per_frame_agreement", None) or {}
+        if agreement:
+            st.markdown("**Per-frame agreement signal**")
+            for kind, n in sorted(agreement.items(), key=lambda kv: -kv[1]):
+                st.write(f"- {kind}: {n}")
