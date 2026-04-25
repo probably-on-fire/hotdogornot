@@ -1,14 +1,17 @@
 """
-Streamlit demo for the RF connector measurement pipeline.
+Streamlit demo for the RF connector identifier.
 
 Run:
     cd training
     .venv/Scripts/python.exe -m streamlit run scripts/demo_app.py
 
 A browser opens on http://localhost:8501. Upload a connector photo (or
-take one with a webcam), see the measurement pipeline output: detected hex,
-detected aperture, detected ArUco marker (if any), family + gender brightness
-signals, and the predicted connector class.
+take one with a webcam), see the ensemble prediction: measurement pipeline
+(hex / aperture / ArUco / family / gender / class) + ResNet-18 classifier
+prediction + agreement signal.
+
+If no classifier is trained yet (no weights at models/connector_classifier/),
+the demo falls back to measurement-only mode.
 """
 
 from __future__ import annotations
@@ -21,12 +24,26 @@ import numpy as np
 import streamlit as st
 from PIL import Image
 
+from rfconnectorai.ensemble import EnsemblePredictor
 from rfconnectorai.measurement.aperture_detector import detect_aperture
 from rfconnectorai.measurement.aruco_detector import detect_aruco_marker
 from rfconnectorai.measurement.class_predictor import predict_class
 from rfconnectorai.measurement.family_detector import detect_family
 from rfconnectorai.measurement.gender_detector import detect_gender
 from rfconnectorai.measurement.hex_detector import detect_hex
+
+
+REPO_TRAINING = Path(__file__).resolve().parents[1]
+DEFAULT_MODEL_DIR = REPO_TRAINING / "models" / "connector_classifier"
+
+
+@st.cache_resource(show_spinner=False)
+def _load_predictor(model_dir_str: str | None) -> EnsemblePredictor:
+    """Cache the loaded classifier across reruns so we don't reload weights
+    on every interaction."""
+    if model_dir_str is None:
+        return EnsemblePredictor(classifier=None)
+    return EnsemblePredictor.load(Path(model_dir_str))
 
 
 st.set_page_config(page_title="AIRED — RF Connector Identifier", layout="wide")
@@ -43,6 +60,27 @@ with st.sidebar:
         "ArUco marker physical size (mm)", min_value=5.0, max_value=100.0, value=25.0, step=0.5
     )
     show_overlays = st.checkbox("Show detection overlays", value=True)
+    require_aruco = st.checkbox(
+        "Require ArUco for class prediction",
+        value=False,
+        help="Strict mode — eliminates 2.92mm vs 2.4mm ambiguity, refuses prediction if no marker.",
+    )
+
+    st.divider()
+    st.markdown("### Classifier")
+    use_classifier = st.checkbox(
+        "Use trained classifier (ensemble mode)",
+        value=DEFAULT_MODEL_DIR.exists() and (DEFAULT_MODEL_DIR / "weights.pt").exists(),
+        help="Cross-checks the measurement pipeline against the ResNet-18 classifier.",
+    )
+    if use_classifier:
+        if not (DEFAULT_MODEL_DIR / "weights.pt").exists():
+            st.warning(
+                f"No trained model at `{DEFAULT_MODEL_DIR}`. Use the Train Classifier "
+                "page to train one first."
+            )
+            use_classifier = False
+
     st.divider()
     st.markdown(
         "**Tips for a good photo**\n"
@@ -96,8 +134,14 @@ if hex_det is not None:
             aperture_radius_px=aperture.diameter_px / 2.0,
         )
 
-# Full prediction
-prediction = predict_class(img_rgb, aruco_marker_size_mm=float(aruco_size))
+# Full prediction — ensemble (measurement + classifier) when enabled.
+predictor = _load_predictor(str(DEFAULT_MODEL_DIR) if use_classifier else None)
+ensemble_result = predictor.predict(
+    img_rgb,
+    require_aruco=require_aruco,
+    aruco_marker_size_mm=float(aruco_size),
+)
+prediction = ensemble_result.measurement   # keep variable name for downstream code
 
 # Compose overlay image
 overlay = img_rgb.copy()
@@ -121,13 +165,31 @@ with col1:
     st.image(overlay, caption="Detections", use_container_width=True)
 
 with col2:
-    # Prediction headline
-    if prediction.class_name == "Unknown":
-        st.error(f"**Predicted: Unknown**")
-        if prediction.reason:
-            st.write(f"_{prediction.reason}_")
+    # Headline reflects the ensemble result, not just the measurement output.
+    headline_class = ensemble_result.class_name
+    headline_conf = ensemble_result.confidence
+
+    agreement_msg = {
+        "agree":              "measurement + classifier agree",
+        "disagree":           "measurement and classifier DISAGREE — recapture recommended",
+        "measurement_only":   "measurement only (classifier off or failed)",
+        "classifier_only":    "classifier only (measurement could not fire)",
+        "neither":            "neither pipeline could fire",
+    }.get(ensemble_result.agreement, ensemble_result.agreement)
+
+    if headline_class == "Unknown":
+        st.error(f"**Predicted: Unknown** — {ensemble_result.reason or agreement_msg}")
+    elif ensemble_result.agreement == "disagree":
+        st.warning(
+            f"**Predicted: {headline_class}** "
+            f"(confidence {headline_conf:.0%} — {agreement_msg})"
+        )
+        st.caption(ensemble_result.reason)
     else:
-        st.success(f"**Predicted: {prediction.class_name}**")
+        st.success(
+            f"**Predicted: {headline_class}** "
+            f"(confidence {headline_conf:.0%} — {agreement_msg})"
+        )
 
     st.markdown("### Measurements")
     rows = []
@@ -157,6 +219,17 @@ with col2:
 
 st.divider()
 
+# Classifier breakdown — only meaningful if classifier was loaded.
+if ensemble_result.classifier is not None:
+    clf = ensemble_result.classifier
+    st.markdown("### Classifier (ResNet-18) prediction")
+    st.write(
+        f"**{clf.class_name}** (top class, confidence {clf.confidence:.0%})"
+    )
+    with st.expander("Per-class probabilities"):
+        for cls_name, prob in sorted(clf.probabilities.items(), key=lambda kv: -kv[1]):
+            st.write(f"- {cls_name}: {prob:.3f}")
+
 with st.expander("Detector outputs (raw)"):
     st.json({
         "hex_detected": hex_det is not None,
@@ -172,4 +245,9 @@ with st.expander("Detector outputs (raw)"):
         "aruco_pixels_per_mm": aruco.pixels_per_mm if aruco else None,
         "predicted_class": prediction.class_name,
         "predicted_aperture_mm": prediction.aperture_mm,
+        "ensemble_class": ensemble_result.class_name,
+        "ensemble_confidence": ensemble_result.confidence,
+        "ensemble_agreement": ensemble_result.agreement,
+        "classifier_class": ensemble_result.classifier.class_name if ensemble_result.classifier else None,
+        "classifier_confidence": ensemble_result.classifier.confidence if ensemble_result.classifier else None,
     })
