@@ -17,11 +17,20 @@ data/processed/
 data/cad/
 data/field_test/
 data/synthetic_faces/
+data/synthetic_angled/
+models/
 runs/
 *.pt
 *.onnx
 *.bin
 !test_data/**/*.bin
+
+# Reference imagery is small and useful to commit.
+!data/reference/
+
+# Throwaway debug renders left in the working dir
+test_*.png
+test_*.jpg
 
 # Environment
 .env

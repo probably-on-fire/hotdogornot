@@ -1,136 +1,238 @@
 # RF Connector AI — Training Pipeline
 
-Python pipeline that trains a YOLOv11n connector detector and a MobileViT-v2 RGBD embedder, then exports both to ONNX for consumption by the Unity Sentis runtime.
+Identify and measure RF coaxial connectors (SMA, 3.5mm, 2.92mm, 2.4mm — male
+& female) from a phone camera. Combines a **geometry-grounded measurement
+pipeline** (no training required, sub-millimeter accuracy with an ArUco
+scale marker) with a **fine-tuned ResNet-18 classifier** (works on any
+image, including non-perpendicular product photos).
 
-Spec: `docs/superpowers/specs/2026-04-23-rf-connector-ar-design.md`
+The two predictors run independently and cross-check each other:
+- **Agreement** → high confidence
+- **Disagreement** → app prompts the user to recapture
+
+Both targets the Unity AR app under `unity/RFConnectorAR`.
+
+---
+
+## Architecture
+
+```
+                                    ┌─ ArUco marker scale  ─────┐
+                                    │                            │
+   image ──► hex_detector ──► aperture_detector ──► family/gender ──► class_predictor
+                                    │                                    │
+                                    └─ thread-pitch FFT (backup scale)   │
+                                                                         │
+   image ──► ConnectorClassifier (ResNet-18) ──────────────────────────► │
+                                                                         │
+                                          frames ──► frame_averager ──► AveragedPrediction
+```
+
+Two complementary pipelines:
+
+**1. Measurement pipeline** (`rfconnectorai/measurement/`)
+
+  - `hex_detector` — finds the coupling-nut hex contour in pixels
+  - `aperture_detector` — finds the inner bore diameter
+  - `family_detector` — SMA (PTFE dielectric visible) vs precision (air)
+  - `gender_detector` — male (pin protrudes) vs female (socket recessed)
+  - `aruco_detector` — finds a 25 mm ArUco marker for absolute scale
+  - `thread_pitch_scale` — backup absolute scale via FFT on the threaded
+    coupling section (standardized pitch: SMA/3.5/2.92 = 0.706 mm; 2.4 = 0.635 mm)
+  - `class_predictor` — combines the above. `require_aruco=True` uses the
+    marker as the only scale source; `require_aruco=False` falls back to
+    enumerating both standard hex sizes (5/16″ and 1/4″).
+  - `frame_averager` — runs `predict_class` across many frames, MAD-filters
+    outliers, votes on family/gender/class. Returns one consensus
+    `AveragedPrediction` with confidence and per-class vote breakdown.
+
+**2. ResNet-18 classifier** (`rfconnectorai/classifier/`)
+
+  - `train.py` — fine-tune ImageNet-pretrained ResNet-18 on labeled folders
+  - `predict.py` — load weights, predict class on any image with full
+    per-class softmax. Works on non-perpendicular images that the
+    measurement pipeline can't fire on.
+
+**Synthetic data** (`rfconnectorai/synthetic/`)
+
+  - `procedural_connectors.py` — emits parametric GLB meshes for all 8
+    classes from `configs/datasheet_dimensions.yaml`. No vendor STEPs needed.
+  - `face_renderer.py` — PIL-based photo-style mating-face renderer with
+    smooth metallic shading, specular highlights, depth-cued bore, and
+    perspective tilt. Used for synthetic eval data.
+  - `angled_renderer.py` — pyrender 3D off-axis renderer for any camera
+    elevation/azimuth. Visualizes the GLB meshes in the round; not used by
+    the measurement detectors (which assume perpendicular views).
+
+**Data ingestion** (`rfconnectorai/data_fetch/`)
+
+  - `ddg_images.py` — DuckDuckGo image search fetcher (no API key)
+  - `google_cse.py` — Google Custom Search JSON API (needs key, see file)
+  - `video_frames.py` — extract frames from a capture video at a target fps
+
+---
 
 ## Setup
 
-    cd training
-    uv venv
-    uv pip install -e ".[dev]"
+```bash
+cd training
+python -m venv .venv
+.venv/Scripts/pip install -e ".[dev]"      # Windows
+.venv/bin/pip install -e ".[dev]"          # macOS/Linux
+```
 
-If `uv` is not installed, the standard equivalent works too:
+For Google Custom Search image fetching (optional), copy `.env.example`
+to `.env` and fill in `GOOGLE_API_KEY` + `GOOGLE_CSE_ID`. Setup steps are
+in `rfconnectorai/data_fetch/google_cse.py`.
 
-    cd training
-    python -m venv .venv
-    .venv/Scripts/pip install -e ".[dev]"      # Windows
-    .venv/bin/pip install -e ".[dev]"          # macOS/Linux
+---
+
+## Streamlit demo + management UI
+
+```bash
+.venv/Scripts/python.exe -m streamlit run scripts/demo_app.py
+```
+
+Opens a multi-page browser app at `http://localhost:8501`:
+
+- **Demo (`demo_app.py`)** — upload a connector photo or take one with the
+  webcam → see hex/aperture/ArUco detections + measurement + class prediction
+- **Manage Data (`pages/1_Manage_Data.py`)** — browse `data/labeled/embedder/<CLASS>/`,
+  delete bad images, run the measurement pipeline against any class with
+  per-image diagnostic output
+- **Fetch Images (`pages/2_Fetch_Images.py`)** — pull connector images from
+  Google CSE / DuckDuckGo / Bing into the labeled folders. Per-class queries
+  are editable.
+- **Process Video (`pages/3_Process_Video.py`)** — drop in a `.mp4` capture
+  → extract frames at configurable fps → optionally run the multi-frame
+  averaged predictor in one click. Shows per-class vote breakdown.
+- **Train Classifier (`pages/4_Train_Classifier.py`)** — train ResNet-18
+  on the labeled folders, see per-epoch metrics, predict on uploaded images
+  with full per-class probabilities.
+
+---
 
 ## Data layout
 
-For the **embedder**, organize images into per-class directories matching `configs/classes.yaml`:
+```
+data/
+  labeled/embedder/          ← real-world capture data (gitignored)
+    SMA-M/                     ddg_*.{jpg,png,webp}   from DDG fetcher
+    SMA-F/                     gcse_*.{jpg,png,webp}  from Google CSE
+    3.5mm-M/                   chrome_*.{jpg,png}     manual / Chrome download
+    3.5mm-F/                   video_*.jpg            extracted from capture video
+    ...
+  synthetic_faces/           ← PIL-rendered frontal mating faces (gitignored, regenerable)
+    SMA-M/face_*.png
+    ...
+  synthetic_angled/          ← pyrender 3D off-axis renders (gitignored, regenerable)
+    SMA-M/angled_*.png
+    ...
+  reference/pasternack/      ← committed: small set of vendor reference photos
+  cad/verified/<CLASS>.glb   ← procedural GLB meshes (gitignored, regenerable)
+```
 
-    data/labeled/embedder/
-      SMA-M/
-        img0001.png
-        ...
-      SMA-F/
-      3.5mm-M/
-      ...
+---
 
-For the **detector**, use standard Ultralytics YOLO layout pointed at by `configs/detector.yaml`:
+## Running the pieces
 
-    data/labeled/detector/
-      images/train/*.png
-      images/val/*.png
-      labels/train/*.txt   # "0 cx cy w h" per line, normalized
-      labels/val/*.txt
+### Generate synthetic data
 
-During Phase 0 (before real connectors arrive), populate both with a mix of:
-- `python -m rfconnectorai.data.scrape` (catalog images)
-- `python -m rfconnectorai.data.synthetic` (procedural renders)
+```bash
+.venv/Scripts/python.exe -m rfconnectorai.synthetic.procedural_connectors
+.venv/Scripts/python.exe -m rfconnectorai.synthetic.face_renderer --per-class 30
+.venv/Scripts/python.exe -m rfconnectorai.synthetic.angled_renderer --per-class 20
+```
 
-## Full pipeline
+### Fetch real images
 
-    bash scripts/run_pipeline.sh
+Use the **Fetch Images** Streamlit page, or:
 
-Produces under `runs/`:
-- `detector.onnx`
-- `embedder.onnx`
-- `reference_embeddings.bin`
-- `eval_report.json`
+```python
+from pathlib import Path
+from rfconnectorai.data_fetch.ddg_images import fetch_images
+fetch_images("SMA male connector", Path("data/labeled/embedder/SMA-M"), n=30)
+```
 
-## Individual steps
+### Extract frames from a capture video
 
-    python -m rfconnectorai.training.train_detector --data-yaml configs/detector.yaml --output-dir runs/detector
-    python -m rfconnectorai.training.train_embedder --data-root data/labeled/embedder --classes-yaml configs/classes.yaml --output-dir runs/embedder
-    python -m rfconnectorai.inference.build_references --checkpoint runs/embedder/embedder.pt --data-root data/labeled/embedder --classes-yaml configs/classes.yaml --output runs/reference_embeddings.bin
-    python -m rfconnectorai.inference.eval --checkpoint runs/embedder/embedder.pt --references runs/reference_embeddings.bin --data-root data/labeled/embedder --classes-yaml configs/classes.yaml --output runs/eval_report.json
-    python -m rfconnectorai.export.onnx_export --embedder-checkpoint runs/embedder/embedder.pt --embedder-out runs/embedder.onnx --detector-weights runs/detector/detector.pt --detector-out runs/detector.onnx
+```python
+from pathlib import Path
+from rfconnectorai.data_fetch.video_frames import extract_frames
+extract_frames(
+    video_path=Path("captures/SMA-M.mp4"),
+    out_dir=Path("data/labeled/embedder/SMA-M"),
+    fps_target=2.0,
+)
+```
+
+### Train the classifier
+
+```bash
+.venv/Scripts/python.exe -m rfconnectorai.classifier.train \
+    --data-dir data/labeled/embedder \
+    --out-dir models/connector_classifier \
+    --epochs 8
+```
+
+Or via the Train Classifier Streamlit page.
+
+### Predict on a single image (measurement pipeline)
+
+```python
+import cv2
+from rfconnectorai.measurement.class_predictor import predict_class
+
+img = cv2.cvtColor(cv2.imread("photo.jpg"), cv2.COLOR_BGR2RGB)
+pred = predict_class(img, require_aruco=True)
+print(pred.class_name, pred.aperture_mm)
+```
+
+### Predict averaged across video frames
+
+```python
+from rfconnectorai.measurement.frame_averager import average_predictions
+
+frames = [...]   # list of HxWx3 RGB arrays
+result = average_predictions(frames, require_aruco=True)
+print(result.class_name, result.confidence, result.per_class_votes)
+```
+
+### Predict with the trained classifier
+
+```python
+from rfconnectorai.classifier.predict import ConnectorClassifier
+
+clf = ConnectorClassifier.load("models/connector_classifier")
+pred = clf.predict(img)
+print(pred.class_name, pred.confidence, pred.probabilities)
+```
+
+---
 
 ## Tests
 
-    pytest                                 # all
-    pytest tests/test_end_to_end.py -v     # full-pipeline smoke test
+```bash
+.venv/Scripts/python.exe -m pytest tests/ -q
+```
 
-## Configuration
+122 tests covering each detector, the class predictor, the frame averager,
+the video extractor, the classifier (round-trip train+predict), the
+thread-pitch FFT, and the synthetic renderers.
 
-- `configs/classes.yaml` — the 8 RF connector classes with metadata
-- `configs/detector.yaml` — YOLO dataset spec
-- `configs/embedder.yaml` — hyperparameters for embedder training
+---
 
-## Notes
+## Capture protocol (for real video / phone photos)
 
-- On Windows, the synthetic-data renderer (`rfconnectorai.data.synthetic`) uses a PIL-based procedural generator instead of a GL-backed 3D rasterizer, because `pyrender` does not load a GL context cleanly on headless Windows. The trimesh mesh builder is retained for downstream geometric reasoning. On Linux with EGL available, a pyrender-based renderer could be swapped back in; Phase-0 proxy data does not depend on the higher-quality path.
-- The embedder projection head uses `nn.LayerNorm` rather than `nn.BatchNorm1d`. BatchNorm crashes on batch size 1 and leaks batch statistics in metric-learning setups; LayerNorm is the idiomatic choice.
-- ONNX export uses `torch.onnx.export(..., dynamo=False)` to stay on the legacy TorchScript exporter, which does not require the optional `onnxscript` dependency.
+See `docs/capture_protocol.md` for the recommended setup: distance, lighting,
+ArUco marker placement, frames-per-class targets.
 
-## Synthetic-data rendering (Plan 3)
+---
 
-CAD→Blender rendering uses `bpy`, the Blender-as-a-library package. `bpy`
-is heavyweight (~500 MB, bundles its own Python runtime for Blender internals).
-The `[dev]` install pulls it automatically.
+## Reference docs
 
-If the `bpy` install fails on your platform, fall back to Blender installed
-separately and `--python-bpy-executable /path/to/blender`. See
-`rfconnectorai/synthetic/render.py` for the flag.
-
-## Synthetic data pipeline (Plan 3)
-
-Render thousands of dimensionally-exact training images per class from
-manufacturer CAD. Replaces catalog-scraped data as the primary backbone
-training source.
-
-### Prerequisites
-
-- Blender 4.x bpy pip-installed (pulled by `[dev]` extras).
-- Per-class mesh files (GLB preferred, STEP/OBJ also supported) in
-  `training/data/cad/`. Match paths in `configs/cad_sources.yaml`.
-- Optional: a directory of HDRI environment maps (.exr/.hdr) from
-  Poly Haven or similar, for realistic background randomization.
-
-See `docs/superpowers/plans/2026-04-24-plan-3-addendum-step-workflow.md` for
-the full STEP → verified GLB workflow including the mating-face repair
-guide (`docs/mating_face_repair_guide.md`).
-
-### Running
-
-Full pipeline for all 8 classes, 2000 samples each at 384×384:
-
-    bash scripts/render_synthetic.sh
-
-Partial run for debugging (one class, 100 samples, smaller size):
-
-    python -m rfconnectorai.synthetic.pipeline \
-        --only-class SMA-M \
-        --per-class 100 \
-        --image-size 128 \
-        --samples 8
-
-Output lands in `data/synthetic/<CLASS>/render_*.png`. The existing
-`RGBDConnectorDataset` reads this directory layout unchanged.
-
-### Training against synthetic data
-
-After rendering, train normally — pass `--data-root data/synthetic` and the
-new `--aux-hierarchical` flag for improved convergence:
-
-    python -m rfconnectorai.training.train_embedder \
-        --data-root data/synthetic \
-        --classes-yaml configs/classes.yaml \
-        --output-dir runs/embedder_synth \
-        --aux-hierarchical \
-        --epochs 40
-
-Then build references + eval + export ONNX exactly as before.
+- `docs/superpowers/specs/` — design specs for each major architecture pivot
+- `docs/superpowers/plans/` — implementation plans
+- `docs/measurement_baseline_findings.md` — first measurement-pipeline accuracy notes
+- `docs/hex_measurement_prototype_findings.md` — hex detection R&D
+- `docs/printables/aruco_marker_25mm.png` — print-ready 25mm ArUco marker for capture
