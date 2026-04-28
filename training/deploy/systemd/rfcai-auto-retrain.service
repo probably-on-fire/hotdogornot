@@ -15,5 +15,6 @@ ExecStart=/opt/rfcai/training/.venv/bin/python -m scripts.auto_retrain \
 
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=yes
+# ProtectHome would block access to the user's own home; rely on
+# ReadWritePaths scoping instead.
 ReadWritePaths=/home/rfcai

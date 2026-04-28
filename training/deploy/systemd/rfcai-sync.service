@@ -13,5 +13,6 @@ ExecStart=/opt/rfcai/training/scripts/sync_with_relay.sh
 
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=read-only
+# ProtectHome=read-only would block sync from writing into /home/rfcai
+# even with ReadWritePaths; rely on ReadWritePaths scoping instead.
 ReadWritePaths=/home/rfcai

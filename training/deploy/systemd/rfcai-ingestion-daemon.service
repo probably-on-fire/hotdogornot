@@ -22,7 +22,9 @@ StartLimitBurst=5
 
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=yes
+# ProtectHome=yes hides all of /home from the service even with
+# ReadWritePaths=, blocking access to the rfcai user's own home dir.
+# Keep it off; ProtectSystem + ReadWritePaths is enough scoping.
 ReadWritePaths=/home/rfcai
 PrivateTmp=yes
 

@@ -52,6 +52,29 @@ MANIFEST_FILENAME = "manifest.json"
 log = logging.getLogger("ingestion_daemon")
 
 
+def _load_predictor(classifier_dir: Path | None) -> EnsemblePredictor:
+    """
+    Load the ensemble predictor, gracefully falling back to measurement-only
+    mode when no trained classifier exists yet (first-boot / pre-training state).
+    """
+    if classifier_dir is None:
+        return EnsemblePredictor(classifier=None)
+    try:
+        return EnsemblePredictor.load(classifier_dir)
+    except FileNotFoundError:
+        log.info(
+            "no classifier weights at %s yet — running measurement-only "
+            "(restart the daemon after the first retrain to pick them up)",
+            classifier_dir,
+        )
+        return EnsemblePredictor(classifier=None)
+    except Exception as e:
+        log.warning(
+            "classifier load failed (%s); running measurement-only", e,
+        )
+        return EnsemblePredictor(classifier=None)
+
+
 def _is_processed(upload_dir: Path) -> bool:
     return (upload_dir / PROCESSED_SIDECAR).exists()
 
@@ -146,12 +169,12 @@ def run_loop(
     once: bool = False,
 ) -> None:
     """Poll incoming_dir on an interval, processing each ready+unprocessed upload."""
-    predictor = EnsemblePredictor.load(classifier_dir) if classifier_dir else EnsemblePredictor(
-        classifier=None,
-    )
+    predictor = _load_predictor(classifier_dir)
     log.info(
         "ingestion daemon up. watching %s, classifier=%s, interval=%.1fs",
-        incoming_dir, "loaded" if classifier_dir else "none", interval_seconds,
+        incoming_dir,
+        "loaded" if predictor.classifier is not None else "measurement-only",
+        interval_seconds,
     )
     while True:
         try:
