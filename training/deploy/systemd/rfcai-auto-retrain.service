@@ -1,0 +1,19 @@
+[Unit]
+Description=RF Connector AI nightly retrain (oneshot, triggered by .timer)
+
+[Service]
+Type=oneshot
+User=rfcai
+Group=rfcai
+WorkingDirectory=/opt/rfcai/training
+EnvironmentFile=/etc/default/rfcai-training
+ExecStart=/opt/rfcai/training/.venv/bin/python -m scripts.auto_retrain \
+    --data-dir ${RFCAI_LABELED_ROOT} \
+    --model-dir ${RFCAI_LOCAL_MODEL_DIR} \
+    --min-new-samples 20 \
+    --epochs 8
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/home/rfcai

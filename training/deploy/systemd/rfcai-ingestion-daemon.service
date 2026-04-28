@@ -1,0 +1,30 @@
+[Unit]
+Description=RF Connector AI ingestion daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=rfcai
+Group=rfcai
+WorkingDirectory=/opt/rfcai/training
+EnvironmentFile=/etc/default/rfcai-training
+ExecStart=/opt/rfcai/training/.venv/bin/python -m scripts.ingestion_daemon \
+    --incoming-dir ${RFCAI_LOCAL_INCOMING} \
+    --labeled-root ${RFCAI_LABELED_ROOT} \
+    --quarantine-root ${RFCAI_QUARANTINE_ROOT} \
+    --classifier-dir ${RFCAI_LOCAL_MODEL_DIR} \
+    --interval 5
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/home/rfcai
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=RF Connector AI sync-with-relay timer
+
+[Timer]
+# Sync every 2 minutes when the machine is up. Persistent so it catches
+# up after a reboot.
+OnBootSec=30s
+OnUnitActiveSec=2min
+Persistent=true
+Unit=rfcai-sync.service
+
+[Install]
+WantedBy=timers.target

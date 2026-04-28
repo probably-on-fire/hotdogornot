@@ -1,0 +1,13 @@
+[Unit]
+Description=RF Connector AI nightly retrain timer
+
+[Timer]
+# Nightly at 02:00 local time. Persistent=true makes it catch up if the
+# machine was off when it should have fired.
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=rfcai-auto-retrain.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=RF Connector AI sync with relay (oneshot, triggered by .timer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=rfcai
+Group=rfcai
+WorkingDirectory=/opt/rfcai/training
+EnvironmentFile=/etc/default/rfcai-sync
+ExecStart=/opt/rfcai/training/scripts/sync_with_relay.sh
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/rfcai

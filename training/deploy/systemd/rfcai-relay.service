@@ -1,0 +1,35 @@
+[Unit]
+Description=RF Connector AI relay (uvicorn FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=rfcai
+Group=rfcai
+WorkingDirectory=/opt/rfcai/training
+EnvironmentFile=/etc/default/rfcai-relay
+# uvicorn binds to 127.0.0.1 by default; put nginx in front for TLS+443.
+ExecStart=/opt/rfcai/training/.venv/bin/uvicorn \
+    rfconnectorai.server.app:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --proxy-headers \
+    --forwarded-allow-ips=127.0.0.1
+Restart=on-failure
+RestartSec=3
+# Prevent the service from running if it crashes-loops in <30s repeatedly.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/rfcai
+PrivateTmp=yes
+PrivateDevices=yes
+
+[Install]
+WantedBy=multi-user.target
