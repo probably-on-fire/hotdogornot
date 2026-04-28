@@ -190,6 +190,17 @@ def train(config: TrainConfig) -> dict:
     metrics_blob = {"history": [asdict(m) for m in history]}
     metrics_path.write_text(json.dumps(metrics_blob, indent=2))
 
+    # Snapshot a versioned weights file + refresh the OTA manifest. The
+    # relay server reads manifest.json to advertise a new version to the app.
+    from rfconnectorai.classifier.versioning import bump_version
+    final_val_acc = history[-1].val_acc if history else None
+    bump_version(
+        model_dir=config.out_dir,
+        weights_path=weights_path,
+        val_acc=final_val_acc,
+        n_train_samples=len(train_idx),
+    )
+
     return metrics_blob
 
 
