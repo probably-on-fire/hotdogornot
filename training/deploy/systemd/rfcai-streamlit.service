@@ -1,0 +1,36 @@
+[Unit]
+Description=RF Connector AI Streamlit demo
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=rfcai
+Group=rfcai
+WorkingDirectory=/opt/rfcai/training
+EnvironmentFile=/etc/default/rfcai-streamlit
+# Bind to 127.0.0.1 only — public exposure is via the reverse SSH tunnel
+# to aired.com + nginx /demo/ proxy. --baseUrlPath=demo so Streamlit's
+# internal links work behind the path-prefix proxy. --server.enableCORS
+# off so the page can POST to the relay's /uploads endpoint without
+# browser CORS preflight rejecting the upload.
+ExecStart=/opt/rfcai/training/.venv/bin/streamlit run scripts/demo_app.py \
+    --server.address=127.0.0.1 \
+    --server.port=8501 \
+    --server.baseUrlPath=demo \
+    --server.headless=true \
+    --server.enableCORS=false \
+    --server.enableXsrfProtection=false \
+    --browser.gatherUsageStats=false
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/rfcai
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+[Unit]
+Description=Reverse SSH tunnel: training-box:8501 -> aired.com:8502
+After=network-online.target rfcai-streamlit.service
+Wants=network-online.target rfcai-streamlit.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=rfcai
+Group=rfcai
+EnvironmentFile=/etc/default/rfcai-streamlit-tunnel
+# autossh keeps the tunnel up across network blips. ServerAliveInterval +
+# ExitOnForwardFailure ensure dead tunnels get torn down so autossh can
+# reopen them. -N suppresses remote shell, -T disables pseudo-tty.
+ExecStart=/usr/bin/autossh -M 0 -N -T \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
+    -o StrictHostKeyChecking=accept-new \
+    -i ${RFCAI_SSH_KEY} \
+    -R ${RFCAI_REMOTE_BIND}:127.0.0.1:${RFCAI_LOCAL_PORT} \
+    ${RFCAI_RELAY_USER}@${RFCAI_RELAY_HOST}
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/rfcai
+
+[Install]
+WantedBy=multi-user.target
