@@ -1,5 +1,7 @@
 # RF Connector AI — Training Pipeline
 
+[![tests](https://github.com/probably-on-fire/hotdogornot/actions/workflows/tests.yml/badge.svg)](https://github.com/probably-on-fire/hotdogornot/actions/workflows/tests.yml)
+
 Identify and measure RF coaxial connectors (SMA, 3.5mm, 2.92mm, 2.4mm — male
 & female) from a phone camera. Combines a **geometry-grounded measurement
 pipeline** (no training required, sub-millimeter accuracy with an ArUco
