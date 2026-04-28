@@ -72,4 +72,24 @@ jobs:
             'ddgs' 'icrawler' 'streamlit' 'python-dotenv'
 
       - name: Run pytest
-        run: pytest tests/ -q --tb=short
+        id: pytest
+        run: |
+          set +e
+          pytest tests/ -v --tb=long 2>&1 | tee pytest.log
+          EXIT=$?
+          # Stash output in the GHA step summary (publicly viewable on the run page)
+          {
+            echo "## pytest output (last 200 lines)"
+            echo '```'
+            tail -200 pytest.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $EXIT
+
+      - name: Upload pytest log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-log
+          path: training/pytest.log
+          retention-days: 7
