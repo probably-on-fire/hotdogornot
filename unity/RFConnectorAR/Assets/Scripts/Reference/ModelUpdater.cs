@@ -1,37 +1,44 @@
 using System;
 using System.Collections;
 using System.IO;
+using Unity.InferenceEngine;
 using UnityEngine;
 using RFConnectorAR.Perception;
 
 namespace RFConnectorAR.Reference
 {
     /// <summary>
-    /// Polls the relay for new model versions and swaps the live SentisClassifier.
+    /// Owns the live SentisClassifier instance.
     ///
-    /// On Awake:
-    ///   1. Try loading the cached model from persistentDataPath.
-    ///   2. If none, copy the bundled StreamingAssets/connector_classifier.onnx
-    ///      to persistentDataPath and load that.
-    ///   3. Either way, kick off a version-check coroutine — if the relay
-    ///      reports a higher version than what's on disk, download the new
-    ///      ONNX, validate sha256, swap the active classifier, persist.
+    /// Boot path:
+    ///   1. Load the bundled ModelAsset from Assets/Resources/Models/
+    ///      (Unity's editor ONNX importer creates the asset at build time).
+    ///   2. Construct a SentisClassifier from it; expose via GetClassifier().
     ///
-    /// Call <see cref="GetClassifier"/> from the inference loop. The returned
-    /// IClassifier reference is stable across update cycles within a single
-    /// frame; the updater swaps it between frames.
+    /// OTA path (DEFERRED):
+    ///   The Inference Engine runtime only reads its own .sentis FlatBuffer
+    ///   format — it cannot parse raw ONNX at runtime. To OTA-update the
+    ///   bundled model we'd need the relay to serve a pre-serialized .sentis
+    ///   file (produced by ModelWriter.Save in an Editor batchmode pass).
+    ///   The Python training pipeline doesn't produce .sentis today, so OTA
+    ///   updates are stubbed out for now: we still poll the relay version
+    ///   and log when a newer one is available, but we don't try to load it.
+    ///   When the .sentis pipeline is wired up, switch the download URL +
+    ///   re-enable LoadFromBytes(...) in OnVersionResponse.
     /// </summary>
     public sealed class ModelUpdater : MonoBehaviour
     {
-        [Header("Relay")]
+        [Header("Bundled model")]
+        [SerializeField] private string resourcesModelPath = "Models/connector_classifier";
+        [SerializeField] private string resourcesLabelsPath = "Models/labels";
+
+        [Header("Relay (OTA — deferred until .sentis serving is wired up)")]
         [SerializeField] private string relayBaseUrl = "https://aired.com/rfcai";
-        [SerializeField] private string deviceToken = ""; // populate via inspector or DeviceConfig
-        [SerializeField] private string deviceId = "";    // device identifier, falls back to SystemInfo
-        [Header("Bundled fallback")]
-        [SerializeField] private string streamingAssetsRelativeOnnx = "model/connector_classifier.onnx";
-        [SerializeField] private string streamingAssetsRelativeLabels = "model/labels.json";
-        [Header("Polling")]
+        [SerializeField] private string deviceToken = "";
+        [SerializeField] private string deviceId = "";
         [SerializeField] private float versionCheckIntervalSeconds = 600f;
+        [Tooltip("If false, the OTA poll loop is disabled entirely.")]
+        [SerializeField] private bool enableOtaPolling = true;
 
         private RelayClient _client;
         private IClassifier _classifier;
@@ -39,13 +46,6 @@ namespace RFConnectorAR.Reference
 
         public IClassifier GetClassifier() => _classifier;
         public int CurrentVersion => _localVersion;
-
-        private string LocalOnnxPath =>
-            Path.Combine(Application.persistentDataPath, "weights.onnx");
-        private string LocalLabelsPath =>
-            Path.Combine(Application.persistentDataPath, "labels.json");
-        private string LocalVersionPath =>
-            Path.Combine(Application.persistentDataPath, "version.txt");
 
         private void Awake()
         {
@@ -56,64 +56,35 @@ namespace RFConnectorAR.Reference
 
         private IEnumerator Start()
         {
-            yield return EnsureLocalModel();
-            yield return TryLoadClassifier();
-            // Kick off the periodic version-check loop.
-            StartCoroutine(VersionPollLoop());
-        }
-
-        private IEnumerator EnsureLocalModel()
-        {
-            if (File.Exists(LocalOnnxPath) && File.Exists(LocalLabelsPath))
-                yield break;
-
-            // Copy bundled StreamingAssets → persistentDataPath. On Android
-            // StreamingAssets lives inside the APK so we need
-            // UnityWebRequest; on iOS/desktop a file copy works.
-            string srcOnnx = Path.Combine(Application.streamingAssetsPath, streamingAssetsRelativeOnnx);
-            string srcLabels = Path.Combine(Application.streamingAssetsPath, streamingAssetsRelativeLabels);
-
-            yield return CopyStreamingAsset(srcOnnx, LocalOnnxPath);
-            yield return CopyStreamingAsset(srcLabels, LocalLabelsPath);
-
-            // No version stamp yet from a downloaded model — assume bundled
-            // is version 0 so any relay-reported version > 0 triggers OTA.
-            File.WriteAllText(LocalVersionPath, "0");
-        }
-
-        private IEnumerator CopyStreamingAsset(string srcUrl, string dstPath)
-        {
-            // On Android srcUrl looks like jar:file:///... — use UnityWebRequest.
-            // On other platforms it's a normal path; File.Copy is faster but
-            // UnityWebRequest works everywhere so we use it uniformly.
-            using var req = UnityEngine.Networking.UnityWebRequest.Get(srcUrl);
-            yield return req.SendWebRequest();
-            if (req.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
-            {
-                Debug.LogWarning($"[ModelUpdater] could not load bundled asset {srcUrl}: {req.error}");
-                yield break;
-            }
-            File.WriteAllBytes(dstPath, req.downloadHandler.data);
-        }
-
-        private IEnumerator TryLoadClassifier()
-        {
             yield return null;
-            if (!File.Exists(LocalOnnxPath) || !File.Exists(LocalLabelsPath))
+            LoadBundledClassifier();
+            if (enableOtaPolling)
+                StartCoroutine(VersionPollLoop());
+        }
+
+        private void LoadBundledClassifier()
+        {
+            var modelAsset = Resources.Load<ModelAsset>(resourcesModelPath);
+            if (modelAsset == null)
             {
-                Debug.LogWarning("[ModelUpdater] no local model — classifier disabled.");
-                yield break;
+                Debug.LogError($"[ModelUpdater] no ModelAsset at Resources/{resourcesModelPath}. " +
+                               "Did you place the .onnx under Assets/Resources/Models/?");
+                return;
             }
+
+            string[] classNames = LoadBundledLabels();
+            if (classNames == null || classNames.Length == 0)
+            {
+                Debug.LogError($"[ModelUpdater] no labels at Resources/{resourcesLabelsPath} — classifier disabled.");
+                return;
+            }
+
             try
             {
-                var bytes = File.ReadAllBytes(LocalOnnxPath);
-                var labels = LoadLabels(LocalLabelsPath);
-                var newClassifier = SentisClassifier.LoadFromBytes(bytes, labels);
                 if (_classifier is IDisposable old) old.Dispose();
-                _classifier = newClassifier;
-                if (File.Exists(LocalVersionPath) && int.TryParse(File.ReadAllText(LocalVersionPath), out int v))
-                    _localVersion = v;
-                Debug.Log($"[ModelUpdater] loaded classifier (version {_localVersion})");
+                _classifier = SentisClassifier.LoadFromModelAsset(modelAsset, classNames);
+                _localVersion = 0;   // bundled has no published version
+                Debug.Log($"[ModelUpdater] loaded bundled classifier (classes: {classNames.Length})");
             }
             catch (Exception e)
             {
@@ -121,11 +92,24 @@ namespace RFConnectorAR.Reference
             }
         }
 
+        private string[] LoadBundledLabels()
+        {
+            var ta = Resources.Load<TextAsset>(resourcesLabelsPath);
+            if (ta == null) return null;
+            try
+            {
+                var blob = JsonUtility.FromJson<RelayClient.LabelsBlob>(ta.text);
+                return blob?.class_names;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ModelUpdater] labels JSON parse failed: {e.Message}");
+                return null;
+            }
+        }
+
         private IEnumerator VersionPollLoop()
         {
-            // First check fires on launch (immediate); subsequent ones at the
-            // configured interval. Persistent so a long-lived session picks
-            // up nightly retrains automatically.
             while (true)
             {
                 yield return _client.GetVersion(OnVersionResponse);
@@ -140,46 +124,14 @@ namespace RFConnectorAR.Reference
                 Debug.LogWarning($"[ModelUpdater] version check failed: {err}");
                 return;
             }
-            if (remoteVersion <= _localVersion)
-                return;
-            Debug.Log($"[ModelUpdater] new model available: {_localVersion} -> {remoteVersion}");
-            StartCoroutine(DownloadAndSwap(remoteVersion));
-        }
+            if (remoteVersion <= _localVersion) return;
 
-        private IEnumerator DownloadAndSwap(int targetVersion)
-        {
-            string tmpOnnx = LocalOnnxPath + ".tmp";
-            string err = null;
-            yield return _client.DownloadOnnx(tmpOnnx, e => err = e);
-            if (err != null)
-            {
-                Debug.LogError($"[ModelUpdater] ONNX download failed: {err}");
-                yield break;
-            }
-
-            string[] labels = null;
-            yield return _client.DownloadLabels((arr, e) => { labels = arr; err = e; });
-            if (labels == null || labels.Length == 0)
-            {
-                Debug.LogError($"[ModelUpdater] labels download failed: {err}");
-                File.Delete(tmpOnnx);
-                yield break;
-            }
-
-            // Atomically replace local files.
-            File.Copy(tmpOnnx, LocalOnnxPath, overwrite: true);
-            File.Delete(tmpOnnx);
-            File.WriteAllText(LocalLabelsPath, "{\"class_names\":[\"" + string.Join("\",\"", labels) + "\"]}");
-            File.WriteAllText(LocalVersionPath, targetVersion.ToString());
-            _localVersion = targetVersion;
-
-            yield return TryLoadClassifier();
-        }
-
-        private static string[] LoadLabels(string path)
-        {
-            var blob = JsonUtility.FromJson<RelayClient.LabelsBlob>(File.ReadAllText(path));
-            return blob.class_names;
+            // OTA download path is deferred — see class docstring. For now,
+            // log the available version so we know the relay is reachable
+            // and the model has moved forward.
+            Debug.Log($"[ModelUpdater] relay reports newer model v{remoteVersion} " +
+                      $"(local v{_localVersion}). OTA load skipped (needs .sentis serving). " +
+                      "Rebuild the APK with the new bundled ONNX to pick it up.");
         }
 
         private void OnDestroy()

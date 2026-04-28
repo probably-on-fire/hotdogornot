@@ -1,30 +1,29 @@
 using System;
 using System.IO;
 // Sentis was rebranded to Inference Engine in com.unity.ai.inference 2.2.
-// The com.unity.sentis package is now a shim that depends on it.
-// The namespace + asmdef are both Unity.InferenceEngine; the API is the same.
+// The com.unity.sentis package is now a shim. Namespace + asmdef are
+// Unity.InferenceEngine; the API is the same as Sentis 2.x.
 using Unity.InferenceEngine;
 using UnityEngine;
 
 namespace RFConnectorAR.Perception
 {
     /// <summary>
-    /// Sentis-backed ResNet-18 classifier.
+    /// Inference Engine (formerly Sentis) ResNet-18 classifier.
     ///
-    /// Loads the ONNX model produced by <c>rfconnectorai.classifier.export_onnx</c>.
-    /// The exporter bakes ImageNet normalization into the graph, so we feed
-    /// raw [0, 1] float NCHW pixels and get logits back. Softmax is applied
-    /// in C# (cheap; one tensor) so the on-device caller gets calibrated
-    /// per-class probabilities.
+    /// The Inference Engine runtime can only load its own .sentis FlatBuffer
+    /// format — it can't parse raw .onnx at runtime. Two valid load paths:
     ///
-    /// Two construction paths:
-    ///   - <see cref="LoadFromBytes"/> — for OTA-downloaded weights buffered in memory
-    ///   - <see cref="LoadFromStreamingAssets"/> — for the bundled startup model
+    ///   - <see cref="LoadFromModelAsset"/> — preferred, used at startup
+    ///     when the model is bundled in Assets/Resources/ (Unity's editor
+    ///     ONNX importer converts to a ModelAsset at build time).
+    ///   - <see cref="LoadFromBytes"/> — used when OTA-downloading a
+    ///     pre-serialized .sentis file from the relay. NOT for raw ONNX.
     ///
-    /// Reload behavior: the class is created fresh per model version. The
-    /// caller (ModelUpdater) disposes the old instance and constructs a new
-    /// one when a newer model arrives — keeps lifecycle obvious vs. mutating
-    /// internal state.
+    /// The exporter on the Python side (export_onnx.py) bakes ImageNet
+    /// normalization into the graph, so we feed raw [0, 1] float NCHW
+    /// pixels and get logits back. Softmax is applied in C# to give the
+    /// caller calibrated probabilities.
     /// </summary>
     public sealed class SentisClassifier : IClassifier, IDisposable
     {
@@ -43,45 +42,39 @@ namespace RFConnectorAR.Perception
             _classNames = classNames;
             _inputShape = new TensorShape(1, Channels, InputSize, InputSize);
             // GPUCompute is great on phones with capable GPUs; CPU is the safe
-            // fallback. Sentis picks the best available backend automatically
-            // when we pass GPUCompute and falls back to CPU as needed.
+            // fallback. Inference Engine picks the best available backend
+            // automatically when we pass GPUCompute.
             _worker = new Worker(model, BackendType.GPUCompute);
         }
 
-        public static SentisClassifier LoadFromBytes(byte[] onnxBytes, string[] classNames)
+        /// <summary>
+        /// Load from a Unity-imported ModelAsset. The editor ONNX importer
+        /// produces these at build time when an .onnx file lives under
+        /// Assets/Resources/ (or any other discoverable folder).
+        /// </summary>
+        public static SentisClassifier LoadFromModelAsset(ModelAsset modelAsset, string[] classNames)
         {
-            if (onnxBytes == null || onnxBytes.Length == 0)
-                throw new ArgumentException("onnxBytes is empty", nameof(onnxBytes));
+            if (modelAsset == null) throw new ArgumentNullException(nameof(modelAsset));
             if (classNames == null || classNames.Length == 0)
                 throw new ArgumentException("classNames is empty", nameof(classNames));
-
-            using var ms = new MemoryStream(onnxBytes);
-            var model = ModelLoader.Load(ms);
+            var model = ModelLoader.Load(modelAsset);
             return new SentisClassifier(model, classNames);
         }
 
         /// <summary>
-        /// Load the ONNX file at <paramref name="streamingAssetsRelativePath"/>
-        /// (e.g. "model/connector_classifier.onnx"). On Android this is read
-        /// out of the APK; on iOS it's a regular file on disk.
+        /// Load from a serialized .sentis byte buffer (e.g. OTA-downloaded
+        /// from the relay). This format is produced by ModelWriter.Save —
+        /// raw ONNX bytes will NOT work here.
         /// </summary>
-        public static SentisClassifier LoadFromStreamingAssets(string streamingAssetsRelativePath, string[] classNames)
+        public static SentisClassifier LoadFromBytes(byte[] sentisBytes, string[] classNames)
         {
-            var path = Path.Combine(Application.streamingAssetsPath, streamingAssetsRelativePath);
-            byte[] bytes;
-            if (path.Contains("://"))
-            {
-                // Android: APK contents need UnityWebRequest. Caller should
-                // typically pre-stage StreamingAssets via the ModelUpdater
-                // (downloads to persistentDataPath) so this path stays
-                // synchronous. We fall back to File.ReadAllBytes if the URL
-                // happens to be a real file URL on iOS.
-                throw new InvalidOperationException(
-                    "On Android, copy StreamingAssets into persistentDataPath at " +
-                    "boot via UnityWebRequest, then call LoadFromBytes(...)");
-            }
-            bytes = File.ReadAllBytes(path);
-            return LoadFromBytes(bytes, classNames);
+            if (sentisBytes == null || sentisBytes.Length == 0)
+                throw new ArgumentException("sentisBytes is empty", nameof(sentisBytes));
+            if (classNames == null || classNames.Length == 0)
+                throw new ArgumentException("classNames is empty", nameof(classNames));
+            using var ms = new MemoryStream(sentisBytes);
+            var model = ModelLoader.Load(ms);
+            return new SentisClassifier(model, classNames);
         }
 
         public ClassificationResult Classify(Texture2D rgb)
@@ -89,13 +82,10 @@ namespace RFConnectorAR.Perception
             if (_disposed) throw new ObjectDisposedException(nameof(SentisClassifier));
             if (rgb == null) throw new ArgumentNullException(nameof(rgb));
 
-            // Center-crop on CPU into a square Texture2D, then let
+            // Center-crop on CPU to a square Texture2D, then let
             // InferenceEngine's TextureConverter do the resize + NCHW pack
-            // on the GPU. Way faster than per-pixel CPU loop and avoids any
-            // direct tensor indexing concerns (which can be backend-specific).
+            // on the GPU. Avoids per-element tensor indexing concerns.
             var square = CenterCropToSquare(rgb);
-            // ToTensor allocates a new Tensor<float> at the requested
-            // resolution and channel count, normalized to [0, 1].
             using var input = TextureConverter.ToTensor(
                 square, width: InputSize, height: InputSize, channels: 3);
             UnityEngine.Object.Destroy(square);
@@ -105,7 +95,6 @@ namespace RFConnectorAR.Perception
             if (logits == null)
                 throw new InvalidOperationException("model output was not Tensor<float>");
 
-            // GPU tensors need download-to-CPU before reading.
             using var cpuLogits = logits.ReadbackAndClone();
             var raw = cpuLogits.DownloadToArray();
             var probs = Softmax(raw);
