@@ -13,10 +13,16 @@ from rfconnectorai.data_fetch.video_frames import extract_frames
 
 def _make_test_video(path: Path, fps: int = 30, duration_sec: int = 2,
                      size: int = 64) -> None:
-    """Write a short synthetic video with a colour-changing solid background."""
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    """
+    Write a short synthetic video with a colour-changing solid background.
+
+    Uses XVID + .avi unconditionally because the headless OpenCV wheels
+    used in CI ship with XVID but not always mp4v. Test caller is
+    responsible for using a .avi-suffixed path.
+    """
+    fourcc = cv2.VideoWriter_fourcc(*"XVID")
     writer = cv2.VideoWriter(str(path), fourcc, fps, (size, size))
-    assert writer.isOpened(), f"could not open writer for {path}"
+    assert writer.isOpened(), f"could not open writer for {path} (XVID codec missing)"
     n_frames = fps * duration_sec
     for i in range(n_frames):
         # Fade red intensity over time so each frame is distinguishable.
@@ -26,7 +32,7 @@ def _make_test_video(path: Path, fps: int = 30, duration_sec: int = 2,
 
 
 def test_extracts_expected_count_at_2fps(tmp_path):
-    video = tmp_path / "clip.mp4"
+    video = tmp_path / "clip.avi"
     out_dir = tmp_path / "frames"
     _make_test_video(video, fps=30, duration_sec=2)  # 60 source frames
 
@@ -39,7 +45,7 @@ def test_extracts_expected_count_at_2fps(tmp_path):
 
 
 def test_max_frames_caps_output(tmp_path):
-    video = tmp_path / "clip.mp4"
+    video = tmp_path / "clip.avi"
     out_dir = tmp_path / "frames"
     _make_test_video(video, fps=30, duration_sec=4)
 
@@ -48,7 +54,7 @@ def test_max_frames_caps_output(tmp_path):
 
 
 def test_indexing_resumes_across_calls(tmp_path):
-    video = tmp_path / "clip.mp4"
+    video = tmp_path / "clip.avi"
     out_dir = tmp_path / "frames"
     _make_test_video(video, fps=30, duration_sec=1)
 
@@ -66,7 +72,7 @@ def test_missing_video_raises(tmp_path):
 
 
 def test_custom_prefix(tmp_path):
-    video = tmp_path / "clip.mp4"
+    video = tmp_path / "clip.avi"
     out_dir = tmp_path / "frames"
     _make_test_video(video, fps=30, duration_sec=1)
     saved = extract_frames(video, out_dir, fps_target=2.0, prefix="custom")
