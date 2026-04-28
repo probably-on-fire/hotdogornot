@@ -190,8 +190,18 @@ def train(config: TrainConfig) -> dict:
     metrics_blob = {"history": [asdict(m) for m in history]}
     metrics_path.write_text(json.dumps(metrics_blob, indent=2))
 
-    # Snapshot a versioned weights file + refresh the OTA manifest. The
-    # relay server reads manifest.json to advertise a new version to the app.
+    # Export ONNX alongside the .pt — the AR app loads ONNX via Sentis.
+    from rfconnectorai.classifier.export_onnx import export_to_onnx
+    onnx_path = config.out_dir / "weights.onnx"
+    try:
+        export_to_onnx(config.out_dir, onnx_path)
+    except Exception as e:
+        # Don't fail the whole train if ONNX export breaks; the .pt is still
+        # usable from Python and the next retrain can retry the export.
+        print(f"warning: ONNX export failed: {e}")
+
+    # Snapshot versioned files + refresh the OTA manifest. Relay reads
+    # manifest.json to advertise a new version to the app.
     from rfconnectorai.classifier.versioning import bump_version
     final_val_acc = history[-1].val_acc if history else None
     bump_version(

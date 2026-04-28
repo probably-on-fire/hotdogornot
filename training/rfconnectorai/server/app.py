@@ -120,11 +120,14 @@ def create_app(config: dict | None = None) -> FastAPI:
         return {
             "version": int(manifest.get("version", 0)),
             "weights_filename": manifest.get("weights_filename"),
+            "weights_onnx_filename": manifest.get("weights_onnx_filename"),
             "labels_filename": manifest.get("labels_filename", LABELS_FILENAME),
             "weights_sha256": manifest.get("weights_sha256"),
+            "weights_onnx_sha256": manifest.get("weights_onnx_sha256"),
             "labels_sha256": manifest.get("labels_sha256"),
             "trained_at": manifest.get("trained_at"),
             "weights_url": "/model/weights",
+            "weights_onnx_url": "/model/weights.onnx",
             "labels_url": "/model/labels",
         }
 
@@ -134,6 +137,22 @@ def create_app(config: dict | None = None) -> FastAPI:
         if manifest is None:
             raise HTTPException(status_code=404, detail="no model published yet")
         weights = model_dir / manifest["weights_filename"]
+        if not weights.exists():
+            raise HTTPException(status_code=500,
+                                detail=f"manifest references missing file {weights.name}")
+        return FileResponse(
+            weights,
+            media_type="application/octet-stream",
+            filename=weights.name,
+        )
+
+    @app.get("/model/weights.onnx")
+    def get_model_weights_onnx(_: str = Depends(require_token)):
+        """ONNX-format weights for the AR app's Sentis runtime."""
+        manifest = _read_manifest()
+        if manifest is None or not manifest.get("weights_onnx_filename"):
+            raise HTTPException(status_code=404, detail="no ONNX model published yet")
+        weights = model_dir / manifest["weights_onnx_filename"]
         if not weights.exists():
             raise HTTPException(status_code=500,
                                 detail=f"manifest references missing file {weights.name}")

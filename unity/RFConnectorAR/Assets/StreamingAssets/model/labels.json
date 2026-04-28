@@ -1,0 +1,26 @@
+{
+  "class_names": [
+    "SMA-M",
+    "SMA-F",
+    "3.5mm-M",
+    "3.5mm-F",
+    "2.92mm-M",
+    "2.92mm-F",
+    "2.4mm-M",
+    "2.4mm-F"
+  ],
+  "input_size": 224,
+  "architecture": "resnet18",
+  "n_train_samples": 388,
+  "n_val_samples": 97,
+  "class_counts": {
+    "SMA-M": 61,
+    "SMA-F": 60,
+    "3.5mm-M": 60,
+    "3.5mm-F": 60,
+    "2.92mm-M": 60,
+    "2.92mm-F": 55,
+    "2.4mm-M": 69,
+    "2.4mm-F": 60
+  }
+}

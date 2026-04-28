@@ -37,3 +37,11 @@ Thumbs.db
 # Test runner output
 test-results.xml
 test-run.log
+
+# Bundled model weights — regenerated from training/ via:
+#   python -m rfconnectorai.classifier.export_onnx \
+#       --model-dir models/connector_classifier \
+#       --output ../../unity/RFConnectorAR/Assets/StreamingAssets/model/connector_classifier.onnx
+# 40+ MB — too big to track. labels.json is small enough to commit.
+Assets/StreamingAssets/model/*.onnx
+Assets/StreamingAssets/model/*.onnx.meta

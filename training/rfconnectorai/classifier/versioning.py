@@ -93,17 +93,29 @@ def bump_version(
     shutil.copyfile(weights_path, versioned)
 
     # Repoint "latest". On Windows we can't rely on real symlinks without
-    # admin rights; just copy to keep the deploy path simple. (The versioned
-    # file is the canonical artifact; "latest" is a convenience pointer.)
+    # admin rights; just copy to keep the deploy path simple.
     latest = model_dir / LATEST_WEIGHTS
     if latest.exists():
         latest.unlink()
     shutil.copyfile(versioned, latest)
 
+    # Snapshot ONNX too if it exists — the AR app loads ONNX via Sentis.
+    onnx_src = model_dir / "weights.onnx"
+    onnx_versioned: Path | None = None
+    onnx_latest: Path | None = None
+    if onnx_src.exists():
+        onnx_versioned = model_dir / f"weights.{new_version:04d}.onnx"
+        shutil.copyfile(onnx_src, onnx_versioned)
+        onnx_latest = model_dir / "weights.latest.onnx"
+        if onnx_latest.exists():
+            onnx_latest.unlink()
+        shutil.copyfile(onnx_versioned, onnx_latest)
+
     version_blob = {
         "version": new_version,
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "weights_filename": versioned.name,
+        "weights_onnx_filename": onnx_versioned.name if onnx_versioned else None,
         "n_train_samples": n_train_samples,
         "val_acc": val_acc,
     }
@@ -112,8 +124,10 @@ def bump_version(
     manifest = {
         "version": new_version,
         "weights_filename": versioned.name,
+        "weights_onnx_filename": onnx_versioned.name if onnx_versioned else None,
         "labels_filename": LABELS_FILENAME,
         "weights_sha256": _sha256(versioned),
+        "weights_onnx_sha256": _sha256(onnx_versioned) if onnx_versioned else None,
         "labels_sha256": _sha256(model_dir / LABELS_FILENAME),
         "trained_at": version_blob["trained_at"],
     }
