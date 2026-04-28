@@ -2,6 +2,9 @@
 Description=RF Connector AI relay (uvicorn FastAPI)
 After=network-online.target
 Wants=network-online.target
+# Prevent crash-loop: max 5 restarts in 60s, otherwise leave service in failed.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=exec
@@ -19,9 +22,6 @@ ExecStart=/opt/rfcai/training/.venv/bin/uvicorn \
     --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=3
-# Prevent the service from running if it crashes-loops in <30s repeatedly.
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 # Hardening
 NoNewPrivileges=yes

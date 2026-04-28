@@ -2,6 +2,9 @@
 Description=RF Connector AI ingestion daemon
 After=network-online.target
 Wants=network-online.target
+# Prevent crash-loop: max 5 restarts in 60s, otherwise leave service in failed.
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=exec
@@ -17,8 +20,6 @@ ExecStart=/opt/rfcai/training/.venv/bin/python -m scripts.ingestion_daemon \
     --interval 5
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=5
 
 NoNewPrivileges=yes
 ProtectSystem=strict

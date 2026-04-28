@@ -32,6 +32,10 @@ runs/
 test_*.png
 test_*.jpg
 
+# Throwaway one-shot deploy helpers (anything prefixed with underscore
+# in scripts/ is local-only by convention).
+scripts/_*.py
+
 # Environment
 .env
 .env.local
