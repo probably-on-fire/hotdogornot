@@ -13,7 +13,7 @@ EnvironmentFile=/etc/default/rfcai-relay
 ExecStart=/opt/rfcai/training/.venv/bin/uvicorn \
     rfconnectorai.server.app:app \
     --host 127.0.0.1 \
-    --port 8000 \
+    --port ${RFCAI_RELAY_PORT} \
     --workers 2 \
     --proxy-headers \
     --forwarded-allow-ips=127.0.0.1
