@@ -5,7 +5,7 @@
         "Unity.XR.ARFoundation",
         "Unity.XR.ARSubsystems",
         "Unity.XR.CoreUtils",
-        "Unity.Sentis"
+        "Unity.InferenceEngine"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

@@ -1,6 +1,9 @@
 using System;
 using System.IO;
-using Unity.Sentis;
+// Sentis was rebranded to Inference Engine in com.unity.ai.inference 2.2.
+// The com.unity.sentis package is now a shim that depends on it.
+// The namespace + asmdef are both Unity.InferenceEngine; the API is the same.
+using Unity.InferenceEngine;
 using UnityEngine;
 
 namespace RFConnectorAR.Perception
@@ -86,17 +89,23 @@ namespace RFConnectorAR.Perception
             if (_disposed) throw new ObjectDisposedException(nameof(SentisClassifier));
             if (rgb == null) throw new ArgumentNullException(nameof(rgb));
 
-            // Resize + center-crop to 224×224 in CPU. For prod we'd do this on
-            // GPU (RenderTexture + Graphics.Blit) to avoid the readback; for
-            // the first build the synchronous CPU path is simpler and correct.
-            using var input = TextureToTensor(rgb);
+            // Center-crop on CPU into a square Texture2D, then let
+            // InferenceEngine's TextureConverter do the resize + NCHW pack
+            // on the GPU. Way faster than per-pixel CPU loop and avoids any
+            // direct tensor indexing concerns (which can be backend-specific).
+            var square = CenterCropToSquare(rgb);
+            // ToTensor allocates a new Tensor<float> at the requested
+            // resolution and channel count, normalized to [0, 1].
+            using var input = TextureConverter.ToTensor(
+                square, width: InputSize, height: InputSize, channels: 3);
+            UnityEngine.Object.Destroy(square);
 
             _worker.Schedule(input);
             using var logits = _worker.PeekOutput() as Tensor<float>;
             if (logits == null)
                 throw new InvalidOperationException("model output was not Tensor<float>");
 
-            // Sentis tensors live on GPU by default; download to CPU before reading.
+            // GPU tensors need download-to-CPU before reading.
             using var cpuLogits = logits.ReadbackAndClone();
             var raw = cpuLogits.DownloadToArray();
             var probs = Softmax(raw);
@@ -107,9 +116,8 @@ namespace RFConnectorAR.Perception
             return new ClassificationResult(top, name, probs[top], probs);
         }
 
-        private Tensor<float> TextureToTensor(Texture2D src)
+        private static Texture2D CenterCropToSquare(Texture2D src)
         {
-            // Center-crop the source to a square, then resize to InputSize.
             int side = Mathf.Min(src.width, src.height);
             int cropX = (src.width - side) / 2;
             int cropY = (src.height - side) / 2;
@@ -117,37 +125,7 @@ namespace RFConnectorAR.Perception
             var square = new Texture2D(side, side, TextureFormat.RGB24, false);
             square.SetPixels(pixels);
             square.Apply();
-
-            // Now resample to InputSize × InputSize via RenderTexture.
-            var rt = RenderTexture.GetTemporary(InputSize, InputSize, 0, RenderTextureFormat.ARGB32);
-            Graphics.Blit(square, rt);
-            var resized = new Texture2D(InputSize, InputSize, TextureFormat.RGB24, false);
-            var prev = RenderTexture.active;
-            RenderTexture.active = rt;
-            resized.ReadPixels(new Rect(0, 0, InputSize, InputSize), 0, 0);
-            resized.Apply();
-            RenderTexture.active = prev;
-            RenderTexture.ReleaseTemporary(rt);
-
-            // Pack into NCHW [1, 3, H, W] in [0, 1]. Normalization is baked
-            // into the ONNX graph so we don't apply mean/std here.
-            var tensor = new Tensor<float>(_inputShape);
-            var px = resized.GetPixels32();
-            for (int y = 0; y < InputSize; y++)
-            {
-                for (int x = 0; x < InputSize; x++)
-                {
-                    var p = px[(InputSize - 1 - y) * InputSize + x]; // flip Y for image-coord origin
-                    tensor[0, 0, y, x] = p.r / 255f;
-                    tensor[0, 1, y, x] = p.g / 255f;
-                    tensor[0, 2, y, x] = p.b / 255f;
-                }
-            }
-
-            // Cleanup intermediates.
-            UnityEngine.Object.Destroy(square);
-            UnityEngine.Object.Destroy(resized);
-            return tensor;
+            return square;
         }
 
         private static float[] Softmax(float[] logits)
