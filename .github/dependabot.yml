@@ -1,0 +1,51 @@
+version: 2
+
+updates:
+  # Python dependencies in training/
+  - package-ecosystem: pip
+    directory: /training
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Denver
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    # Group small patch/minor updates so we get one PR per week instead
+    # of a swarm. Major updates still come as individual PRs since they
+    # often need code changes.
+    groups:
+      patch-and-minor:
+        patterns:
+          - "*"
+        update-types:
+          - patch
+          - minor
+    # Don't auto-bump these; they're load-bearing and need careful review:
+    ignore:
+      - dependency-name: torch
+        update-types:
+          - version-update:semver-major
+      - dependency-name: torchvision
+        update-types:
+          - version-update:semver-major
+      - dependency-name: bpy
+        # bpy releases align with Blender LTS — never autobump
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+
+  # GitHub Actions used in our workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+      day: monday
+      time: "09:00"
+      timezone: America/Denver
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions

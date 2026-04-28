@@ -1,0 +1,131 @@
+name: release
+
+# Triggered by version tags like v1.0.0 / v1.2.3-rc1.
+# Creates a GitHub Release containing the model artifacts that were
+# checked into models/connector_classifier/ as of that tag.
+#
+# Release flow on the training machine:
+#
+#   1. confirm models/connector_classifier/ has the weights you want shipped
+#   2. git tag -a v1.0.0 -m "Production model v1 — trained on N samples"
+#   3. git push origin v1.0.0
+#
+# This workflow then bundles weights.latest.pt + labels.json + manifest.json
+# + version.json into a tarball, attaches it as a Release asset, and
+# generates release notes from the manifest's training metadata.
+#
+# Why bother (we already serve the model via the relay): the Release page
+# is the rollback target. If a bad model ships and the relay's model dir
+# gets wiped, you can pull the last known-good asset from the GitHub Release
+# instead of retraining.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (workflow_dispatch only)'
+        required: true
+
+permissions:
+  contents: write   # needed to create the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history so generated release notes can list commits
+          # since the previous tag.
+          fetch-depth: 0
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify model artifacts exist
+        run: |
+          MODEL_DIR=training/models/connector_classifier
+          if [ ! -f "$MODEL_DIR/manifest.json" ]; then
+            echo "::error::no $MODEL_DIR/manifest.json at this tag — nothing to release"
+            echo "(expected the training machine to have committed model artifacts)"
+            exit 1
+          fi
+          ls -la $MODEL_DIR
+
+      - name: Bundle model artifacts
+        id: bundle
+        run: |
+          MODEL_DIR=training/models/connector_classifier
+          STAGE=staging
+          mkdir -p $STAGE
+          # Copy only what the AR app actually needs — manifest, labels,
+          # weights pointed at by manifest.weights_filename. Skip historical
+          # weights.NNNN.pt snapshots; keep the bundle small.
+          cp $MODEL_DIR/manifest.json $STAGE/
+          cp $MODEL_DIR/labels.json $STAGE/
+          cp $MODEL_DIR/version.json $STAGE/
+          WEIGHTS=$(python3 -c "import json; print(json.load(open('$MODEL_DIR/manifest.json'))['weights_filename'])")
+          cp "$MODEL_DIR/$WEIGHTS" $STAGE/
+          # Also include weights.latest.pt as a symlink-equivalent copy so
+          # the rollback CLI can pull it directly.
+          if [ -f "$MODEL_DIR/weights.latest.pt" ]; then
+            cp $MODEL_DIR/weights.latest.pt $STAGE/
+          fi
+          tar -czf model-${{ steps.tag.outputs.name }}.tar.gz -C $STAGE .
+          ls -la model-${{ steps.tag.outputs.name }}.tar.gz
+          echo "weights=$WEIGHTS" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes from manifest
+        id: notes
+        run: |
+          MANIFEST=training/models/connector_classifier/manifest.json
+          VERSION_JSON=training/models/connector_classifier/version.json
+          NOTES=release-notes.md
+          {
+            echo "## Model release ${{ steps.tag.outputs.name }}"
+            echo ""
+            echo "Bundled artifacts:"
+            echo "- weights: \`${{ steps.bundle.outputs.weights }}\`"
+            echo "- labels.json"
+            echo "- manifest.json"
+            echo "- version.json"
+            echo ""
+            echo "### Training metadata"
+            echo ""
+            python3 -c "
+            import json
+            v = json.load(open('$VERSION_JSON'))
+            print(f'- Internal model version: **{v.get(\"version\", \"?\")}**')
+            print(f'- Trained at: {v.get(\"trained_at\", \"?\")}')
+            print(f'- Training samples: {v.get(\"n_train_samples\", \"?\")}')
+            print(f'- Validation accuracy: {v.get(\"val_acc\", \"?\")}')
+            "
+            echo ""
+            echo "### Manifest hashes"
+            echo ""
+            echo '```json'
+            cat $MANIFEST
+            echo '```'
+          } > $NOTES
+          cat $NOTES
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: Model ${{ steps.tag.outputs.name }}
+          body_path: release-notes.md
+          files: |
+            model-${{ steps.tag.outputs.name }}.tar.gz
+          fail_on_unmatched_files: true
