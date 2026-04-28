@@ -73,10 +73,15 @@ jobs:
 
       - name: Run pytest
         id: pytest
+        # pipefail is required so the pipe's exit status reflects pytest's
+        # exit status, not tee's. Without it, "tee | pipefail" always
+        # returns 0 and the workflow falsely reports success.
+        shell: bash
         run: |
+          set -eo pipefail
           set +e
           pytest tests/ -v --tb=long 2>&1 | tee pytest.log
-          EXIT=$?
+          EXIT=${PIPESTATUS[0]}
           # Stash output in the GHA step summary (publicly viewable on the run page)
           {
             echo "## pytest output (last 200 lines)"
