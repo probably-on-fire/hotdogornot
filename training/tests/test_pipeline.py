@@ -2,6 +2,9 @@ from pathlib import Path
 
 import pytest
 
+# Legacy bpy-based pipeline; skip cleanly when bpy isn't installed (CI).
+pytest.importorskip("bpy")
+
 
 @pytest.mark.slow
 def test_render_class_with_cube_fixture(tmp_path: Path):

@@ -2,6 +2,11 @@ from pathlib import Path
 
 import pytest
 
+# The Blender-based renderer requires bpy. We've moved to PIL + pyrender
+# for active synthetic generation, but these tests still exist for the
+# legacy bpy path; skip them cleanly when bpy isn't installed (e.g. CI).
+pytest.importorskip("bpy")
+
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

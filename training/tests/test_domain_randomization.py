@@ -2,6 +2,9 @@ from pathlib import Path
 
 import pytest
 
+# Legacy bpy-based renderer; skip cleanly when bpy isn't installed (CI).
+pytest.importorskip("bpy")
+
 
 @pytest.mark.slow
 def test_domain_randomization_with_no_hdri_dir_still_renders(tmp_path: Path):
