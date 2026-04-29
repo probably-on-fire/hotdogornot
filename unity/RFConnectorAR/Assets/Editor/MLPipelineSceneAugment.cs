@@ -8,6 +8,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
+using UnityEngine.XR.ARFoundation;
 
 namespace RFConnectorAR.EditorTools
 {
@@ -58,6 +59,8 @@ namespace RFConnectorAR.EditorTools
             if (oldPanel != null) Object.DestroyImmediate(oldPanel.gameObject);
             var oldRoot = canvas.transform.Find("MLPipelineUI");
             if (oldRoot != null) Object.DestroyImmediate(oldRoot.gameObject);
+            var oldBoot = canvas.transform.Find("ARBootstrapOverlay");
+            if (oldBoot != null) Object.DestroyImmediate(oldBoot.gameObject);
 
             // ---- MLPipeline GameObject (services) -----------------------
             var pipelineGo = GameObject.Find("MLPipeline");
@@ -70,6 +73,13 @@ namespace RFConnectorAR.EditorTools
             var loop = pipelineGo.GetComponent<ClassifierLoop>() ?? pipelineGo.AddComponent<ClassifierLoop>();
             var videoCapture = pipelineGo.GetComponent<VideoCapture>() ?? pipelineGo.AddComponent<VideoCapture>();
             SerializeFieldRef(videoCapture, "cameraSource", cameraSource);
+
+            // ---- ARBootstrapper — handles ARCore install + perms -------
+            var arSession = Object.FindFirstObjectByType<ARSession>();
+            if (arSession == null)
+                Debug.LogWarning("[MLPipelineSceneAugment] no ARSession in scene — ARBootstrapper will be inert");
+            var bootstrapper = pipelineGo.GetComponent<ARBootstrapper>() ?? pipelineGo.AddComponent<ARBootstrapper>();
+            if (arSession != null) SerializeFieldRef(bootstrapper, "session", arSession);
 
             // ---- Build the tabbed UI hierarchy --------------------------
             var rootGo = new GameObject("MLPipelineUI", typeof(RectTransform));
@@ -118,6 +128,22 @@ namespace RFConnectorAR.EditorTools
             SerializeFieldRef(loop, "cameraSource", cameraSource);
             SerializeFieldRef(loop, "modelUpdater", modelUpdater);
             SerializeFieldRef(loop, "scanPanel", scanComp);
+
+            // ---- Bootstrap overlay (full-screen, dismissed when AR ready)
+            var bootOverlay = NewUiNode("ARBootstrapOverlay", canvas.transform,
+                Vector2.zero, Vector2.one);
+            bootOverlay.AddComponent<Image>().color = new Color(0, 0, 0, 0.9f);
+            var bootStatus = AddText(bootOverlay.transform, "Initializing AR...", 24);
+            bootStatus.color = Color.white;
+            bootStatus.alignment = TextAnchor.MiddleCenter;
+            var bootRt = bootStatus.GetComponent<RectTransform>();
+            bootRt.anchorMin = new Vector2(0.05f, 0.45f);
+            bootRt.anchorMax = new Vector2(0.95f, 0.55f);
+            bootRt.offsetMin = bootRt.offsetMax = Vector2.zero;
+            // Ensure overlay sits on TOP of the tabbed UI
+            bootOverlay.transform.SetAsLastSibling();
+            SerializeFieldRef(bootstrapper, "overlayRoot", bootOverlay);
+            SerializeFieldRef(bootstrapper, "statusText", bootStatus);
 
             EditorSceneManager.MarkSceneDirty(scene);
             EditorSceneManager.SaveScene(scene);
