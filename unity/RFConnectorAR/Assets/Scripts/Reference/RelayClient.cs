@@ -112,19 +112,40 @@ namespace RFConnectorAR.Reference
         }
 
         /// <summary>
-        /// POST /uploads — submits a JPEG-encoded frame with the user's
-        /// claimed class. Used by the inline-correction flow.
+        /// POST /uploads — single-frame variant. Used by the inline-
+        /// correction snapshot flow.
         /// </summary>
         public IEnumerator UploadFrame(byte[] jpegBytes, string claimedClass, string captureReason,
                                        Action<string, string> onResult)
         {
+            return UploadFrames(new[] { jpegBytes }, claimedClass, captureReason, onResult);
+        }
+
+        /// <summary>
+        /// POST /uploads — multi-frame variant. Submits N JPEG frames in
+        /// one multipart request. The relay's /uploads endpoint accepts up
+        /// to 200 frames per upload (the daemon then runs the ensemble
+        /// averager across all frames before deciding approve/quarantine).
+        /// </summary>
+        public IEnumerator UploadFrames(byte[][] frames, string claimedClass, string captureReason,
+                                        Action<string, string> onResult)
+        {
+            if (frames == null || frames.Length == 0)
+            {
+                onResult?.Invoke(null, "no frames to upload");
+                yield break;
+            }
             var form = new List<IMultipartFormSection>
             {
                 new MultipartFormDataSection("claimed_class", claimedClass),
                 new MultipartFormDataSection("device_id", DeviceId),
                 new MultipartFormDataSection("capture_reason", captureReason),
-                new MultipartFormFileSection("frames", jpegBytes, "frame.jpg", "image/jpeg"),
             };
+            for (int i = 0; i < frames.Length; i++)
+            {
+                form.Add(new MultipartFormFileSection(
+                    "frames", frames[i], $"frame_{i:D3}.jpg", "image/jpeg"));
+            }
             using var req = UnityWebRequest.Post($"{BaseUrl}/uploads", form);
             req.SetRequestHeader("X-Device-Token", DeviceToken);
             yield return req.SendWebRequest();

@@ -8,7 +8,7 @@ namespace RFConnectorAR.Perception
     /// <summary>
     /// Drives per-frame classifier inference. Pulls the latest AR camera
     /// frame, runs the active SentisClassifier, pushes the result to the
-    /// inline-correction UI (which decides whether to surface a banner).
+    /// Scan panel (which renders class + confidence overlay).
     ///
     /// Throttled to a target FPS so we don't run inference every frame —
     /// a phone CPU/GPU appreciates the breathing room and the user doesn't
@@ -19,7 +19,7 @@ namespace RFConnectorAR.Perception
         [Header("Inputs")]
         [SerializeField] private CameraFrameSource cameraSource;
         [SerializeField] private ModelUpdater modelUpdater;
-        [SerializeField] private InlineCorrectionPanel correctionPanel;
+        [SerializeField] private ScanPanel scanPanel;
 
         [Header("Behavior")]
         [Tooltip("Inference target rate (Hz). 4-6 Hz is plenty for live guidance.")]
@@ -39,7 +39,7 @@ namespace RFConnectorAR.Perception
             _lastInferenceAt = Time.time;
 
             var result = classifier.Classify(cameraSource.LatestRgb);
-            if (correctionPanel != null) correctionPanel.NotifyClassification(result);
+            if (scanPanel != null) scanPanel.NotifyClassification(result);
         }
     }
 }
