@@ -34,6 +34,68 @@ class CropResult:
     area_px: int
 
 
+def detect_connector_crops_hough(
+    frame_bgr: np.ndarray,
+    min_radius_frac: float = 0.04,
+    max_radius_frac: float = 0.25,
+    pad_frac: float = 0.6,
+    max_crops: int = 4,
+    accumulator_threshold: int = 35,
+) -> list[CropResult]:
+    """
+    Find connectors by Hough circle detection. RF connector mating faces
+    are explicitly circular, so looking for circles beats edge-density
+    heuristics on textured backgrounds (wood grain has linear/random edges,
+    not circular ones).
+
+    pad_frac defaults to 0.6 — wider than the edge-density detector's 0.35
+    so the crop shows the coupling nut and a bit of context around the
+    mating face, not just a tight crop of the face itself.
+    """
+    h, w = frame_bgr.shape[:2]
+    short_side = min(h, w)
+
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.medianBlur(gray, 7)
+
+    min_r = max(8, int(short_side * min_radius_frac))
+    max_r = max(min_r + 1, int(short_side * max_radius_frac))
+
+    circles = cv2.HoughCircles(
+        gray, cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=max_r,            # don't double-count overlapping circles
+        param1=80,                # upper Canny edge threshold
+        param2=accumulator_threshold,  # center-vote threshold; lower = more circles
+        minRadius=min_r,
+        maxRadius=max_r,
+    )
+    if circles is None:
+        return []
+
+    # circles shape: (1, N, 3) — (x, y, r). Sort by accumulator strength
+    # (HoughCircles returns strongest first already).
+    circles = circles[0]
+    candidates: list[CropResult] = []
+    for cx, cy, r in circles[:max_crops]:
+        cx, cy, r = int(round(cx)), int(round(cy)), int(round(r))
+        side = int(2 * r * (1 + 2 * pad_frac))
+        x0 = max(0, cx - side // 2)
+        y0 = max(0, cy - side // 2)
+        x1 = min(w, x0 + side)
+        y1 = min(h, y0 + side)
+        if x1 - x0 < side: x0 = max(0, x1 - side)
+        if y1 - y0 < side: y0 = max(0, y1 - side)
+        crop = frame_bgr[y0:y1, x0:x1].copy()
+        candidates.append(CropResult(
+            crop=crop,
+            bbox=(cx - r, cy - r, 2 * r, 2 * r),
+            center=(cx, cy),
+            area_px=int(np.pi * r * r),
+        ))
+    return candidates
+
+
 def detect_connector_crops(
     frame_bgr: np.ndarray,
     min_area_frac: float = 0.0005,
