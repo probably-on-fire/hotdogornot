@@ -3,19 +3,21 @@ Phone-friendly capture demo for the pitch.
 
 Workflow on a phone browser:
   1. Tap "Take photo" → mobile camera opens
-  2. Snap a connector → ensemble prediction shown immediately
-  3. Either tap "✓ correct" (auto-submits with predicted class)
-     or pick the correct class manually (submits with corrected class)
-  4. Image goes to the relay's /rfcai/uploads endpoint, kicks off the
-     continuous-learning loop just like the AR app would.
+  2. Snap a connector → image POSTs to /rfcai/predict, gets back per-detection
+     class + confidence + bbox; rendered with bounding boxes overlaid.
+  3. Either tap "✓ correct" (submits to /rfcai/uploads with the predicted
+     class) or pick the correct class manually (submits with correction)
+  4. Either way, the image enters the continuous-learning loop.
+
+Two endpoints are used:
+  - POST /rfcai/predict — detect+crop+classify per frame (live inference)
+  - POST /rfcai/uploads — store labeled training data (active learning)
 
 This page is the closest thing to the eventual AR app inline-correction
-UX without writing any Unity. It exercises the full backend loop end to
-end — relay → sync → daemon → labeled folder → eventual retrain.
+UX without writing any Unity.
 
 Auth note: the device token is read from RFCAI_DEVICE_TOKEN env var. The
-demo URL itself should be behind nginx basic auth so random visitors
-can't poison the training set.
+demo URL itself should be behind nginx basic auth.
 """
 
 from __future__ import annotations
@@ -28,8 +30,6 @@ import cv2
 import numpy as np
 import requests
 import streamlit as st
-
-from rfconnectorai.ensemble import EnsemblePredictor
 
 
 REPO_TRAINING = Path(__file__).resolve().parents[2]
@@ -46,14 +46,26 @@ RELAY_URL = os.environ.get("RFCAI_RELAY_URL", "https://aired.com/rfcai")
 DEVICE_TOKEN = os.environ.get("RFCAI_DEVICE_TOKEN", "")
 
 
-@st.cache_resource(show_spinner=False)
-def _load_predictor() -> EnsemblePredictor:
-    classifier_dir = DEFAULT_MODEL_DIR if (DEFAULT_MODEL_DIR / "weights.pt").exists() else None
-    return EnsemblePredictor.load(classifier_dir) if classifier_dir else EnsemblePredictor(classifier=None)
+def _predict_via_relay(image_bytes: bytes) -> tuple[dict | None, str]:
+    """POST the image to /rfcai/predict. Returns (response_dict, error_msg)."""
+    if not DEVICE_TOKEN:
+        return None, "RFCAI_DEVICE_TOKEN not configured on the demo server"
+    try:
+        resp = requests.post(
+            f"{RELAY_URL}/predict",
+            headers={"X-Device-Token": DEVICE_TOKEN},
+            files=[("image", ("capture.jpg", image_bytes, "image/jpeg"))],
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return resp.json(), None
+        return None, f"Relay returned {resp.status_code}: {resp.text[:200]}"
+    except requests.RequestException as e:
+        return None, f"Network error: {e}"
 
 
 def _submit_to_relay(image_bytes: bytes, claimed_class: str, capture_reason: str) -> tuple[bool, str]:
-    """POST the image to the relay. Returns (ok, message_for_user)."""
+    """POST the image to /rfcai/uploads. Returns (ok, message_for_user)."""
     if not DEVICE_TOKEN:
         return False, "RFCAI_DEVICE_TOKEN not configured on the demo server"
     try:
@@ -74,6 +86,32 @@ def _submit_to_relay(image_bytes: bytes, claimed_class: str, capture_reason: str
         return False, f"Relay returned {resp.status_code}: {resp.text[:200]}"
     except requests.RequestException as e:
         return False, f"Network error: {e}"
+
+
+def _draw_bboxes(image_bytes: bytes, predict_response: dict) -> bytes:
+    """Render bounding boxes + class labels on the original image."""
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if bgr is None: return image_bytes
+    for p in predict_response.get("predictions", []):
+        b = p["bbox"]
+        x, y, w, h = b["x"], b["y"], b["w"], b["h"]
+        # Pad the bbox visualization a bit since the detector returns the
+        # tight contour box; the actual classifier saw a padded crop.
+        pad = int(max(w, h) * 0.4)
+        x0, y0 = max(0, x - pad), max(0, y - pad)
+        x1 = min(bgr.shape[1], x + w + pad)
+        y1 = min(bgr.shape[0], y + h + pad)
+        color = (0, 200, 50)  # green BGR
+        cv2.rectangle(bgr, (x0, y0), (x1, y1), color, 4)
+        label = f"{p['class_name']} {p['confidence']:.0%}"
+        # Label background + text
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+        cv2.rectangle(bgr, (x0, y0 - th - 12), (x0 + tw + 8, y0), color, -1)
+        cv2.putText(bgr, label, (x0 + 4, y0 - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return buf.tobytes() if ok else image_bytes
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +139,8 @@ st.caption(
 # without re-snapping.
 if "capture_bytes" not in st.session_state:
     st.session_state.capture_bytes = None
-    st.session_state.prediction = None
+    st.session_state.predict_response = None
+    st.session_state.predict_error = None
 
 img_input = st.camera_input(
     "Take photo (or upload)",
@@ -117,46 +156,44 @@ if img_input is None:
 
 if img_input is not None:
     raw = img_input.getvalue()
-    # Only re-run prediction when the bytes actually change.
     if st.session_state.capture_bytes != raw:
         st.session_state.capture_bytes = raw
-        nparr = np.frombuffer(raw, np.uint8)
-        bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if bgr is None:
-            st.error("Couldn't decode that image.")
-            st.session_state.prediction = None
+        with st.spinner("Sending to /rfcai/predict…"):
+            resp, err = _predict_via_relay(raw)
+        st.session_state.predict_response = resp
+        st.session_state.predict_error = err
+
+if st.session_state.capture_bytes is not None:
+    if st.session_state.predict_error:
+        st.error(f"Prediction failed: {st.session_state.predict_error}")
+        st.image(st.session_state.capture_bytes, caption="captured", use_container_width=True)
+    elif st.session_state.predict_response is not None:
+        resp = st.session_state.predict_response
+        n = len(resp.get("predictions", []))
+        if n == 0:
+            st.warning("No connector detected in the image. Try a clearer mating-face photo.")
+            st.image(st.session_state.capture_bytes, caption="captured", use_container_width=True)
         else:
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            with st.spinner("Predicting…"):
-                predictor = _load_predictor()
-                st.session_state.prediction = predictor.predict(rgb)
+            # Render bounding boxes + class labels on the image
+            annotated = _draw_bboxes(st.session_state.capture_bytes, resp)
+            st.image(annotated, caption=f"{n} detection(s) over {resp['image_width']}x{resp['image_height']}", use_container_width=True)
+            st.markdown("### Detections")
+            for i, p in enumerate(resp["predictions"]):
+                cn = p["class_name"]
+                cf = p["confidence"]
+                bar = "█" * int(cf * 20)
+                st.write(f"**{i+1}.** `{cn}` — {cf:.0%}  {bar}")
 
-if st.session_state.capture_bytes is not None and st.session_state.prediction is not None:
-    pred = st.session_state.prediction
-
-    if pred.class_name == "Unknown":
-        st.warning(
-            "Couldn't identify the connector. Try a clearer photo of the "
-            "mating face, perpendicular to the camera."
-        )
+    if (st.session_state.predict_response is not None
+            and len(st.session_state.predict_response.get("predictions", [])) > 0):
+        pred_class = st.session_state.predict_response["predictions"][0]["class_name"]
     else:
-        agree = pred.agreement
-        confidence_label = f"{pred.confidence:.0%}"
-        if agree == "agree":
-            st.success(f"**{pred.class_name}**  ({confidence_label} — measurement + classifier agree)")
-        elif agree == "disagree":
-            st.warning(f"**{pred.class_name}**  ({confidence_label} — uncertain, please confirm)")
-        elif agree == "measurement_only":
-            st.info(f"**{pred.class_name}**  ({confidence_label} — measurement only)")
-        elif agree == "classifier_only":
-            st.info(f"**{pred.class_name}**  ({confidence_label} — classifier only)")
-        else:
-            st.info(f"**{pred.class_name}**  ({confidence_label})")
+        pred_class = "Unknown"
 
     st.divider()
     st.markdown("### Help us train")
     st.caption(
-        "Tap ✓ if the prediction is right, or pick the correct class. "
+        "Tap ✓ if the top prediction is right, or pick the correct class. "
         "Either way, your photo gets labeled and used to improve the model."
     )
 
@@ -171,15 +208,15 @@ if st.session_state.capture_bytes is not None and st.session_state.prediction is
         "✓ Submit",
         type="primary",
         use_container_width=True,
-        disabled=correction == "(use prediction)" and pred.class_name == "Unknown",
+        disabled=correction == "(use prediction)" and pred_class == "Unknown",
     )
     col2.button("Reset", on_click=lambda: st.session_state.update(
-        capture_bytes=None, prediction=None,
+        capture_bytes=None, predict_response=None, predict_error=None,
     ), use_container_width=True)
 
     if confirm:
         if correction == "(use prediction)":
-            chosen_class = pred.class_name
+            chosen_class = pred_class
             reason = "auto_confirmed"
         else:
             chosen_class = correction
@@ -188,7 +225,7 @@ if st.session_state.capture_bytes is not None and st.session_state.prediction is
         if chosen_class == "Unknown":
             st.error("Pick a class from the dropdown first.")
         else:
-            with st.spinner("Sending…"):
+            with st.spinner("Sending to /rfcai/uploads…"):
                 ok, msg = _submit_to_relay(
                     image_bytes=st.session_state.capture_bytes,
                     claimed_class=chosen_class,
@@ -197,14 +234,18 @@ if st.session_state.capture_bytes is not None and st.session_state.prediction is
             if ok:
                 st.success(msg)
                 st.balloons()
-                # Reset so user can take another photo
                 st.session_state.capture_bytes = None
-                st.session_state.prediction = None
+                st.session_state.predict_response = None
+                st.session_state.predict_error = None
             else:
                 st.error(msg)
 
 # Footer / debug expander
 with st.expander("Debug info"):
     st.write(f"Relay: `{RELAY_URL}`")
-    st.write(f"Token configured: {'yes' if DEVICE_TOKEN else 'NO — uploads will fail'}")
-    st.write(f"Classifier: `{DEFAULT_MODEL_DIR}` ({'loaded' if (DEFAULT_MODEL_DIR / 'weights.pt').exists() else 'measurement-only'})")
+    st.write(f"Token configured: {'yes' if DEVICE_TOKEN else 'NO — predictions + uploads will fail'}")
+    st.write("Predict endpoint: `POST /predict`")
+    st.write("Upload endpoint: `POST /uploads`")
+    if st.session_state.get("predict_response"):
+        st.write("**Last raw /predict response:**")
+        st.json(st.session_state.predict_response)
