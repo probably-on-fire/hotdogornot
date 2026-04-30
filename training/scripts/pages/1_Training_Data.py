@@ -354,144 +354,280 @@ with tab_review:
         if n_visible == 0:
             st.info("No images match the current filters.")
         else:
-            # ---- Pagination ---------------------------------------------
-
-            total_pages = max(1, (n_visible + page_size - 1) // page_size)
-            page = st.number_input(
-                "Page", min_value=1, max_value=total_pages, value=1, key="td_review_page",
-            )
-            page_start = (page - 1) * page_size
-            page_end = min(page_start + page_size, n_visible)
-            visible = records[page_start:page_end]
-            st.caption(f"Showing {page_start + 1}–{page_end} of {n_visible}")
-
-            # ---- Grid ---------------------------------------------------
-
-            if "review_selected" not in st.session_state:
-                st.session_state.review_selected = set()
-
-            visible_paths = [str(r["path"]) for r in visible]
-            sel_visible = sum(1 for p in visible_paths if p in st.session_state.review_selected)
-
-            # ---- Page-level select-all helpers --------------------------
-
-            sa1, sa2, sa3 = st.columns([1, 1, 4])
-            if sa1.button(
-                f"Select all on page ({len(visible_paths)})",
-                key="td_review_selpage", use_container_width=True,
-            ):
-                st.session_state.review_selected.update(visible_paths)
-                st.rerun()
-            if sa2.button(
-                "Clear selection", key="td_review_selclr", use_container_width=True,
-                disabled=len(st.session_state.review_selected) == 0,
-            ):
-                st.session_state.review_selected.clear()
-                st.rerun()
-            sa3.caption(
-                f"{sel_visible}/{len(visible_paths)} selected on this page · "
-                f"{len(st.session_state.review_selected)} selected total"
+            focus_mode = st.toggle(
+                "⌨ Focus mode (one image at a time, keyboard hotkeys)",
+                key="td_focus_mode",
+                help=(
+                    "One big image at a time. Hotkeys: D = delete, "
+                    "F = flip gender (M ↔ F same family), K or → = keep+next, ← = prev."
+                ),
             )
 
-            # ---- Grid ---------------------------------------------------
+            if focus_mode:
+                # ---- Focus mode -----------------------------------------
 
-            per_row = 4
-            for row_start in range(0, len(visible), per_row):
-                cols = st.columns(per_row)
-                for col, rec in zip(cols, visible[row_start:row_start + per_row]):
-                    path_str = str(rec["path"])
-                    with col:
-                        try:
-                            st.image(path_str, use_container_width=True)
-                        except Exception as e:
-                            st.error(str(e))
-                            continue
+                if "td_focus_idx" not in st.session_state:
+                    st.session_state.td_focus_idx = 0
+                idx = max(0, min(st.session_state.td_focus_idx, n_visible - 1))
+                st.session_state.td_focus_idx = idx
+                rec = records[idx]
 
-                        # On-disk class + classifier verdict.
-                        st.markdown(f"`{rec['name']}` · in :blue[**{rec['cls']}**]")
-                        if rec["pred"] not in ("(no model)", "(unreadable)"):
-                            badge = "✗" if rec["disagree"] else "✓"
-                            color = "red" if rec["disagree"] else "green"
-                            st.markdown(
-                                f":{color}[{badge} classifier: **{rec['pred']}** {rec['conf']:.0%}]"
-                            )
+                st.markdown(
+                    f"**{idx + 1} of {n_visible}** · `{rec['name']}` · "
+                    f"in :blue[**{rec['cls']}**]"
+                )
+                st.image(str(rec["path"]), use_container_width=True)
 
-                        is_selected = path_str in st.session_state.review_selected
-                        new_state = st.checkbox(
-                            "select",
-                            value=is_selected,
-                            key=f"td_sel_{path_str}",
-                            label_visibility="collapsed",
-                        )
-                        if new_state and not is_selected:
-                            st.session_state.review_selected.add(path_str)
-                        elif not new_state and is_selected:
-                            st.session_state.review_selected.discard(path_str)
+                if rec["pred"] not in ("(no model)", "(unreadable)"):
+                    badge = "✗" if rec["disagree"] else "✓"
+                    color = "red" if rec["disagree"] else "green"
+                    st.markdown(
+                        f":{color}[{badge} classifier: **{rec['pred']}** {rec['conf']:.0%}]"
+                    )
 
-            st.divider()
+                st.caption(
+                    "Hotkeys:  **D** delete  ·  **F** flip gender  ·  "
+                    "**K** or **→** keep + next  ·  **←** previous"
+                )
 
-            # ---- Bulk actions on selected -------------------------------
+                fc1, fc2, fc3, fc4 = st.columns(4)
+                prev_clicked = fc1.button(
+                    "← Prev", key="fm_prev", use_container_width=True,
+                )
+                del_clicked = fc2.button(
+                    "✗ Delete (D)", key="fm_delete", use_container_width=True,
+                    type="primary",
+                )
+                flip_clicked = fc3.button(
+                    "⇄ Flip gender (F)", key="fm_flip", use_container_width=True,
+                    type="primary",
+                )
+                next_clicked = fc4.button(
+                    "Keep + Next → (K)", key="fm_keep", use_container_width=True,
+                )
 
-            sel_count = len(st.session_state.review_selected)
-            st.markdown(f"### {sel_count} selected")
-            if sel_count == 0:
-                st.caption("Tick the box on each tile that's wrong, then choose an action.")
-            else:
-                bcol1, bcol2 = st.columns(2)
-                if bcol1.button(
-                    f"✗ Delete {sel_count} image(s)",
-                    type="primary", use_container_width=True, key="td_bulk_delete",
-                    help="Permanently removes the files from data/labeled/embedder/.",
-                ):
-                    deleted = 0
-                    for p_str in list(st.session_state.review_selected):
-                        try:
-                            Path(p_str).unlink()
-                            deleted += 1
-                        except Exception:
-                            pass
-                    st.session_state.review_selected.clear()
-                    _predict_path.clear()
-                    st.success(f"Deleted {deleted} image(s).")
+                if prev_clicked:
+                    st.session_state.td_focus_idx = max(0, idx - 1)
                     st.rerun()
-
-                if bcol2.button(
-                    f"⇄ Flip gender on {sel_count} image(s)",
-                    type="primary", use_container_width=True, key="td_bulk_flip",
-                    help="Moves each selected image to the same family with the opposite gender — e.g. 2.4mm-M → 2.4mm-F.",
-                ):
-                    moved = skipped = 0
-                    for p_str in list(st.session_state.review_selected):
-                        src = Path(p_str)
-                        if not src.exists():
-                            skipped += 1
-                            continue
-                        cls = src.parent.name
-                        if cls not in CANONICAL_CLASSES:
-                            skipped += 1
-                            continue
-                        family, gender = cls.rsplit("-", 1)
-                        new_cls = f"{family}-{'F' if gender == 'M' else 'M'}"
-                        if new_cls not in CANONICAL_CLASSES:
-                            skipped += 1
-                            continue
+                if del_clicked:
+                    try:
+                        rec["path"].unlink()
+                    except Exception as e:
+                        st.error(f"Couldn't delete: {e}")
+                    _predict_path.clear()
+                    # Don't increment idx — list shifts left, so the same
+                    # index now points to the next image.
+                    st.rerun()
+                if flip_clicked:
+                    family, gender = rec["cls"].rsplit("-", 1)
+                    new_cls = f"{family}-{'F' if gender == 'M' else 'M'}"
+                    if new_cls in CANONICAL_CLASSES:
                         tgt_dir = DATA_ROOT / new_cls
                         tgt_dir.mkdir(parents=True, exist_ok=True)
-                        stem, ext = src.stem, src.suffix
-                        dst = tgt_dir / src.name
+                        stem, ext = rec["path"].stem, rec["path"].suffix
+                        dst = tgt_dir / rec["path"].name
                         n = 1
                         while dst.exists():
                             dst = tgt_dir / f"{stem}_dup{n}{ext}"
                             n += 1
                         try:
-                            shutil.move(str(src), str(dst))
-                            moved += 1
-                        except Exception:
-                            skipped += 1
-                    st.session_state.review_selected.clear()
+                            shutil.move(str(rec["path"]), str(dst))
+                        except Exception as e:
+                            st.error(f"Couldn't flip: {e}")
                     _predict_path.clear()
-                    st.success(f"Flipped gender on {moved} image(s)" + (f" ({skipped} skipped)." if skipped else "."))
+                    # If the new class is in the filter, the moved image
+                    # still appears in records; idx points to the next one
+                    # because the moved image's filesystem location changed
+                    # but it may re-sort. Just advance.
+                    st.session_state.td_focus_idx = min(n_visible - 1, idx + 1)
                     st.rerun()
+                if next_clicked:
+                    st.session_state.td_focus_idx = min(n_visible - 1, idx + 1)
+                    st.rerun()
+
+                # Keyboard hotkeys: an injected JS listener finds the
+                # action buttons by their text and clicks them. Streamlit
+                # components run in an iframe; we hop to window.parent
+                # to reach the Streamlit page DOM.
+                st.components.v1.html(
+                    """
+                    <script>
+                    (function() {
+                        const doc = window.parent.document;
+                        if (doc._rfcaiHotkeysInstalled) return;
+                        doc._rfcaiHotkeysInstalled = true;
+
+                        function clickByText(needle) {
+                            const buttons = doc.querySelectorAll('button');
+                            for (const b of buttons) {
+                                const t = (b.innerText || '').trim();
+                                if (t.startsWith(needle)) {
+                                    b.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+
+                        doc.addEventListener('keydown', function(e) {
+                            const tag = (e.target.tagName || '').toUpperCase();
+                            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                            if (e.metaKey || e.ctrlKey || e.altKey) return;
+                            let handled = false;
+                            switch (e.key) {
+                                case 'd': case 'D':
+                                    handled = clickByText('✗ Delete'); break;
+                                case 'f': case 'F':
+                                    handled = clickByText('⇄ Flip gender'); break;
+                                case 'k': case 'K':
+                                case 'ArrowRight':
+                                    handled = clickByText('Keep + Next'); break;
+                                case 'ArrowLeft':
+                                    handled = clickByText('← Prev'); break;
+                            }
+                            if (handled) e.preventDefault();
+                        });
+                    })();
+                    </script>
+                    """,
+                    height=0,
+                )
+
+            else:
+                # ---- Grid view (default) --------------------------------
+
+                # Pagination
+                total_pages = max(1, (n_visible + page_size - 1) // page_size)
+                page = st.number_input(
+                    "Page", min_value=1, max_value=total_pages, value=1, key="td_review_page",
+                )
+                page_start = (page - 1) * page_size
+                page_end = min(page_start + page_size, n_visible)
+                visible = records[page_start:page_end]
+                st.caption(f"Showing {page_start + 1}–{page_end} of {n_visible}")
+
+                if "review_selected" not in st.session_state:
+                    st.session_state.review_selected = set()
+
+                visible_paths = [str(r["path"]) for r in visible]
+                sel_visible = sum(1 for p in visible_paths if p in st.session_state.review_selected)
+
+                # Page-level select-all helpers
+                sa1, sa2, sa3 = st.columns([1, 1, 4])
+                if sa1.button(
+                    f"Select all on page ({len(visible_paths)})",
+                    key="td_review_selpage", use_container_width=True,
+                ):
+                    st.session_state.review_selected.update(visible_paths)
+                    st.rerun()
+                if sa2.button(
+                    "Clear selection", key="td_review_selclr", use_container_width=True,
+                    disabled=len(st.session_state.review_selected) == 0,
+                ):
+                    st.session_state.review_selected.clear()
+                    st.rerun()
+                sa3.caption(
+                    f"{sel_visible}/{len(visible_paths)} selected on this page · "
+                    f"{len(st.session_state.review_selected)} selected total"
+                )
+
+                # Grid
+                per_row = 4
+                for row_start in range(0, len(visible), per_row):
+                    cols = st.columns(per_row)
+                    for col, rec in zip(cols, visible[row_start:row_start + per_row]):
+                        path_str = str(rec["path"])
+                        with col:
+                            try:
+                                st.image(path_str, use_container_width=True)
+                            except Exception as e:
+                                st.error(str(e))
+                                continue
+
+                            # On-disk class + classifier verdict.
+                            st.markdown(f"`{rec['name']}` · in :blue[**{rec['cls']}**]")
+                            if rec["pred"] not in ("(no model)", "(unreadable)"):
+                                badge = "✗" if rec["disagree"] else "✓"
+                                color = "red" if rec["disagree"] else "green"
+                                st.markdown(
+                                    f":{color}[{badge} classifier: **{rec['pred']}** {rec['conf']:.0%}]"
+                                )
+
+                            is_selected = path_str in st.session_state.review_selected
+                            new_state = st.checkbox(
+                                "select",
+                                value=is_selected,
+                                key=f"td_sel_{path_str}",
+                                label_visibility="collapsed",
+                            )
+                            if new_state and not is_selected:
+                                st.session_state.review_selected.add(path_str)
+                            elif not new_state and is_selected:
+                                st.session_state.review_selected.discard(path_str)
+
+                st.divider()
+
+                # Bulk actions on selected
+                sel_count = len(st.session_state.review_selected)
+                st.markdown(f"### {sel_count} selected")
+                if sel_count == 0:
+                    st.caption("Tick the box on each tile that's wrong, then choose an action.")
+                else:
+                    bcol1, bcol2 = st.columns(2)
+                    if bcol1.button(
+                        f"✗ Delete {sel_count} image(s)",
+                        type="primary", use_container_width=True, key="td_bulk_delete",
+                        help="Permanently removes the files from data/labeled/embedder/.",
+                    ):
+                        deleted = 0
+                        for p_str in list(st.session_state.review_selected):
+                            try:
+                                Path(p_str).unlink()
+                                deleted += 1
+                            except Exception:
+                                pass
+                        st.session_state.review_selected.clear()
+                        _predict_path.clear()
+                        st.success(f"Deleted {deleted} image(s).")
+                        st.rerun()
+
+                    if bcol2.button(
+                        f"⇄ Flip gender on {sel_count} image(s)",
+                        type="primary", use_container_width=True, key="td_bulk_flip",
+                        help="Moves each selected image to the same family with the opposite gender — e.g. 2.4mm-M → 2.4mm-F.",
+                    ):
+                        moved = skipped = 0
+                        for p_str in list(st.session_state.review_selected):
+                            src = Path(p_str)
+                            if not src.exists():
+                                skipped += 1
+                                continue
+                            cls = src.parent.name
+                            if cls not in CANONICAL_CLASSES:
+                                skipped += 1
+                                continue
+                            family, gender = cls.rsplit("-", 1)
+                            new_cls = f"{family}-{'F' if gender == 'M' else 'M'}"
+                            if new_cls not in CANONICAL_CLASSES:
+                                skipped += 1
+                                continue
+                            tgt_dir = DATA_ROOT / new_cls
+                            tgt_dir.mkdir(parents=True, exist_ok=True)
+                            stem, ext = src.stem, src.suffix
+                            dst = tgt_dir / src.name
+                            n = 1
+                            while dst.exists():
+                                dst = tgt_dir / f"{stem}_dup{n}{ext}"
+                                n += 1
+                            try:
+                                shutil.move(str(src), str(dst))
+                                moved += 1
+                            except Exception:
+                                skipped += 1
+                        st.session_state.review_selected.clear()
+                        _predict_path.clear()
+                        st.success(f"Flipped gender on {moved} image(s)" + (f" ({skipped} skipped)." if skipped else "."))
+                        st.rerun()
 
 # ===========================================================================
 # Tab 3: Train
