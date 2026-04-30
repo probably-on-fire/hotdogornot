@@ -33,6 +33,7 @@ from rfconnectorai.data_fetch.connector_crops import detect_connector_crops
 
 REPO = Path(__file__).resolve().parents[2]
 DATA_ROOT = REPO / "data" / "labeled" / "embedder"
+TEST_HOLDOUT_ROOT = REPO / "data" / "test_holdout"
 DEFAULT_MODEL_DIR = REPO / "models" / "connector_classifier"
 
 CANONICAL_CLASSES = [
@@ -541,6 +542,112 @@ with tab_train:
             _load_classifier.clear()
         except Exception as e:
             st.error(f"Training failed: {e}")
+
+    st.divider()
+    st.markdown("### Evaluate on held-out test set")
+    st.caption(
+        "Runs the current classifier against every image in "
+        "`data/test_holdout/<CLASS>/` and reports accuracy. The held-out "
+        "set is hand-verified ground truth — never trained on — so this "
+        "is the real measure of classifier quality. Random would be "
+        "~12.5% full-class, ~25% family, ~50% gender."
+    )
+
+    test_classes_present = sorted(
+        d.name for d in TEST_HOLDOUT_ROOT.iterdir()
+        if d.is_dir() and d.name in CANONICAL_CLASSES
+    ) if TEST_HOLDOUT_ROOT.is_dir() else []
+    test_count = sum(
+        sum(1 for p in (TEST_HOLDOUT_ROOT / c).iterdir() if p.is_file())
+        for c in test_classes_present
+    )
+
+    if not (model_dir / "weights.pt").exists():
+        st.info(f"Train a model first (no weights at `{model_dir}/weights.pt`).")
+    elif test_count == 0:
+        st.info(
+            f"No images in `{TEST_HOLDOUT_ROOT}`. Drop a few hand-verified "
+            "images per class there to enable held-out evaluation."
+        )
+    else:
+        show_misclassified = st.checkbox(
+            "Show misclassified images", value=True, key="td_eval_show_miss",
+        )
+
+        if st.button("Run evaluation", type="primary", key="td_eval_run"):
+            classifier = ConnectorClassifier.load(model_dir)
+            results = []  # (truth_class, pred_class, confidence, img_path)
+            for cls in test_classes_present:
+                cls_dir = TEST_HOLDOUT_ROOT / cls
+                for img_path in sorted(p for p in cls_dir.iterdir() if p.is_file()):
+                    bgr = cv2.imread(str(img_path))
+                    if bgr is None: continue
+                    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                    p = classifier.predict(rgb)
+                    results.append((cls, p.class_name, float(p.confidence), img_path))
+
+            if not results:
+                st.error("Couldn't read any held-out images.")
+            else:
+                # Top-line accuracy. Class string is "<family>-<gender>".
+                full_correct = sum(1 for t, p, _, _ in results if t == p)
+                family_correct = sum(
+                    1 for t, p, _, _ in results
+                    if t.rsplit("-", 1)[0] == p.rsplit("-", 1)[0]
+                )
+                gender_correct = sum(
+                    1 for t, p, _, _ in results
+                    if t.rsplit("-", 1)[1] == p.rsplit("-", 1)[1]
+                )
+                n = len(results)
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Full class", f"{full_correct}/{n}", f"{full_correct/n:.0%}")
+                m2.metric("Family (mm)", f"{family_correct}/{n}", f"{family_correct/n:.0%}")
+                m3.metric("Gender (M/F)", f"{gender_correct}/{n}", f"{gender_correct/n:.0%}")
+
+                # Confusion matrix as a markdown table. Rows = truth,
+                # cols = prediction. Only includes classes that appear in
+                # the held-out set as truth (usually all 8, but be tolerant).
+                truth_classes = sorted(set(t for t, _, _, _ in results))
+                pred_classes = CANONICAL_CLASSES
+                st.markdown("**Confusion matrix** (rows = truth, cols = prediction)")
+                header = "| truth ↓ / pred → | " + " | ".join(pred_classes) + " | total |"
+                sep = "|" + "---|" * (len(pred_classes) + 2)
+                lines = [header, sep]
+                for t in truth_classes:
+                    row = [t]
+                    truth_total = 0
+                    for p in pred_classes:
+                        cnt = sum(1 for tt, pp, _, _ in results if tt == t and pp == p)
+                        truth_total += cnt
+                        if cnt == 0:
+                            row.append(".")
+                        elif t == p:
+                            row.append(f"**{cnt}**")
+                        else:
+                            row.append(str(cnt))
+                    row.append(str(truth_total))
+                    lines.append("| " + " | ".join(row) + " |")
+                st.markdown("\n".join(lines))
+
+                if show_misclassified:
+                    misses = [(t, p, c, ip) for t, p, c, ip in results if t != p]
+                    if not misses:
+                        st.success("No misclassifications — every held-out image classified correctly.")
+                    else:
+                        st.markdown(f"**Misclassified** ({len(misses)}/{n}):")
+                        per_row = 4
+                        for row_start in range(0, len(misses), per_row):
+                            cols = st.columns(per_row)
+                            for col, (t, p, c, ip) in zip(cols, misses[row_start:row_start + per_row]):
+                                with col:
+                                    st.image(str(ip), use_container_width=True)
+                                    st.markdown(
+                                        f"`{ip.name}`  \n"
+                                        f"truth: :blue[**{t}**]  \n"
+                                        f"pred:  :red[**{p}**] {c:.0%}"
+                                    )
 
     st.divider()
     st.markdown("### Test on a sample image")
