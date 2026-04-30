@@ -95,22 +95,22 @@ in `rfconnectorai/data_fetch/google_cse.py`.
 .venv/Scripts/python.exe -m streamlit run scripts/demo_app.py
 ```
 
-Opens a multi-page browser app at `http://localhost:8501`:
+Opens a two-page browser app at `http://localhost:8501` (also live at
+`https://aired.com/demo/`):
 
-- **Demo (`demo_app.py`)** — upload a connector photo or take one with the
-  webcam → see hex/aperture/ArUco detections + measurement + class prediction
-- **Manage Data (`pages/1_Manage_Data.py`)** — browse `data/labeled/embedder/<CLASS>/`,
-  delete bad images, run the measurement pipeline against any class with
-  per-image diagnostic output
-- **Fetch Images (`pages/2_Fetch_Images.py`)** — pull connector images from
-  Google CSE / DuckDuckGo / Bing into the labeled folders. Per-class queries
-  are editable.
-- **Process Video (`pages/3_Process_Video.py`)** — drop in a `.mp4` capture
-  → extract frames at configurable fps → optionally run the multi-frame
-  averaged predictor in one click. Shows per-class vote breakdown.
-- **Train Classifier (`pages/4_Train_Classifier.py`)** — train ResNet-18
-  on the labeled folders, see per-epoch metrics, predict on uploaded images
-  with full per-class probabilities.
+- **Demo (`demo_app.py`)** — take a photo (or upload), POST to the
+  `/predict` relay, render bounding boxes with confidence on the captured
+  image, then either confirm or correct the class. Confirmed/corrected
+  samples flow back into the training-data folders.
+- **Training Data (`pages/1_Training_Data.py`)** — three tabs:
+  - *Upload + Label* — drop a connector video → auto-detect each connector
+    in each frame → pick a class per crop → save into
+    `data/labeled/embedder/<CLASS>/`
+  - *Review* — walk through a class folder with the current classifier's
+    prediction alongside the on-disk label; disagreements bubble to the
+    top; bulk keep / delete / move-to-class
+  - *Train* — fine-tune ResNet-18 on the current labeled folders, then
+    test on a sample image with full per-class probabilities
 
 ---
 
@@ -118,18 +118,18 @@ Opens a multi-page browser app at `http://localhost:8501`:
 
 ```
 data/
-  labeled/embedder/          ← real-world capture data (gitignored)
-    SMA-M/                     ddg_*.{jpg,png,webp}   from DDG fetcher
-    SMA-F/                     gcse_*.{jpg,png,webp}  from Google CSE
-    3.5mm-M/                   chrome_*.{jpg,png}     manual / Chrome download
-    3.5mm-F/                   video_*.jpg            extracted from capture video
+  labeled/embedder/          ← labeled crops the classifier trains on (gitignored)
+    SMA-M/video_NNNN.jpg       extracted by the Video Labeler page
+    SMA-F/video_NNNN.jpg
+    3.5mm-M/...
     ...
+  test_holdout/              ← hand-verified golden test set, never trained on
+    SMA-M/IMG_*.jpg
+    ...
+  archive/scraped/           ← old DDG/Google/Chrome scraped images (gitignored,
+                               kept out of training; ignore unless reviving)
   synthetic_faces/           ← PIL-rendered frontal mating faces (gitignored, regenerable)
-    SMA-M/face_*.png
-    ...
   synthetic_angled/          ← pyrender 3D off-axis renders (gitignored, regenerable)
-    SMA-M/angled_*.png
-    ...
   reference/pasternack/      ← committed: small set of vendor reference photos
   cad/verified/<CLASS>.glb   ← procedural GLB meshes (gitignored, regenerable)
 ```
