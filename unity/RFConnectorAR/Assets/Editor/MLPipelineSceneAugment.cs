@@ -168,6 +168,40 @@ namespace RFConnectorAR.EditorTools
         // -----------------------------------------------------------------
         private static void BuildScanPanel(Transform root)
         {
+            // Bbox overlay layer: full-screen container for per-detection
+            // bounding boxes drawn in [0,1] anchor space mapped from the
+            // camera frame.
+            var overlay = NewUiNode("BBoxOverlay", root, Vector2.zero, Vector2.one);
+
+            // Bbox overlay prefab template — built once, hidden, used as a
+            // template by ScanPanel's pool.
+            var bboxTemplate = NewUiNode("BBoxTemplate", root, Vector2.zero, Vector2.zero);
+            var bboxOverlay = bboxTemplate.AddComponent<BBoxOverlay>();
+            // Outline child: bordered rectangle drawn via 4-edge thin
+            // images so the center stays transparent (we want to see the
+            // camera feed inside the box).
+            var outline = NewUiNode("Outline", bboxTemplate.transform, Vector2.zero, Vector2.one);
+            var outlineRt = outline.GetComponent<RectTransform>();
+            // Use a simple Image with a built-in sliced "UISprite" sprite —
+            // gives us a transparent middle with a hardcoded edge.
+            var outlineImg = outline.AddComponent<Image>();
+            outlineImg.sprite = Resources.GetBuiltinResource<Sprite>("UI/Skin/UISprite.psd");
+            outlineImg.type = Image.Type.Sliced;
+            outlineImg.color = new Color(0.2f, 0.85f, 0.35f, 0.85f);
+            // Label at the top-left of the box.
+            var bboxLabel = AddText(bboxTemplate.transform, "(label)", 18);
+            bboxLabel.color = Color.white;
+            bboxLabel.alignment = TextAnchor.LowerLeft;
+            var lblRt = bboxLabel.GetComponent<RectTransform>();
+            lblRt.anchorMin = new Vector2(0, 1f);
+            lblRt.anchorMax = new Vector2(1, 1f);
+            lblRt.pivot = new Vector2(0, 1);
+            lblRt.offsetMin = new Vector2(2, -28);
+            lblRt.offsetMax = new Vector2(-2, -2);
+            SerializeFieldRef(bboxOverlay, "outline", outlineRt);
+            SerializeFieldRef(bboxOverlay, "label", bboxLabel);
+            bboxTemplate.SetActive(false);
+
             // Top region with class name + confidence
             var top = NewUiNode("Top", root, new Vector2(0, 0.85f), Vector2.one);
             var topBg = top.AddComponent<Image>();
@@ -214,6 +248,8 @@ namespace RFConnectorAR.EditorTools
             SerializeFieldRef(scan, "confidenceText", conf);
             SerializeFieldRef(scan, "confidenceBar", barImg);
             SerializeFieldRef(scan, "hintText", hint);
+            SerializeFieldRef(scan, "overlayRoot", overlay.GetComponent<RectTransform>());
+            SerializeFieldRef(scan, "bboxOverlayPrefab", bboxTemplate);
         }
 
         // -----------------------------------------------------------------
