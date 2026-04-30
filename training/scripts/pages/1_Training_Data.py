@@ -175,32 +175,43 @@ with tab_upload:
             uploaded_bytes = uploaded.getvalue()
             uploaded_name = uploaded.name
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     fps = col1.number_input(
         "Extraction fps", min_value=0.5, max_value=30.0, value=5.0, step=0.5,
-        help="Frames sampled per second of video. Higher = more crops, more clicks. "
-             "Bump to 8-10 for short clips of a stationary connector at varied angles.",
+        help="Frames sampled per second of video. Higher = more crops, more clicks.",
         key="td_fps",
     )
     max_crops = col2.number_input(
         "Max connectors per frame", min_value=1, max_value=10, value=5,
-        help="Cap on detections per frame. Bump if you have a frame with multiple connectors.",
+        help="Cap on detections per frame.",
         key="td_maxcrops",
     )
+
+    col3, col4 = st.columns(2)
     sensitivity = col3.select_slider(
         "Detector sensitivity",
         options=["Low (3.0σ)", "Normal (2.0σ)", "High (1.5σ)", "Aggressive (1.0σ)"],
-        value="High (1.5σ)",
-        help="Edge-density threshold. Lower = catches more borderline crops "
-             "but more false positives. Aggressive captures everything; "
-             "expect to delete a lot in Review.",
+        value="Normal (2.0σ)",
+        help="Edge-density threshold. Lower = more crops, more false positives.",
         key="td_sens",
+    )
+    circularity = col4.select_slider(
+        "Circularity filter",
+        options=["Off", "Loose (0.3)", "Medium (0.5)", "Strict (0.7)"],
+        value="Medium (0.5)",
+        help="RF connector mating faces are circular; wood-grain artifacts aren't. "
+             "Strict cuts most desk false positives; Loose lets through angled views.",
+        key="td_circ",
     )
     sens_map = {
         "Low (3.0σ)": 3.0, "Normal (2.0σ)": 2.0,
         "High (1.5σ)": 1.5, "Aggressive (1.0σ)": 1.0,
     }
+    circ_map = {
+        "Off": 0.0, "Loose (0.3)": 0.3, "Medium (0.5)": 0.5, "Strict (0.7)": 0.7,
+    }
     edge_threshold_std = sens_map[sensitivity]
+    min_circularity = circ_map[circularity]
 
     if "lbl_crops" not in st.session_state:
         st.session_state.lbl_crops = []
@@ -233,6 +244,7 @@ with tab_upload:
                         bgr,
                         max_crops=int(max_crops),
                         edge_threshold_std=edge_threshold_std,
+                        min_circularity=min_circularity,
                     )
                     for crop_idx, r in enumerate(results):
                         ok, buf = cv2.imencode(".jpg", r.crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
