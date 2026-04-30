@@ -1,253 +1,218 @@
 """
-Streamlit demo for the RF connector identifier.
+RF Connector AI demo — main page.
 
-Run:
-    cd training
-    .venv/Scripts/python.exe -m streamlit run scripts/demo_app.py
+Workflow on a phone or laptop browser:
+  1. Tap "Take photo" (or upload an image)
+  2. Image POSTs to /rfcai/predict; per-detection class + confidence + bbox
+     comes back, rendered as green bounding boxes on the captured image.
+  3. Either tap "✓ correct" (submits to /uploads with the predicted class)
+     or pick the correct class manually (submits with the user-corrected
+     class as a training-data correction).
+  4. Either way the image enters the continuous-learning loop.
 
-A browser opens on http://localhost:8501. Upload a connector photo (or
-take one with a webcam), see the ensemble prediction: measurement pipeline
-(hex / aperture / ArUco / family / gender / class) + ResNet-18 classifier
-prediction + agreement signal.
-
-If no classifier is trained yet (no weights at models/connector_classifier/),
-the demo falls back to measurement-only mode.
+Uses the same /predict endpoint the Unity AR app uses, so this page is a
+direct test bed for the live model.
 """
 
 from __future__ import annotations
 
-import io
+import os
 from pathlib import Path
 
 import cv2
 import numpy as np
+import requests
 import streamlit as st
-from PIL import Image
-
-from rfconnectorai.ensemble import EnsemblePredictor
-from rfconnectorai.measurement.aperture_detector import detect_aperture
-from rfconnectorai.measurement.aruco_detector import detect_aruco_marker
-from rfconnectorai.measurement.class_predictor import predict_class
-from rfconnectorai.measurement.family_detector import detect_family
-from rfconnectorai.measurement.gender_detector import detect_gender
-from rfconnectorai.measurement.hex_detector import detect_hex
 
 
-REPO_TRAINING = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL_DIR = REPO_TRAINING / "models" / "connector_classifier"
+CANONICAL_CLASSES = [
+    "SMA-M", "SMA-F",
+    "3.5mm-M", "3.5mm-F",
+    "2.92mm-M", "2.92mm-F",
+    "2.4mm-M", "2.4mm-F",
+]
+
+RELAY_URL = os.environ.get("RFCAI_RELAY_URL", "https://aired.com/rfcai")
+DEVICE_TOKEN = os.environ.get("RFCAI_DEVICE_TOKEN", "")
 
 
-@st.cache_resource(show_spinner=False)
-def _load_predictor(model_dir_str: str | None) -> EnsemblePredictor:
-    """Cache the loaded classifier across reruns so we don't reload weights
-    on every interaction."""
-    if model_dir_str is None:
-        return EnsemblePredictor(classifier=None)
-    return EnsemblePredictor.load(Path(model_dir_str))
+def _predict_via_relay(image_bytes: bytes) -> tuple[dict | None, str | None]:
+    if not DEVICE_TOKEN:
+        return None, "RFCAI_DEVICE_TOKEN not configured on the demo server"
+    try:
+        resp = requests.post(
+            f"{RELAY_URL}/predict",
+            headers={"X-Device-Token": DEVICE_TOKEN},
+            files=[("image", ("capture.jpg", image_bytes, "image/jpeg"))],
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return resp.json(), None
+        return None, f"relay returned {resp.status_code}: {resp.text[:200]}"
+    except requests.RequestException as e:
+        return None, f"network error: {e}"
 
 
-st.set_page_config(page_title="AIRED — RF Connector Identifier", layout="wide")
-st.title("AIRED — RF Connector Identifier")
+def _submit_to_relay(image_bytes: bytes, claimed_class: str, capture_reason: str) -> tuple[bool, str]:
+    if not DEVICE_TOKEN:
+        return False, "RFCAI_DEVICE_TOKEN not configured on the demo server"
+    try:
+        resp = requests.post(
+            f"{RELAY_URL}/uploads",
+            headers={"X-Device-Token": DEVICE_TOKEN},
+            data={
+                "claimed_class": claimed_class,
+                "device_id": "demo-streamlit",
+                "capture_reason": capture_reason,
+            },
+            files=[("frames", ("capture.jpg", image_bytes, "image/jpeg"))],
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            blob = resp.json()
+            return True, f"Sent for training as `{claimed_class}` (upload_id={blob['upload_id'][:8]}…)"
+        return False, f"relay returned {resp.status_code}: {resp.text[:200]}"
+    except requests.RequestException as e:
+        return False, f"network error: {e}"
+
+
+def _draw_bboxes(image_bytes: bytes, predict_response: dict) -> bytes:
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if bgr is None: return image_bytes
+    for p in predict_response.get("predictions", []):
+        b = p["bbox"]
+        x, y, w, h = b["x"], b["y"], b["w"], b["h"]
+        # Pad the visualization box; the classifier saw a padded crop anyway.
+        pad = int(max(w, h) * 0.4)
+        x0, y0 = max(0, x - pad), max(0, y - pad)
+        x1 = min(bgr.shape[1], x + w + pad)
+        y1 = min(bgr.shape[0], y + h + pad)
+        # Color by confidence: green > 0.75, yellow > 0.5, red below.
+        c = p["confidence"]
+        color = (50, 200, 50) if c >= 0.75 else (10, 180, 230) if c >= 0.5 else (60, 60, 220)
+        cv2.rectangle(bgr, (x0, y0), (x1, y1), color, 4)
+        label = f"{p['class_name']} {c:.0%}"
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 1.0, 2)
+        cv2.rectangle(bgr, (x0, y0 - th - 12), (x0 + tw + 8, y0), color, -1)
+        cv2.putText(bgr, label, (x0 + 4, y0 - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+    ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return buf.tobytes() if ok else image_bytes
+
+
+# ---------------------------------------------------------------------------
+
+st.set_page_config(page_title="RF Connector Demo", layout="centered")
+st.markdown(
+    """
+    <style>
+      .stButton button { font-size: 1.05rem; padding: 0.75rem 1rem; }
+      .block-container { padding-top: 1.5rem; padding-bottom: 1.5rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.title("RF Connector Demo")
 st.caption(
-    "Upload a frontal mating-face photo of an RF connector. The app detects the hex, "
-    "aperture, dielectric, and pin/socket, and predicts the connector class. "
-    "Add a 25 mm ArUco scale marker in the frame for higher precision-size accuracy."
+    "Take a photo of a connector mating face. The system identifies it and "
+    "your confirmed answer feeds back into training so the model improves."
 )
 
-with st.sidebar:
-    st.header("Capture options")
-    aruco_size = st.number_input(
-        "ArUco marker physical size (mm)", min_value=5.0, max_value=100.0, value=25.0, step=0.5
+if "capture_bytes" not in st.session_state:
+    st.session_state.capture_bytes = None
+    st.session_state.predict_response = None
+    st.session_state.predict_error = None
+
+img_input = st.camera_input("Take photo (or upload)", label_visibility="collapsed", key="cam")
+if img_input is None:
+    img_input = st.file_uploader(
+        "…or upload an image",
+        type=["jpg", "jpeg", "png", "webp"],
+        label_visibility="collapsed",
     )
-    show_overlays = st.checkbox("Show detection overlays", value=True)
-    require_aruco = st.checkbox(
-        "Require ArUco for class prediction",
-        value=False,
-        help="Strict mode — eliminates 2.92mm vs 2.4mm ambiguity, refuses prediction if no marker.",
-    )
+
+if img_input is not None:
+    raw = img_input.getvalue()
+    if st.session_state.capture_bytes != raw:
+        st.session_state.capture_bytes = raw
+        with st.spinner("Identifying…"):
+            resp, err = _predict_via_relay(raw)
+        st.session_state.predict_response = resp
+        st.session_state.predict_error = err
+
+if st.session_state.capture_bytes is not None:
+    if st.session_state.predict_error:
+        st.error(f"Prediction failed: {st.session_state.predict_error}")
+        st.image(st.session_state.capture_bytes, use_container_width=True)
+        pred_class = "Unknown"
+    elif st.session_state.predict_response is not None:
+        resp = st.session_state.predict_response
+        n = len(resp.get("predictions", []))
+        if n == 0:
+            st.warning("No connector detected. Try a clearer mating-face photo.")
+            st.image(st.session_state.capture_bytes, use_container_width=True)
+            pred_class = "Unknown"
+        else:
+            annotated = _draw_bboxes(st.session_state.capture_bytes, resp)
+            st.image(annotated, caption=f"{n} detection(s)", use_container_width=True)
+            st.markdown("### Detections")
+            for i, p in enumerate(resp["predictions"]):
+                bar = "█" * int(p["confidence"] * 20)
+                st.write(f"**{i+1}.** `{p['class_name']}` — {p['confidence']:.0%}  {bar}")
+            pred_class = resp["predictions"][0]["class_name"]
+    else:
+        pred_class = "Unknown"
 
     st.divider()
-    st.markdown("### Classifier")
-    use_classifier = st.checkbox(
-        "Use trained classifier (ensemble mode)",
-        value=DEFAULT_MODEL_DIR.exists() and (DEFAULT_MODEL_DIR / "weights.pt").exists(),
-        help="Cross-checks the measurement pipeline against the ResNet-18 classifier.",
-    )
-    if use_classifier:
-        if not (DEFAULT_MODEL_DIR / "weights.pt").exists():
-            st.warning(
-                f"No trained model at `{DEFAULT_MODEL_DIR}`. Use the Train Classifier "
-                "page to train one first."
-            )
-            use_classifier = False
+    st.markdown("### Help us train")
+    st.caption("Tap ✓ if the top prediction is right, or pick the correct class.")
 
-    st.divider()
-    st.markdown(
-        "**Tips for a good photo**\n"
-        "- Hold the camera roughly perpendicular to the mating face\n"
-        "- Make sure the hex coupling nut is fully visible\n"
-        "- Use even lighting, plain background\n"
-        "- Place the printed ArUco marker on the same surface for scale"
+    correction = st.selectbox(
+        "Connector class",
+        options=["(use prediction)"] + CANONICAL_CLASSES,
+        index=0,
     )
 
-uploaded = st.file_uploader(
-    "Upload a connector photo (JPG/PNG)", type=["jpg", "jpeg", "png", "webp"]
-)
-camera = st.camera_input("...or take one with your webcam")
-
-source = uploaded or camera
-if source is None:
-    st.info("Upload an image or take a photo to get started.")
-    st.stop()
-
-# Load image
-img_bytes = source.getvalue()
-nparr = np.frombuffer(img_bytes, np.uint8)
-img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-if img_bgr is None:
-    st.error("Couldn't decode the image. Try a different file.")
-    st.stop()
-img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-
-# Run individual detectors so we can show intermediate state
-hex_det = detect_hex(img_rgb)
-aruco = detect_aruco_marker(img_rgb, marker_size_mm=float(aruco_size))
-aperture = None
-family = None
-gender = None
-if hex_det is not None:
-    aperture = detect_aperture(
-        img_rgb,
-        search_center=hex_det.center,
-        search_radius_px=hex_det.flat_to_flat_px * 0.5,
+    col1, col2 = st.columns(2)
+    confirm = col1.button(
+        "✓ Submit",
+        type="primary",
+        use_container_width=True,
+        disabled=correction == "(use prediction)" and pred_class == "Unknown",
     )
-    if aperture is not None:
-        family = detect_family(
-            img_rgb,
-            aperture_center=aperture.center,
-            aperture_radius_px=aperture.diameter_px / 2.0,
-            pin_radius_px=aperture.diameter_px / 2.0 * 0.50,
-        )
-        gender = detect_gender(
-            img_rgb,
-            aperture_center=aperture.center,
-            aperture_radius_px=aperture.diameter_px / 2.0,
-        )
-
-# Full prediction — ensemble (measurement + classifier) when enabled.
-predictor = _load_predictor(str(DEFAULT_MODEL_DIR) if use_classifier else None)
-ensemble_result = predictor.predict(
-    img_rgb,
-    require_aruco=require_aruco,
-    aruco_marker_size_mm=float(aruco_size),
-)
-prediction = ensemble_result.measurement   # keep variable name for downstream code
-
-# Compose overlay image
-overlay = img_rgb.copy()
-if show_overlays:
-    if hex_det is not None:
-        # Draw hex bbox
-        verts = hex_det.vertices_px.astype(np.int32)
-        cv2.polylines(overlay, [verts], isClosed=True, color=(0, 200, 255), thickness=3)
-        cx, cy = int(hex_det.center[0]), int(hex_det.center[1])
-        cv2.circle(overlay, (cx, cy), 6, (0, 200, 255), -1)
-    if aperture is not None:
-        cx, cy = int(aperture.center[0]), int(aperture.center[1])
-        r = int(aperture.diameter_px / 2)
-        cv2.circle(overlay, (cx, cy), r, (255, 80, 80), 3)
-    if aruco is not None:
-        corners = aruco.corners.astype(np.int32)
-        cv2.polylines(overlay, [corners], isClosed=True, color=(120, 255, 120), thickness=3)
-
-col1, col2 = st.columns([2, 1])
-with col1:
-    st.image(overlay, caption="Detections", use_container_width=True)
-
-with col2:
-    # Headline reflects the ensemble result, not just the measurement output.
-    headline_class = ensemble_result.class_name
-    headline_conf = ensemble_result.confidence
-
-    agreement_msg = {
-        "agree":              "measurement + classifier agree",
-        "disagree":           "measurement and classifier DISAGREE — recapture recommended",
-        "measurement_only":   "measurement only (classifier off or failed)",
-        "classifier_only":    "classifier only (measurement could not fire)",
-        "neither":            "neither pipeline could fire",
-    }.get(ensemble_result.agreement, ensemble_result.agreement)
-
-    if headline_class == "Unknown":
-        st.error(f"**Predicted: Unknown** — {ensemble_result.reason or agreement_msg}")
-    elif ensemble_result.agreement == "disagree":
-        st.warning(
-            f"**Predicted: {headline_class}** "
-            f"(confidence {headline_conf:.0%} — {agreement_msg})"
-        )
-        st.caption(ensemble_result.reason)
-    else:
-        st.success(
-            f"**Predicted: {headline_class}** "
-            f"(confidence {headline_conf:.0%} — {agreement_msg})"
-        )
-
-    st.markdown("### Measurements")
-    rows = []
-    if prediction.hex_flat_to_flat_mm is not None:
-        rows.append(("Hex flat-to-flat", f"{prediction.hex_flat_to_flat_mm:.2f} mm"))
-    if prediction.aperture_mm is not None:
-        rows.append(("Aperture diameter", f"{prediction.aperture_mm:.2f} mm"))
-    if prediction.pixels_per_mm is not None:
-        rows.append(("Scale (px / mm)", f"{prediction.pixels_per_mm:.1f}"))
-    if prediction.family is not None:
-        rows.append(("Family", prediction.family))
-    if prediction.gender is not None:
-        rows.append(("Gender", prediction.gender))
-    if prediction.dielectric_brightness is not None:
-        rows.append(("Dielectric brightness", f"{prediction.dielectric_brightness:.0f} / 255"))
-    if prediction.center_brightness is not None:
-        rows.append(("Center brightness", f"{prediction.center_brightness:.0f} / 255"))
-    if aruco is not None:
-        rows.append(("ArUco marker ID", str(aruco.marker_id)))
-        rows.append(("ArUco edge", f"{aruco.edge_px:.0f} px"))
-
-    if not rows:
-        st.write("_(no measurements — pipeline failed at the first stage)_")
-    else:
-        for k, v in rows:
-            st.write(f"**{k}:** {v}")
-
-st.divider()
-
-# Classifier breakdown — only meaningful if classifier was loaded.
-if ensemble_result.classifier is not None:
-    clf = ensemble_result.classifier
-    st.markdown("### Classifier (ResNet-18) prediction")
-    st.write(
-        f"**{clf.class_name}** (top class, confidence {clf.confidence:.0%})"
+    col2.button(
+        "Reset",
+        on_click=lambda: st.session_state.update(
+            capture_bytes=None, predict_response=None, predict_error=None,
+        ),
+        use_container_width=True,
     )
-    with st.expander("Per-class probabilities"):
-        for cls_name, prob in sorted(clf.probabilities.items(), key=lambda kv: -kv[1]):
-            st.write(f"- {cls_name}: {prob:.3f}")
 
-with st.expander("Detector outputs (raw)"):
-    st.json({
-        "hex_detected": hex_det is not None,
-        "hex_flat_to_flat_px": hex_det.flat_to_flat_px if hex_det else None,
-        "hex_center": [hex_det.center[0], hex_det.center[1]] if hex_det else None,
-        "aperture_detected": aperture is not None,
-        "aperture_diameter_px": aperture.diameter_px if aperture else None,
-        "family": family.family if family else None,
-        "dielectric_brightness": family.dielectric_brightness if family else None,
-        "gender": gender.gender if gender else None,
-        "center_brightness": gender.center_brightness if gender else None,
-        "aruco_detected": aruco is not None,
-        "aruco_pixels_per_mm": aruco.pixels_per_mm if aruco else None,
-        "predicted_class": prediction.class_name,
-        "predicted_aperture_mm": prediction.aperture_mm,
-        "ensemble_class": ensemble_result.class_name,
-        "ensemble_confidence": ensemble_result.confidence,
-        "ensemble_agreement": ensemble_result.agreement,
-        "classifier_class": ensemble_result.classifier.class_name if ensemble_result.classifier else None,
-        "classifier_confidence": ensemble_result.classifier.confidence if ensemble_result.classifier else None,
-    })
+    if confirm:
+        chosen = pred_class if correction == "(use prediction)" else correction
+        reason = "auto_confirmed" if correction == "(use prediction)" else "user_corrected"
+        if chosen == "Unknown":
+            st.error("Pick a class from the dropdown first.")
+        else:
+            with st.spinner("Sending…"):
+                ok, msg = _submit_to_relay(
+                    image_bytes=st.session_state.capture_bytes,
+                    claimed_class=chosen,
+                    capture_reason=reason,
+                )
+            if ok:
+                st.success(msg)
+                st.balloons()
+                st.session_state.capture_bytes = None
+                st.session_state.predict_response = None
+                st.session_state.predict_error = None
+            else:
+                st.error(msg)
+
+with st.expander("Debug"):
+    st.write(f"Relay: `{RELAY_URL}`")
+    st.write(f"Token configured: {'yes' if DEVICE_TOKEN else 'NO — predictions + uploads will fail'}")
+    if st.session_state.get("predict_response"):
+        st.json(st.session_state.predict_response)
