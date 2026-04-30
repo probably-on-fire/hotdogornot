@@ -242,76 +242,130 @@ with tab_upload:
 with tab_review:
     st.markdown("### Review labels")
     st.caption(
-        "Walk through each image in a class folder. The classifier's "
-        "prediction shows alongside the on-disk label — disagreements bubble "
-        "to the top. Pick an action per image, then tap Apply."
+        "Filter the labeled set down to a subset, see the classifier's "
+        "prediction next to each image's on-disk class, and bulk-correct: "
+        "keep, delete, or move to a different class. Apply commits the changes."
     )
 
-    review_col_left, review_col_right = st.columns([1, 3])
-    with review_col_left:
-        cls_options = [f"{c} ({counts.get(c, 0)})" for c in CANONICAL_CLASSES]
-        sel = st.radio("Class to review", options=cls_options, index=0, key="td_review_class")
-        target_class = sel.split(" (")[0]
+    # ---- Filters ---------------------------------------------------------
 
-        sort_mode = st.selectbox(
-            "Sort by",
-            options=["disagreements first", "lowest classifier confidence", "filename"],
-            index=0,
-            key="td_review_sort",
+    fcol1, fcol2, fcol3 = st.columns([2, 1, 1])
+    with fcol1:
+        selected_classes = st.multiselect(
+            "Classes",
+            options=CANONICAL_CLASSES,
+            default=CANONICAL_CLASSES,
+            format_func=lambda c: f"{c} ({counts.get(c, 0)})",
+            key="td_review_classes",
+            help="Which class folders to walk. Default is all eight.",
         )
-        page_size = st.number_input(
-            "Per page", min_value=8, max_value=64, value=24, step=8, key="td_review_pagesize",
+        sa, sb = st.columns(2)
+        if sa.button("Select all", use_container_width=True, key="td_review_all"):
+            st.session_state.td_review_classes = list(CANONICAL_CLASSES)
+            st.rerun()
+        if sb.button("Clear", use_container_width=True, key="td_review_none"):
+            st.session_state.td_review_classes = []
+            st.rerun()
+    with fcol2:
+        only_disagree = st.checkbox(
+            "Only disagreements", value=False, key="td_review_disagree",
+            help="Show only images where the classifier predicts a different class than the folder.",
         )
         use_classifier = st.checkbox(
-            "Use classifier predictions",
+            "Use classifier",
             value=(DEFAULT_MODEL_DIR / "weights.pt").exists(),
             key="td_review_useclf",
+            help="Toggle off to skip classifier scoring (faster, but no disagreement signal).",
+        )
+    with fcol3:
+        conf_lo, conf_hi = st.slider(
+            "Confidence range", min_value=0, max_value=100, value=(0, 100),
+            step=5, key="td_review_confband",
+            help="Narrow to e.g. 0–60% to find low-confidence cases worth a human look.",
         )
 
-    with review_col_right:
-        class_dir = DATA_ROOT / target_class
-        if not class_dir.is_dir() or counts.get(target_class, 0) == 0:
-            st.info(f"`{target_class}` has no images yet.")
-        else:
-            clf_id = str(DEFAULT_MODEL_DIR) if use_classifier else None
+    scol1, scol2 = st.columns([1, 1])
+    sort_mode = scol1.selectbox(
+        "Sort by",
+        options=[
+            "disagreements first",
+            "lowest classifier confidence",
+            "class then filename",
+        ],
+        index=0,
+        key="td_review_sort",
+    )
+    page_size = scol2.number_input(
+        "Per page", min_value=8, max_value=128, value=32, step=8, key="td_review_pagesize",
+    )
 
-            images = sorted([p for p in class_dir.iterdir() if p.is_file()])
-            records = []
-            with st.spinner(f"Scoring {len(images)} images..."):
-                for img_path in images:
+    if not selected_classes:
+        st.info("Pick at least one class above.")
+    else:
+        # ---- Build records across all selected classes ------------------
+
+        clf_id = str(DEFAULT_MODEL_DIR) if use_classifier else None
+        all_records = []
+        total_in_scope = sum(counts.get(c, 0) for c in selected_classes)
+        with st.spinner(f"Scoring {total_in_scope} images across {len(selected_classes)} classes..."):
+            for cls in selected_classes:
+                cls_dir = DATA_ROOT / cls
+                if not cls_dir.is_dir():
+                    continue
+                for img_path in sorted(p for p in cls_dir.iterdir() if p.is_file()):
                     if clf_id is not None:
                         pred, conf = _predict_path(clf_id, str(img_path))
                     else:
                         pred, conf = "(no model)", 0.0
-                    records.append({
+                    disagree = pred != cls and pred not in ("(no model)", "(unreadable)")
+                    all_records.append({
                         "path": img_path,
                         "name": img_path.name,
+                        "cls": cls,
                         "pred": pred,
                         "conf": conf,
-                        "disagree": pred != target_class and pred not in ("(no model)", "(unreadable)"),
+                        "disagree": disagree,
                     })
 
-            if sort_mode == "disagreements first":
-                records.sort(key=lambda r: (not r["disagree"], r["conf"]))
-            elif sort_mode == "lowest classifier confidence":
-                records.sort(key=lambda r: r["conf"])
-            else:
-                records.sort(key=lambda r: r["name"])
+        # ---- Apply filters ----------------------------------------------
 
-            total_pages = max(1, (len(records) + page_size - 1) // page_size)
+        records = all_records
+        if only_disagree:
+            records = [r for r in records if r["disagree"]]
+        if use_classifier and (conf_lo > 0 or conf_hi < 100):
+            lo, hi = conf_lo / 100.0, conf_hi / 100.0
+            records = [r for r in records if lo <= r["conf"] <= hi]
+
+        if sort_mode == "disagreements first":
+            records.sort(key=lambda r: (not r["disagree"], r["conf"]))
+        elif sort_mode == "lowest classifier confidence":
+            records.sort(key=lambda r: r["conf"])
+        else:
+            records.sort(key=lambda r: (r["cls"], r["name"]))
+
+        n_total = len(all_records)
+        n_visible = len(records)
+        n_disagree = sum(1 for r in all_records if r["disagree"])
+        st.markdown(
+            f"**{n_visible}** of {n_total} images match — "
+            f"{n_disagree} disagree with classifier across the selected classes."
+        )
+
+        if n_visible == 0:
+            st.info("No images match the current filters.")
+        else:
+            # ---- Pagination ---------------------------------------------
+
+            total_pages = max(1, (n_visible + page_size - 1) // page_size)
             page = st.number_input(
                 "Page", min_value=1, max_value=total_pages, value=1, key="td_review_page",
             )
             page_start = (page - 1) * page_size
-            page_end = min(page_start + page_size, len(records))
+            page_end = min(page_start + page_size, n_visible)
             visible = records[page_start:page_end]
+            st.caption(f"Showing {page_start + 1}–{page_end} of {n_visible}")
 
-            n_disagree = sum(1 for r in records if r["disagree"])
-            st.markdown(
-                f"**`{target_class}`** — {len(records)} images, "
-                f"**{n_disagree}** disagree with classifier "
-                f"(showing {page_start + 1}–{page_end})"
-            )
+            # ---- Grid ---------------------------------------------------
 
             if "review_actions" not in st.session_state:
                 st.session_state.review_actions = {}
@@ -327,16 +381,22 @@ with tab_review:
                             st.error(str(e))
                             continue
 
-                        if rec["pred"] in ("(no model)", "(unreadable)"):
-                            st.write(f"`{rec['name']}`")
-                        else:
+                        # On-disk class always shown; classifier verdict
+                        # shown when the classifier ran.
+                        st.markdown(f"`{rec['name']}` — in :blue[**{rec['cls']}**]")
+                        if rec["pred"] not in ("(no model)", "(unreadable)"):
                             badge = "✗" if rec["disagree"] else "✓"
                             color = "red" if rec["disagree"] else "green"
                             st.markdown(
-                                f"`{rec['name']}` — :{color}[{badge} **{rec['pred']}** {rec['conf']:.0%}]"
+                                f":{color}[{badge} classifier: **{rec['pred']}** {rec['conf']:.0%}]"
                             )
 
-                        current = st.session_state.review_actions.get(str(rec["path"]), "Keep")
+                        # Default to the classifier's suggested move when
+                        # it disagrees — one click to accept.
+                        default_action = "Keep"
+                        if rec["disagree"] and rec["pred"] in CANONICAL_CLASSES:
+                            default_action = f"Move to {rec['pred']}"
+                        current = st.session_state.review_actions.get(str(rec["path"]), default_action)
                         choice = st.selectbox(
                             "Action",
                             options=ACTION_CHOICES,
@@ -347,6 +407,11 @@ with tab_review:
                         st.session_state.review_actions[str(rec["path"])] = choice
 
             st.divider()
+
+            # ---- Apply --------------------------------------------------
+
+            # Map path -> on-disk class so a "Move to <same>" is a no-op.
+            cls_by_path = {str(r["path"]): r["cls"] for r in all_records}
 
             delete_paths = []
             move_pairs = []
@@ -360,7 +425,8 @@ with tab_review:
                     delete_paths.append(src)
                 elif action.startswith("Move to "):
                     tgt = action[len("Move to "):]
-                    if tgt != target_class:
+                    current_cls = cls_by_path.get(path_str)
+                    if current_cls is not None and tgt != current_cls:
                         move_pairs.append((src, tgt))
 
             n_pending = len(delete_paths) + len(move_pairs)
