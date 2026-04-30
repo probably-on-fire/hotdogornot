@@ -34,6 +34,7 @@ from rfconnectorai.data_fetch.connector_crops import detect_connector_crops
 REPO = Path(__file__).resolve().parents[2]
 DATA_ROOT = REPO / "data" / "labeled" / "embedder"
 TEST_HOLDOUT_ROOT = REPO / "data" / "test_holdout"
+VIDEOS_ROOT = REPO / "data" / "videos"
 DEFAULT_MODEL_DIR = REPO / "models" / "connector_classifier"
 
 CANONICAL_CLASSES = [
@@ -137,11 +138,42 @@ with tab_upload:
         "`data/labeled/embedder/<CLASS>/` ready for training."
     )
 
-    uploaded = st.file_uploader(
-        "Upload video",
-        type=["mp4", "mov", "avi", "mkv", "webm"],
-        key="td_video",
-    )
+    saved_videos = sorted(
+        [p for p in VIDEOS_ROOT.iterdir() if p.is_file() and p.suffix.lower() in
+         (".mp4", ".mov", ".avi", ".mkv", ".webm")]
+    ) if VIDEOS_ROOT.is_dir() else []
+
+    if saved_videos:
+        source_mode = st.radio(
+            "Source",
+            options=["Pick a saved video", "Upload a new video"],
+            index=0, horizontal=True, key="td_source_mode",
+        )
+    else:
+        source_mode = "Upload a new video"
+
+    chosen_video_path: Path | None = None
+    uploaded_bytes: bytes | None = None
+    uploaded_name: str = "clip.mp4"
+
+    if source_mode == "Pick a saved video":
+        names = [p.name for p in saved_videos]
+        sel_name = st.selectbox(
+            "Saved videos",
+            options=names,
+            help=f"Stored in `{VIDEOS_ROOT}` on the server.",
+            key="td_saved_video",
+        )
+        chosen_video_path = next(p for p in saved_videos if p.name == sel_name)
+    else:
+        uploaded = st.file_uploader(
+            "Upload video",
+            type=["mp4", "mov", "avi", "mkv", "webm"],
+            key="td_video",
+        )
+        if uploaded is not None:
+            uploaded_bytes = uploaded.getvalue()
+            uploaded_name = uploaded.name
 
     col1, col2, col3 = st.columns(3)
     fps = col1.number_input(
@@ -174,12 +206,16 @@ with tab_upload:
         st.session_state.lbl_crops = []
         st.session_state.lbl_labels = {}
 
-    if uploaded is not None and st.button("Extract & detect", type="primary", key="td_extract"):
-        suffix = Path(uploaded.name).suffix or ".mp4"
+    have_video = chosen_video_path is not None or uploaded_bytes is not None
+    if have_video and st.button("Extract & detect", type="primary", key="td_extract"):
         with tempfile.TemporaryDirectory(prefix="rfcai_label_") as tmp:
             tmp_path = Path(tmp)
-            video_path = tmp_path / f"clip{suffix}"
-            video_path.write_bytes(uploaded.getvalue())
+            if chosen_video_path is not None:
+                video_path = chosen_video_path
+            else:
+                suffix = Path(uploaded_name).suffix or ".mp4"
+                video_path = tmp_path / f"clip{suffix}"
+                video_path.write_bytes(uploaded_bytes)
 
             with st.spinner(f"Extracting frames at {fps} fps…"):
                 frames = _extract_frames(video_path, tmp_path, float(fps))
