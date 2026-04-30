@@ -375,16 +375,16 @@ with tab_review:
             for row_start in range(0, len(visible), per_row):
                 cols = st.columns(per_row)
                 for col, rec in zip(cols, visible[row_start:row_start + per_row]):
+                    path_str = str(rec["path"])
                     with col:
                         try:
-                            st.image(str(rec["path"]), use_container_width=True)
+                            st.image(path_str, use_container_width=True)
                         except Exception as e:
                             st.error(str(e))
                             continue
 
-                        # On-disk class always shown; classifier verdict
-                        # shown when the classifier ran.
-                        st.markdown(f"`{rec['name']}` — in :blue[**{rec['cls']}**]")
+                        # On-disk class + classifier verdict.
+                        st.markdown(f"`{rec['name']}` · in :blue[**{rec['cls']}**]")
                         if rec["pred"] not in ("(no model)", "(unreadable)"):
                             badge = "✗" if rec["disagree"] else "✓"
                             color = "red" if rec["disagree"] else "green"
@@ -392,20 +392,58 @@ with tab_review:
                                 f":{color}[{badge} classifier: **{rec['pred']}** {rec['conf']:.0%}]"
                             )
 
-                        # Default to the classifier's suggested move when
-                        # it disagrees — one click to accept.
-                        default_action = "Keep"
-                        if rec["disagree"] and rec["pred"] in CANONICAL_CLASSES:
-                            default_action = f"Move to {rec['pred']}"
-                        current = st.session_state.review_actions.get(str(rec["path"]), default_action)
-                        choice = st.selectbox(
-                            "Action",
-                            options=ACTION_CHOICES,
-                            index=ACTION_CHOICES.index(current) if current in ACTION_CHOICES else 0,
-                            key=f"td_act_{rec['path']}",
+                        # 1-click action: Keep / Delete / Move. Default to
+                        # Move when classifier disagrees so accepting the
+                        # correction is just one click.
+                        current = st.session_state.review_actions.get(path_str)
+                        if current is None:
+                            current = (
+                                "Move"
+                                if rec["disagree"] and rec["pred"] in CANONICAL_CLASSES
+                                else "Keep"
+                            )
+                        elif current == "Delete (false positive)":
+                            current = "Delete"
+                        elif isinstance(current, str) and current.startswith("Move to "):
+                            current = "Move"
+
+                        action = st.radio(
+                            "action",
+                            options=["Keep", "Delete", "Move"],
+                            index=["Keep", "Delete", "Move"].index(current),
+                            horizontal=True,
+                            key=f"td_radio_{path_str}",
                             label_visibility="collapsed",
                         )
-                        st.session_state.review_actions[str(rec["path"])] = choice
+
+                        if action == "Keep":
+                            st.session_state.review_actions[path_str] = "Keep"
+                        elif action == "Delete":
+                            st.session_state.review_actions[path_str] = "Delete (false positive)"
+                            st.markdown(":red[**marked for delete**]")
+                        else:  # Move
+                            # Default the target to the classifier's prediction
+                            # when it disagrees, otherwise to the on-disk class.
+                            suggested = (
+                                rec["pred"]
+                                if rec["disagree"] and rec["pred"] in CANONICAL_CLASSES
+                                else rec["cls"]
+                            )
+                            existing = st.session_state.review_actions.get(path_str, "")
+                            if isinstance(existing, str) and existing.startswith("Move to "):
+                                suggested = existing[len("Move to "):]
+                            target = st.selectbox(
+                                "to",
+                                options=CANONICAL_CLASSES,
+                                index=CANONICAL_CLASSES.index(suggested) if suggested in CANONICAL_CLASSES else 0,
+                                key=f"td_movetgt_{path_str}",
+                                label_visibility="collapsed",
+                            )
+                            st.session_state.review_actions[path_str] = f"Move to {target}"
+                            if target == rec["cls"]:
+                                st.markdown(":gray[*(same class — no-op)*]")
+                            else:
+                                st.markdown(f":orange[**→ {target}**]")
 
             st.divider()
 
