@@ -40,6 +40,7 @@ def detect_connector_crops(
     max_area_frac: float = 0.10,
     pad_frac: float = 0.35,
     max_crops: int = 4,
+    edge_threshold_std: float = 2.0,
 ) -> list[CropResult]:
     """
     Find connectors via local edge density. Returns padded square crops.
@@ -72,7 +73,7 @@ def detect_connector_crops(
 
     mean_e = float(local_edge.mean())
     std_e = float(local_edge.std())
-    threshold = mean_e + 2.0 * std_e
+    threshold = mean_e + edge_threshold_std * std_e
     mask = (local_edge > threshold).astype(np.uint8) * 255
 
     close_size = max(7, int(min(h, w) * 0.012) | 1)

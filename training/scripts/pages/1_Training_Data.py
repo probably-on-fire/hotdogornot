@@ -143,16 +143,32 @@ with tab_upload:
         key="td_video",
     )
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     fps = col1.number_input(
-        "Extraction fps", min_value=0.5, max_value=15.0, value=2.0, step=0.5,
-        help="Higher fps = more frames = more data, but more clicks.",
+        "Extraction fps", min_value=0.5, max_value=30.0, value=5.0, step=0.5,
+        help="Frames sampled per second of video. Higher = more crops, more clicks. "
+             "Bump to 8-10 for short clips of a stationary connector at varied angles.",
         key="td_fps",
     )
     max_crops = col2.number_input(
-        "Max connectors per frame", min_value=1, max_value=6, value=3,
+        "Max connectors per frame", min_value=1, max_value=10, value=5,
+        help="Cap on detections per frame. Bump if you have a frame with multiple connectors.",
         key="td_maxcrops",
     )
+    sensitivity = col3.select_slider(
+        "Detector sensitivity",
+        options=["Low (3.0σ)", "Normal (2.0σ)", "High (1.5σ)", "Aggressive (1.0σ)"],
+        value="High (1.5σ)",
+        help="Edge-density threshold. Lower = catches more borderline crops "
+             "but more false positives. Aggressive captures everything; "
+             "expect to delete a lot in Review.",
+        key="td_sens",
+    )
+    sens_map = {
+        "Low (3.0σ)": 3.0, "Normal (2.0σ)": 2.0,
+        "High (1.5σ)": 1.5, "Aggressive (1.0σ)": 1.0,
+    }
+    edge_threshold_std = sens_map[sensitivity]
 
     if "lbl_crops" not in st.session_state:
         st.session_state.lbl_crops = []
@@ -177,7 +193,11 @@ with tab_upload:
                 for frame_idx, fp in enumerate(frames):
                     bgr = cv2.imread(str(fp))
                     if bgr is None: continue
-                    results = detect_connector_crops(bgr, max_crops=int(max_crops))
+                    results = detect_connector_crops(
+                        bgr,
+                        max_crops=int(max_crops),
+                        edge_threshold_std=edge_threshold_std,
+                    )
                     for crop_idx, r in enumerate(results):
                         ok, buf = cv2.imencode(".jpg", r.crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
                         if not ok: continue
