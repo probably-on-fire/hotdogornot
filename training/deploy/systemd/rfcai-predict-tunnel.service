@@ -1,0 +1,29 @@
+[Unit]
+Description=Reverse SSH tunnel: training-box:8503 -> aired.com:8504
+After=network-online.target rfcai-predict.service
+Wants=network-online.target rfcai-predict.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=rfcai
+Group=rfcai
+EnvironmentFile=/etc/default/rfcai-predict-tunnel
+ExecStart=/usr/bin/autossh -M 0 -N -T \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
+    -o StrictHostKeyChecking=accept-new \
+    -i ${RFCAI_SSH_KEY} \
+    -R ${RFCAI_REMOTE_BIND}:127.0.0.1:${RFCAI_LOCAL_PORT} \
+    ${RFCAI_RELAY_USER}@${RFCAI_RELAY_HOST}
+Restart=always
+RestartSec=10
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/rfcai
+
+[Install]
+WantedBy=multi-user.target
