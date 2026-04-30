@@ -1,18 +1,21 @@
 """
 Auto-detect connector positions in a video frame and return tight crops.
 
-Most of our M+F training videos show 1-2 connectors on a wood surface. The
-connectors are bright metallic blobs on a much darker matte background, so
-a simple Otsu-thresholded contour search picks them out reliably without
-any ML.
+Connectors on a wood bench (our typical capture environment) defeat naive
+brightness thresholding because the wood is bright too — Otsu lumps wood
+and metal into one giant white blob. We use **edge density** instead:
+metallic connectors have sharp hex outlines, dark shadow grooves, and
+specular highlights that all produce strong local edges, while wood
+surfaces are smooth with low local-edge magnitude.
 
 Public surface:
 
     detect_connector_crops(frame_bgr, max_crops=4) -> list[CropResult]
 
-Each CropResult contains the bounding box, a tight crop (with padding),
-and a center coordinate. Used by the Streamlit Video Labeler to give the
-user one labeling decision per detected connector instead of per frame.
+Each CropResult contains the bounding box, a tight padded square crop,
+and a center coordinate. Used by the Streamlit Video Labeler at training
+time and the /predict endpoint at inference time, so the same detector
+produces the data the classifier sees in both phases.
 """
 
 from __future__ import annotations
@@ -33,21 +36,25 @@ class CropResult:
 
 def detect_connector_crops(
     frame_bgr: np.ndarray,
-    min_area_frac: float = 0.001,
+    min_area_frac: float = 0.0005,
     max_area_frac: float = 0.10,
     pad_frac: float = 0.35,
     max_crops: int = 4,
 ) -> list[CropResult]:
     """
-    Find bright metallic blobs on the frame and return padded square crops.
+    Find connectors via local edge density. Returns padded square crops.
 
-    `min_area_frac` / `max_area_frac` filter contours by their fraction of the
-    total frame area — drops noise (too small) and continuous bright regions
-    like the wood surface (too big). Defaults are tuned for typical phone
-    captures of small connectors on a wood bench.
+    Algorithm:
+      1. Laplacian magnitude per pixel — highlights edges (hex outline,
+         shadow grooves, specular highlights).
+      2. Local sum of edge magnitudes via box filter — region-density map.
+      3. Threshold at mean + 2*std of the density map; morphologically
+         close so a connector's clustered edges merge into one blob.
+      4. Filter contours by area + aspect ratio (drops wood-grain lines
+         and noise).
 
-    Crops are square with the connector centered, padded by `pad_frac * size`
-    so the user sees enough context to identify M vs F at a glance.
+    Window sizes scale with frame dimensions so the same detector works
+    on phone video (1080p) and high-res photos (4K) without retuning.
     """
     h, w = frame_bgr.shape[:2]
     total = h * w
@@ -55,12 +62,21 @@ def detect_connector_crops(
     max_area = total * max_area_frac
 
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    # Otsu finds the metal-vs-wood split fairly reliably.
-    _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # Dilate-then-erode (close) to bridge the small dark gaps inside the
-    # connector body (e.g., the dark hex shadow lines).
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    lap = cv2.Laplacian(gray, cv2.CV_32F, ksize=3)
+    edge_mag = np.abs(lap).astype(np.float32)
+
+    # Box-filter the edge magnitude — high values mean edge-dense regions.
+    # Window scales with frame size; |1 makes it odd as box filters expect.
+    window = max(11, int(min(h, w) * 0.02) | 1)
+    local_edge = cv2.boxFilter(edge_mag, -1, (window, window))
+
+    mean_e = float(local_edge.mean())
+    std_e = float(local_edge.std())
+    threshold = mean_e + 2.0 * std_e
+    mask = (local_edge > threshold).astype(np.uint8) * 255
+
+    close_size = max(7, int(min(h, w) * 0.012) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_size, close_size))
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -70,11 +86,9 @@ def detect_connector_crops(
         if area < min_area or area > max_area:
             continue
         x, y, cw, ch = cv2.boundingRect(c)
-        # Drop highly-elongated contours (likely wood-grain lines).
         aspect = max(cw, ch) / max(1, min(cw, ch))
         if aspect > 2.5:
             continue
-        # Build a square padded crop centered on the contour.
         side = int(max(cw, ch) * (1 + 2 * pad_frac))
         cx = x + cw // 2
         cy = y + ch // 2
@@ -82,7 +96,6 @@ def detect_connector_crops(
         y0 = max(0, cy - side // 2)
         x1 = min(w, x0 + side)
         y1 = min(h, y0 + side)
-        # Re-anchor if we hit an edge so the crop stays square if possible.
         if x1 - x0 < side: x0 = max(0, x1 - side)
         if y1 - y0 < side: y0 = max(0, y1 - side)
         crop = frame_bgr[y0:y1, x0:x1].copy()
@@ -90,6 +103,5 @@ def detect_connector_crops(
             crop=crop, bbox=(x, y, cw, ch), center=(cx, cy), area_px=int(area),
         ))
 
-    # Keep the largest N crops (likely the actual connectors, not background blobs).
     candidates.sort(key=lambda r: -r.area_px)
     return candidates[:max_crops]
