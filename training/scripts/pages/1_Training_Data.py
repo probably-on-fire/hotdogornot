@@ -43,7 +43,6 @@ CANONICAL_CLASSES = [
     "2.4mm-M", "2.4mm-F",
 ]
 LABEL_CHOICES = ["(skip)"] + CANONICAL_CLASSES
-ACTION_CHOICES = ["Keep", "Delete (false positive)"] + [f"Move to {c}" for c in CANONICAL_CLASSES]
 
 
 # ---------------------------------------------------------------------------
@@ -368,8 +367,33 @@ with tab_review:
 
             # ---- Grid ---------------------------------------------------
 
-            if "review_actions" not in st.session_state:
-                st.session_state.review_actions = {}
+            if "review_selected" not in st.session_state:
+                st.session_state.review_selected = set()
+
+            visible_paths = [str(r["path"]) for r in visible]
+            sel_visible = sum(1 for p in visible_paths if p in st.session_state.review_selected)
+
+            # ---- Page-level select-all helpers --------------------------
+
+            sa1, sa2, sa3 = st.columns([1, 1, 4])
+            if sa1.button(
+                f"Select all on page ({len(visible_paths)})",
+                key="td_review_selpage", use_container_width=True,
+            ):
+                st.session_state.review_selected.update(visible_paths)
+                st.rerun()
+            if sa2.button(
+                "Clear selection", key="td_review_selclr", use_container_width=True,
+                disabled=len(st.session_state.review_selected) == 0,
+            ):
+                st.session_state.review_selected.clear()
+                st.rerun()
+            sa3.caption(
+                f"{sel_visible}/{len(visible_paths)} selected on this page · "
+                f"{len(st.session_state.review_selected)} selected total"
+            )
+
+            # ---- Grid ---------------------------------------------------
 
             per_row = 4
             for row_start in range(0, len(visible), per_row):
@@ -392,100 +416,66 @@ with tab_review:
                                 f":{color}[{badge} classifier: **{rec['pred']}** {rec['conf']:.0%}]"
                             )
 
-                        # 1-click action: Keep / Delete / Move. Default to
-                        # Move when classifier disagrees so accepting the
-                        # correction is just one click.
-                        current = st.session_state.review_actions.get(path_str)
-                        if current is None:
-                            current = (
-                                "Move"
-                                if rec["disagree"] and rec["pred"] in CANONICAL_CLASSES
-                                else "Keep"
-                            )
-                        elif current == "Delete (false positive)":
-                            current = "Delete"
-                        elif isinstance(current, str) and current.startswith("Move to "):
-                            current = "Move"
-
-                        action = st.radio(
-                            "action",
-                            options=["Keep", "Delete", "Move"],
-                            index=["Keep", "Delete", "Move"].index(current),
-                            horizontal=True,
-                            key=f"td_radio_{path_str}",
+                        is_selected = path_str in st.session_state.review_selected
+                        new_state = st.checkbox(
+                            "select",
+                            value=is_selected,
+                            key=f"td_sel_{path_str}",
                             label_visibility="collapsed",
                         )
-
-                        if action == "Keep":
-                            st.session_state.review_actions[path_str] = "Keep"
-                        elif action == "Delete":
-                            st.session_state.review_actions[path_str] = "Delete (false positive)"
-                            st.markdown(":red[**marked for delete**]")
-                        else:  # Move
-                            # Default the target to the classifier's prediction
-                            # when it disagrees, otherwise to the on-disk class.
-                            suggested = (
-                                rec["pred"]
-                                if rec["disagree"] and rec["pred"] in CANONICAL_CLASSES
-                                else rec["cls"]
-                            )
-                            existing = st.session_state.review_actions.get(path_str, "")
-                            if isinstance(existing, str) and existing.startswith("Move to "):
-                                suggested = existing[len("Move to "):]
-                            target = st.selectbox(
-                                "to",
-                                options=CANONICAL_CLASSES,
-                                index=CANONICAL_CLASSES.index(suggested) if suggested in CANONICAL_CLASSES else 0,
-                                key=f"td_movetgt_{path_str}",
-                                label_visibility="collapsed",
-                            )
-                            st.session_state.review_actions[path_str] = f"Move to {target}"
-                            if target == rec["cls"]:
-                                st.markdown(":gray[*(same class — no-op)*]")
-                            else:
-                                st.markdown(f":orange[**→ {target}**]")
+                        if new_state and not is_selected:
+                            st.session_state.review_selected.add(path_str)
+                        elif not new_state and is_selected:
+                            st.session_state.review_selected.discard(path_str)
 
             st.divider()
 
-            # ---- Apply --------------------------------------------------
+            # ---- Bulk actions on selected -------------------------------
 
-            # Map path -> on-disk class so a "Move to <same>" is a no-op.
-            cls_by_path = {str(r["path"]): r["cls"] for r in all_records}
-
-            delete_paths = []
-            move_pairs = []
-            for path_str, action in st.session_state.review_actions.items():
-                if action == "Keep":
-                    continue
-                src = Path(path_str)
-                if not src.exists():
-                    continue
-                if action == "Delete (false positive)":
-                    delete_paths.append(src)
-                elif action.startswith("Move to "):
-                    tgt = action[len("Move to "):]
-                    current_cls = cls_by_path.get(path_str)
-                    if current_cls is not None and tgt != current_cls:
-                        move_pairs.append((src, tgt))
-
-            n_pending = len(delete_paths) + len(move_pairs)
-            if n_pending == 0:
-                st.caption("No pending changes.")
+            sel_count = len(st.session_state.review_selected)
+            st.markdown(f"### {sel_count} selected")
+            if sel_count == 0:
+                st.caption("Tick the box on each tile that's wrong, then choose an action.")
             else:
-                st.markdown(
-                    f"**{n_pending} pending changes** "
-                    f"(delete: {len(delete_paths)}, move: {len(move_pairs)})"
-                )
-                if st.button("Apply", type="primary", key="td_review_apply"):
-                    deleted = moved = 0
-                    for src in delete_paths:
+                bcol1, bcol2 = st.columns(2)
+                if bcol1.button(
+                    f"✗ Delete {sel_count} image(s)",
+                    type="primary", use_container_width=True, key="td_bulk_delete",
+                    help="Permanently removes the files from data/labeled/embedder/.",
+                ):
+                    deleted = 0
+                    for p_str in list(st.session_state.review_selected):
                         try:
-                            src.unlink()
+                            Path(p_str).unlink()
                             deleted += 1
                         except Exception:
                             pass
-                    for src, tgt in move_pairs:
-                        tgt_dir = DATA_ROOT / tgt
+                    st.session_state.review_selected.clear()
+                    _predict_path.clear()
+                    st.success(f"Deleted {deleted} image(s).")
+                    st.rerun()
+
+                if bcol2.button(
+                    f"⇄ Flip gender on {sel_count} image(s)",
+                    type="primary", use_container_width=True, key="td_bulk_flip",
+                    help="Moves each selected image to the same family with the opposite gender — e.g. 2.4mm-M → 2.4mm-F.",
+                ):
+                    moved = skipped = 0
+                    for p_str in list(st.session_state.review_selected):
+                        src = Path(p_str)
+                        if not src.exists():
+                            skipped += 1
+                            continue
+                        cls = src.parent.name
+                        if cls not in CANONICAL_CLASSES:
+                            skipped += 1
+                            continue
+                        family, gender = cls.rsplit("-", 1)
+                        new_cls = f"{family}-{'F' if gender == 'M' else 'M'}"
+                        if new_cls not in CANONICAL_CLASSES:
+                            skipped += 1
+                            continue
+                        tgt_dir = DATA_ROOT / new_cls
                         tgt_dir.mkdir(parents=True, exist_ok=True)
                         stem, ext = src.stem, src.suffix
                         dst = tgt_dir / src.name
@@ -497,10 +487,10 @@ with tab_review:
                             shutil.move(str(src), str(dst))
                             moved += 1
                         except Exception:
-                            pass
-                    st.success(f"Applied — deleted {deleted}, moved {moved}.")
-                    st.session_state.review_actions = {}
+                            skipped += 1
+                    st.session_state.review_selected.clear()
                     _predict_path.clear()
+                    st.success(f"Flipped gender on {moved} image(s)" + (f" ({skipped} skipped)." if skipped else "."))
                     st.rerun()
 
 # ===========================================================================
