@@ -41,6 +41,7 @@ def detect_connector_crops(
     pad_frac: float = 0.35,
     max_crops: int = 4,
     edge_threshold_std: float = 2.0,
+    min_circularity: float = 0.0,
 ) -> list[CropResult]:
     """
     Find connectors via local edge density. Returns padded square crops.
@@ -90,6 +91,15 @@ def detect_connector_crops(
         aspect = max(cw, ch) / max(1, min(cw, ch))
         if aspect > 2.5:
             continue
+        # Circularity = 4π·area / perimeter² — perfect circle is 1.0,
+        # connectors are 0.6–0.9, wood-grain blobs are usually <0.4.
+        if min_circularity > 0.0:
+            perimeter = cv2.arcLength(c, True)
+            if perimeter <= 0:
+                continue
+            circularity = 4.0 * np.pi * area / (perimeter * perimeter)
+            if circularity < min_circularity:
+                continue
         side = int(max(cw, ch) * (1 + 2 * pad_frac))
         cx = x + cw // 2
         cy = y + ch // 2
