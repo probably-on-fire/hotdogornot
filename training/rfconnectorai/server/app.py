@@ -262,7 +262,10 @@ def create_app(config: dict | None = None) -> FastAPI:
             if k.lower() not in _HOP_BY_HOP and k.lower() != "host"
         }
         body = await request.body()
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        # Generous timeout: a cold-start grid load runs Hough+blur+dHash
+        # over every labeled crop (~500 files at ~50ms each = ~30-60s on
+        # the training-box CPU). Subsequent loads are instant from cache.
+        async with httpx.AsyncClient(timeout=180.0) as client:
             upstream = await client.request(
                 method=request.method,
                 url=target,
