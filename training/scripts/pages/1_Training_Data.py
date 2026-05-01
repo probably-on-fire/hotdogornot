@@ -92,6 +92,26 @@ def _load_classifier(model_dir_str: str | None):
 
 
 @st.cache_data(show_spinner=False)
+def _count_circles_in_crop(img_path_str: str, mtime: float) -> int:
+    """How many connector-like circles does this crop contain? Used to
+    surface multi-object crops (a single image with two connectors in it
+    is poison for training)."""
+    bgr = cv2.imread(img_path_str)
+    if bgr is None: return 0
+    h, w = bgr.shape[:2]
+    short = min(h, w)
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.medianBlur(gray, 7)
+    min_r = max(15, int(short * 0.10))
+    max_r = max(min_r + 1, int(short * 0.45))
+    circles = cv2.HoughCircles(
+        gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=min_r,
+        param1=80, param2=30, minRadius=min_r, maxRadius=max_r,
+    )
+    return 0 if circles is None else len(circles[0])
+
+
+@st.cache_data(show_spinner=False)
 def _predict_path(_clf_id: str, img_path_str: str) -> tuple[str, float]:
     clf = _load_classifier(_clf_id) if _clf_id else None
     if clf is None: return ("(no model)", 0.0)
@@ -339,6 +359,11 @@ with tab_review:
             "Only disagreements", value=False, key="td_review_disagree",
             help="Show only images where the classifier predicts a different class than the folder.",
         )
+        only_multi = st.checkbox(
+            "Only multi-object",
+            value=False, key="td_review_multi",
+            help="Show only crops with 2+ circular objects detected — these contain multiple connectors and confuse training.",
+        )
         use_classifier = st.checkbox(
             "Use classifier",
             value=(DEFAULT_MODEL_DIR / "weights.pt").exists(),
@@ -386,6 +411,12 @@ with tab_review:
                     else:
                         pred, conf = "(no model)", 0.0
                     disagree = pred != cls and pred not in ("(no model)", "(unreadable)")
+                    try:
+                        n_circles = _count_circles_in_crop(
+                            str(img_path), img_path.stat().st_mtime
+                        )
+                    except Exception:
+                        n_circles = 0
                     all_records.append({
                         "path": img_path,
                         "name": img_path.name,
@@ -393,6 +424,8 @@ with tab_review:
                         "pred": pred,
                         "conf": conf,
                         "disagree": disagree,
+                        "n_circles": n_circles,
+                        "multi": n_circles >= 2,
                     })
 
         # ---- Apply filters ----------------------------------------------
@@ -400,6 +433,8 @@ with tab_review:
         records = all_records
         if only_disagree:
             records = [r for r in records if r["disagree"]]
+        if only_multi:
+            records = [r for r in records if r["multi"]]
         if use_classifier and (conf_lo > 0 or conf_hi < 100):
             lo, hi = conf_lo / 100.0, conf_hi / 100.0
             records = [r for r in records if lo <= r["conf"] <= hi]
@@ -414,9 +449,11 @@ with tab_review:
         n_total = len(all_records)
         n_visible = len(records)
         n_disagree = sum(1 for r in all_records if r["disagree"])
+        n_multi = sum(1 for r in all_records if r["multi"])
         st.markdown(
             f"**{n_visible}** of {n_total} images match — "
-            f"{n_disagree} disagree with classifier across the selected classes."
+            f"{n_disagree} disagree with classifier · "
+            f"**{n_multi}** are multi-object (≥2 circles)."
         )
 
         if n_visible == 0:
@@ -437,7 +474,8 @@ with tab_review:
             # is preserved and other tiles are untouched.
             @st.fragment
             def _review_tile(path_str: str, cls: str, name: str,
-                             pred: str, conf: float, disagree: bool):
+                             pred: str, conf: float, disagree: bool,
+                             n_circles: int):
                 path = Path(path_str)
 
                 # If this image was deleted or moved (file gone from this
@@ -458,6 +496,10 @@ with tab_review:
                     color = "red" if disagree else "green"
                     st.markdown(
                         f":{color}[{badge} classifier: **{pred}** {conf:.0%}]"
+                    )
+                if n_circles >= 2:
+                    st.markdown(
+                        f":orange[⚠ multi-object: **{n_circles}** circles detected]"
                     )
 
                 bc1, bc2 = st.columns(2)
@@ -508,6 +550,7 @@ with tab_review:
                             pred=rec["pred"],
                             conf=float(rec["conf"]),
                             disagree=bool(rec["disagree"]),
+                            n_circles=int(rec["n_circles"]),
                         )
 
 # ===========================================================================
