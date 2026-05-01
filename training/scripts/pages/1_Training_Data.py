@@ -432,63 +432,83 @@ with tab_review:
             visible = records[page_start:page_end]
             st.caption(f"Showing {page_start + 1}–{page_end} of {n_visible}")
 
-            # Grid: each tile has Delete and Flip-gender buttons that act
-            # immediately. No staging, no Apply step.
+            # Each tile is a Streamlit fragment: Delete / Flip clicks rerun
+            # ONLY this tile's fragment, not the whole page. Scroll position
+            # is preserved and other tiles are untouched.
+            @st.fragment
+            def _review_tile(path_str: str, cls: str, name: str,
+                             pred: str, conf: float, disagree: bool):
+                path = Path(path_str)
+
+                # If this image was deleted or moved (file gone from this
+                # location), show that state and stop.
+                if not path.exists():
+                    st.caption(f":gray[~~`{name}`~~ — gone]")
+                    return
+
+                try:
+                    st.image(path_str, use_container_width=True)
+                except Exception as e:
+                    st.error(str(e))
+                    return
+
+                st.markdown(f"`{name}` · in :blue[**{cls}**]")
+                if pred not in ("(no model)", "(unreadable)"):
+                    badge = "✗" if disagree else "✓"
+                    color = "red" if disagree else "green"
+                    st.markdown(
+                        f":{color}[{badge} classifier: **{pred}** {conf:.0%}]"
+                    )
+
+                bc1, bc2 = st.columns(2)
+                if bc1.button(
+                    "✗ Delete", key=f"td_del_{path_str}",
+                    type="primary", use_container_width=True,
+                ):
+                    try:
+                        path.unlink()
+                    except Exception as e:
+                        st.error(f"Couldn't delete: {e}")
+                    # No st.rerun — fragment auto-reruns. The next pass will
+                    # see path.exists() == False and render the "gone" state.
+
+                family, gender = cls.rsplit("-", 1)
+                new_cls = f"{family}-{'F' if gender == 'M' else 'M'}"
+                flip_label = f"⇄ → {new_cls.rsplit('-', 1)[1]}"
+                if bc2.button(
+                    flip_label, key=f"td_flip_{path_str}",
+                    type="primary", use_container_width=True,
+                    disabled=new_cls not in CANONICAL_CLASSES,
+                    help=f"Move to {new_cls}",
+                ):
+                    tgt_dir = DATA_ROOT / new_cls
+                    tgt_dir.mkdir(parents=True, exist_ok=True)
+                    stem, ext = path.stem, path.suffix
+                    dst = tgt_dir / path.name
+                    n = 1
+                    while dst.exists():
+                        dst = tgt_dir / f"{stem}_dup{n}{ext}"
+                        n += 1
+                    try:
+                        shutil.move(str(path), str(dst))
+                    except Exception as e:
+                        st.error(f"Couldn't flip: {e}")
+                    # Same: fragment auto-reruns; path no longer exists at
+                    # the original location, so we'll render the "gone" state.
+
             per_row = 4
             for row_start in range(0, len(visible), per_row):
                 cols = st.columns(per_row)
                 for col, rec in zip(cols, visible[row_start:row_start + per_row]):
-                    path_str = str(rec["path"])
                     with col:
-                        try:
-                            st.image(path_str, use_container_width=True)
-                        except Exception as e:
-                            st.error(str(e))
-                            continue
-
-                        st.markdown(f"`{rec['name']}` · in :blue[**{rec['cls']}**]")
-                        if rec["pred"] not in ("(no model)", "(unreadable)"):
-                            badge = "✗" if rec["disagree"] else "✓"
-                            color = "red" if rec["disagree"] else "green"
-                            st.markdown(
-                                f":{color}[{badge} classifier: **{rec['pred']}** {rec['conf']:.0%}]"
-                            )
-
-                        bc1, bc2 = st.columns(2)
-                        if bc1.button(
-                            "✗ Delete", key=f"td_del_{path_str}",
-                            type="primary", use_container_width=True,
-                        ):
-                            try:
-                                rec["path"].unlink()
-                            except Exception as e:
-                                st.error(f"Couldn't delete: {e}")
-                            _predict_path.clear()
-                            st.rerun()
-
-                        family, gender = rec["cls"].rsplit("-", 1)
-                        new_cls = f"{family}-{'F' if gender == 'M' else 'M'}"
-                        flip_label = f"⇄ → {new_cls.rsplit('-', 1)[1]}"
-                        if bc2.button(
-                            flip_label, key=f"td_flip_{path_str}",
-                            type="primary", use_container_width=True,
-                            disabled=new_cls not in CANONICAL_CLASSES,
-                            help=f"Move to {new_cls}",
-                        ):
-                            tgt_dir = DATA_ROOT / new_cls
-                            tgt_dir.mkdir(parents=True, exist_ok=True)
-                            stem, ext = rec["path"].stem, rec["path"].suffix
-                            dst = tgt_dir / rec["path"].name
-                            n = 1
-                            while dst.exists():
-                                dst = tgt_dir / f"{stem}_dup{n}{ext}"
-                                n += 1
-                            try:
-                                shutil.move(str(rec["path"]), str(dst))
-                            except Exception as e:
-                                st.error(f"Couldn't flip: {e}")
-                            _predict_path.clear()
-                            st.rerun()
+                        _review_tile(
+                            path_str=str(rec["path"]),
+                            cls=rec["cls"],
+                            name=rec["name"],
+                            pred=rec["pred"],
+                            conf=float(rec["conf"]),
+                            disagree=bool(rec["disagree"]),
+                        )
 
 # ===========================================================================
 # Tab 3: Train
