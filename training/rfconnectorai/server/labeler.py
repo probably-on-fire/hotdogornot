@@ -27,16 +27,21 @@ from __future__ import annotations
 import os
 import secrets
 import shutil
+import subprocess
+import tempfile
+import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
+
+from rfconnectorai.data_fetch.connector_crops import detect_connector_crops_hough
 
 
 CANONICAL_CLASSES = [
@@ -54,6 +59,23 @@ def _data_root() -> Path:
         "RFCAI_LABELED_DIR",
         "/opt/rfcai/repo/training/data/labeled/embedder",
     )).resolve()
+
+
+def _test_holdout_root() -> Path:
+    return Path(os.environ.get(
+        "RFCAI_TEST_HOLDOUT_DIR",
+        "/opt/rfcai/repo/training/data/test_holdout",
+    )).resolve()
+
+
+def _videos_root() -> Path:
+    return Path(os.environ.get(
+        "RFCAI_VIDEOS_DIR",
+        "/opt/rfcai/repo/training/data/videos",
+    )).resolve()
+
+
+CANONICAL_FAMILIES = ["SMA", "3.5mm", "2.92mm", "2.4mm"]
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +419,130 @@ def create_router() -> APIRouter:
                 except Exception:
                     pass
         return HTMLResponse(f"<div class='success'>Deleted {deleted} image(s).</div>")
+
+    @r.post("/upload-test", response_class=HTMLResponse)
+    async def upload_test(
+        cls: str = Form(...),
+        images: list[UploadFile] = File(...),
+        _: str = Depends(_require_basic_auth),
+    ):
+        if cls not in CANONICAL_CLASSES:
+            raise HTTPException(400, f"unknown class {cls!r}")
+        out_dir = _test_holdout_root() / cls
+        out_dir.mkdir(parents=True, exist_ok=True)
+        saved = []
+        for image in images:
+            if not image.filename:
+                continue
+            ext = Path(image.filename).suffix.lower()
+            if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+                continue
+            stem = Path(image.filename).stem or f"upload_{int(time.time())}"
+            # Strip any path components for safety.
+            stem = Path(stem).name
+            dst = out_dir / f"{stem}{ext}"
+            n = 1
+            while dst.exists():
+                dst = out_dir / f"{stem}_dup{n}{ext}"
+                n += 1
+            data = await image.read()
+            dst.write_bytes(data)
+            saved.append(dst.name)
+        if not saved:
+            return HTMLResponse(
+                "<div style='color:#f87171'>No valid images saved (jpg/png/webp only).</div>"
+            )
+        return HTMLResponse(
+            f"<div style='color:#4ade80'>Saved {len(saved)} test image(s) to "
+            f"<code>data/test_holdout/{cls}/</code>: {', '.join(saved)}</div>"
+        )
+
+    @r.post("/upload-video", response_class=HTMLResponse)
+    async def upload_video(
+        family: str = Form(...),
+        fps: float = Form(5.0),
+        sensitivity: float = Form(2.0),
+        max_crops: int = Form(5),
+        file: UploadFile = File(...),
+        _: str = Depends(_require_basic_auth),
+    ):
+        if family not in CANONICAL_FAMILIES:
+            raise HTTPException(400, f"unknown family {family!r}")
+        if not file.filename:
+            raise HTTPException(400, "no file")
+        ext = Path(file.filename).suffix.lower()
+        if ext not in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
+            raise HTTPException(400, f"unsupported video extension {ext!r}")
+        # Stash a copy of the source video for re-extraction later.
+        videos_dir = _videos_root()
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        stem = Path(file.filename).stem or f"upload_{int(time.time())}"
+        stem = Path(stem).name
+        saved_video = videos_dir / f"{stem}{ext}"
+        n = 1
+        while saved_video.exists():
+            saved_video = videos_dir / f"{stem}_dup{n}{ext}"
+            n += 1
+        data = await file.read()
+        saved_video.write_bytes(data)
+
+        # Extract frames at requested fps, run Hough, dump crops to
+        # <family>-M (user will Flip wrong-gender ones via the labeler).
+        try:
+            import imageio_ffmpeg
+            ff = imageio_ffmpeg.get_ffmpeg_exe()
+        except Exception as e:
+            raise HTTPException(500, f"ffmpeg not available: {e}")
+        target_cls = f"{family}-M"
+        out_dir = _data_root() / target_cls
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Pick a fresh starting index for "agg_NNNN.jpg" output names.
+        existing = []
+        for p in out_dir.glob("agg_*.jpg"):
+            tail = p.stem[len("agg_"):]
+            if tail.isdigit():
+                existing.append(int(tail))
+        idx = max(existing) + 1 if existing else 0
+
+        saved_crops = 0
+        with tempfile.TemporaryDirectory(prefix="upload_video_") as tmp:
+            tmpp = Path(tmp)
+            subprocess.run(
+                [ff, "-y", "-i", str(saved_video),
+                 "-vf", f"fps={fps}", "-q:v", "4",
+                 str(tmpp / "f_%04d.jpg")],
+                capture_output=True, check=False,
+            )
+            frames = sorted(tmpp.glob("f_*.jpg"))
+            for fp in frames:
+                bgr = cv2.imread(str(fp))
+                if bgr is None:
+                    continue
+                # Reuse the Hough detector with the same defaults the
+                # bulk-extract script tuned (pad_frac=0.35, param2=22).
+                results = detect_connector_crops_hough(
+                    bgr,
+                    max_crops=int(max_crops),
+                    pad_frac=0.35,
+                    accumulator_threshold=22,
+                )
+                for r2 in results:
+                    cv2.imwrite(
+                        str(out_dir / f"agg_{idx:04d}.jpg"),
+                        r2.crop, [cv2.IMWRITE_JPEG_QUALITY, 90],
+                    )
+                    idx += 1
+                    saved_crops += 1
+
+        # Bust the signal cache so the new crops show up scored on next grid load.
+        global _signals_cache
+        _signals_cache = {}
+
+        return HTMLResponse(
+            f"<div style='color:#4ade80'>Extracted <strong>{saved_crops}</strong> crops "
+            f"from {saved_video.name} into <code>{target_cls}/</code> "
+            f"({len(frames)} frames at {fps} fps). Refresh the grid to see them.</div>"
+        )
 
     return r
 

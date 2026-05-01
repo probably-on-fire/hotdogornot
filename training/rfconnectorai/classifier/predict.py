@@ -36,6 +36,27 @@ class ClassifierPrediction:
     probabilities: dict[str, float] = field(default_factory=dict)
 
 
+def _tta_variants(pil: Image.Image) -> list[Image.Image]:
+    """5 cheap augmentations for test-time averaging. Avoids vertical
+    flip (breaks pin-vs-hole appearance) and any color jitter (could
+    swap the M-vs-F luminance cue), since both would degrade the average
+    rather than denoise it."""
+    w, h = pil.size
+    short = min(w, h)
+    # 90% center crop for the "slight zoom" variant.
+    crop = int(short * 0.9)
+    left = (w - crop) // 2
+    top = (h - crop) // 2
+    zoomed = pil.crop((left, top, left + crop, top + crop))
+    return [
+        pil,
+        pil.transpose(Image.FLIP_LEFT_RIGHT),
+        pil.rotate(10, resample=Image.BILINEAR),
+        pil.rotate(-10, resample=Image.BILINEAR),
+        zoomed,
+    ]
+
+
 def _build_model(num_classes: int) -> nn.Module:
     # Mirror what train.py does — initialize weights=None since we're loading
     # the fine-tuned state_dict immediately after.
@@ -78,8 +99,16 @@ class ConnectorClassifier:
         model.load_state_dict(torch.load(weights_path, map_location=device))
         return cls(model=model, class_names=class_names, device=device)
 
-    def predict(self, image: np.ndarray | Image.Image) -> ClassifierPrediction:
-        """Predict class for a single image (RGB uint8 array or PIL Image)."""
+    def predict(self, image: np.ndarray | Image.Image,
+                tta: bool = True) -> ClassifierPrediction:
+        """Predict class for a single image (RGB uint8 array or PIL Image).
+
+        With tta=True (default), runs inference on 5 augmented variants of
+        the input — original, horizontal flip, ±10° rotations, slight
+        center zoom — and averages probabilities. Costs ~5x compute on
+        the predict path but typically buys 2-5% on noisy held-out data
+        with no retraining.
+        """
         if isinstance(image, np.ndarray):
             if image.ndim != 3 or image.shape[2] != 3:
                 raise ValueError(f"expected HxWx3 RGB image, got shape {image.shape}")
@@ -87,10 +116,18 @@ class ConnectorClassifier:
         else:
             pil = image.convert("RGB")
 
-        x = self.transform(pil).unsqueeze(0).to(self.device)
-        with torch.no_grad():
-            logits = self.model(x)
-            probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
+        if tta:
+            variants = _tta_variants(pil)
+            xs = torch.stack([self.transform(v) for v in variants], dim=0).to(self.device)
+            with torch.no_grad():
+                logits = self.model(xs)
+                probs = torch.softmax(logits, dim=1).mean(dim=0).cpu().numpy()
+        else:
+            x = self.transform(pil).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                logits = self.model(x)
+                probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
+
         top_idx = int(np.argmax(probs))
         return ClassifierPrediction(
             class_name=self.class_names[top_idx],
