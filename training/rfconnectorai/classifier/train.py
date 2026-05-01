@@ -31,7 +31,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
 from torchvision import models
 
 from rfconnectorai.classifier.dataset import (
@@ -144,9 +144,23 @@ def train(config: TrainConfig) -> dict:
         )
 
     train_idx, val_idx = _split_indices(len(train_ds), config.val_fraction, config.seed)
+
+    # Class-balanced sampling: oversample minority classes so a 22-sample
+    # class contributes the same per-epoch gradient signal as an 86-sample
+    # class. Without this, the model defaults to the most-frequent class
+    # on out-of-distribution inputs (the held-out 3.5mm-bias we just hit).
+    train_labels = [train_ds.samples[i][1] for i in train_idx]
+    label_counts = {l: train_labels.count(l) for l in set(train_labels)}
+    sample_weights = [1.0 / label_counts[l] for l in train_labels]
+    sampler = WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(train_idx),
+        replacement=True,
+    )
+
     train_loader = DataLoader(
         Subset(train_ds, train_idx),
-        batch_size=config.batch_size, shuffle=True, num_workers=0,
+        batch_size=config.batch_size, sampler=sampler, num_workers=0,
     )
     val_loader = DataLoader(
         Subset(eval_ds, val_idx),

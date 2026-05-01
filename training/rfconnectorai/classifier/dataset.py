@@ -33,13 +33,25 @@ INPUT_SIZE = 224
 
 
 def make_train_transforms() -> transforms.Compose:
+    """Aggressive augmentation: forces the model to identify the connector
+    rather than relying on background / lighting cues that are constant
+    across our training videos but absent from real-world held-out
+    photos. Small RandomResizedCrop scales include "tight zoom on the
+    connector" cases. Rotation, ColorJitter, blur, and RandomErasing
+    all break shortcut cues."""
     return transforms.Compose([
         transforms.Resize(256),
-        transforms.RandomResizedCrop(INPUT_SIZE, scale=(0.7, 1.0)),
+        transforms.RandomResizedCrop(INPUT_SIZE, scale=(0.5, 1.0), ratio=(0.85, 1.18)),
         transforms.RandomHorizontalFlip(),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.1),
+        transforms.RandomVerticalFlip(p=0.2),
+        transforms.RandomRotation(degrees=30),
+        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.3, hue=0.05),
+        transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 1.5))], p=0.3),
         transforms.ToTensor(),
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+        # Erase a random rectangle. Forces features distributed across the
+        # crop instead of one corner shortcut.
+        transforms.RandomErasing(p=0.35, scale=(0.02, 0.18), ratio=(0.3, 3.3)),
     ])
 
 
