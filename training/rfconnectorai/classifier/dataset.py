@@ -55,9 +55,12 @@ def make_train_transforms() -> transforms.Compose:
         transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 1.0))], p=0.2),
         transforms.ToTensor(),
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-        # No RandomErasing: even small patches can wipe the central pin
-        # on M crops, training the model to predict F when the gender
-        # cue is occluded. Empirically observed gender collapse to F.
+        # Tiny RandomErasing patches: scale up to 5% only — small enough
+        # that the central pin/hole gender cue almost always survives,
+        # large enough to nudge the model away from background shortcuts.
+        # Empirically: omitting it entirely or going larger both hurt
+        # held-out across runs.
+        transforms.RandomErasing(p=0.20, scale=(0.02, 0.05), ratio=(0.5, 2.0)),
     ])
 
 
