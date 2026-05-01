@@ -10,6 +10,7 @@ dist/
 build/
 
 # Data and models
+backups/
 data/raw/
 data/synthetic/
 data/labeled/
@@ -18,6 +19,9 @@ data/cad/
 data/field_test/
 data/synthetic_faces/
 data/synthetic_angled/
+data/test_holdout/
+data/videos/
+data/archive/
 models/
 runs/
 *.pt
