@@ -38,11 +38,14 @@
 {% endfor %}
 
 {% if has_more %}
+{# URL already carries every filter (filter_query is built from the
+   parsed request params), so don't hx-include the form — it would
+   duplicate every cls= once per scroll, ballooning the URL until
+   nginx returned 504. #}
 <div class="sentinel"
      hx-get="/rfcai/labeler/grid?{{ filter_query }}&page={{ next_page }}&partial=true"
      hx-trigger="revealed"
-     hx-swap="outerHTML"
-     hx-include="#filters">
+     hx-swap="outerHTML">
   <div class="sentinel-spinner">Loading more…</div>
 </div>
 {% endif %}
