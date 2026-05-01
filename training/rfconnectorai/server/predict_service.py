@@ -41,6 +41,7 @@ from fastapi.responses import JSONResponse
 
 from rfconnectorai.classifier.predict import ConnectorClassifier
 from rfconnectorai.data_fetch.connector_crops import detect_connector_crops
+from rfconnectorai.server.labeler import create_router as create_labeler_router
 
 
 DEFAULT_MODEL_DIR = Path("./models/connector_classifier")
@@ -131,6 +132,13 @@ def create_app(config: dict | None = None) -> FastAPI:
             "image_height": h,
             "predictions": predictions,
         })
+
+    # Mount the HTMX-driven training-data labeler at /labeler/.
+    # Reachable at https://aired.com/rfcai/labeler/ via the existing
+    # /rfcai/* nginx wildcard. Auth is HTTP Basic via LABELER_USER /
+    # LABELER_PASS env vars (separate from the device-token auth on
+    # /predict and /uploads).
+    app.include_router(create_labeler_router())
 
     return app
 

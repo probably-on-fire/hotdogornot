@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RFCAI Labeler</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #161a22;
+      --panel-2: #1d222c;
+      --border: #2a313e;
+      --text: #d6dde8;
+      --muted: #8a93a3;
+      --accent: #4f8cff;
+      --green: #4ade80;
+      --red: #f87171;
+      --orange: #fb923c;
+      --violet: #a78bfa;
+      --gray: #6b7280;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 14px;
+    }
+    header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    header .hint { color: var(--muted); font-size: 12px; }
+    .filters {
+      padding: 12px 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex; flex-wrap: wrap; gap: 12px 20px;
+      align-items: flex-start;
+    }
+    .filter-group { display: flex; flex-direction: column; gap: 4px; min-width: 120px; }
+    .filter-group label.title {
+      font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+    }
+    .checkbox-row { display: flex; flex-wrap: wrap; gap: 6px; max-width: 380px; }
+    .checkbox-row label {
+      background: var(--panel-2); padding: 4px 8px; border-radius: 4px;
+      border: 1px solid var(--border); cursor: pointer; font-size: 12px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .checkbox-row input { margin: 0; }
+    .filter-flags { display: flex; flex-direction: column; gap: 4px; }
+    .filter-flags label { font-size: 12px; cursor: pointer; }
+    input[type="number"] {
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 6px; width: 80px; font-size: 12px;
+    }
+    select {
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 4px 6px; font-size: 12px;
+    }
+    main { padding: 16px 20px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 12px;
+    }
+    .tile {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+      overflow: hidden; display: flex; flex-direction: column;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    .tile.gone { opacity: 0; transform: scale(0.9); pointer-events: none; }
+    .tile.focused { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .tile img {
+      width: 100%; aspect-ratio: 1/1; object-fit: cover;
+      display: block; background: #0a0c11;
+    }
+    .tile-meta { padding: 8px 10px; font-size: 12px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .tile-meta code { color: var(--muted); font-size: 11px; }
+    .tile-meta .cls { font-weight: 600; color: var(--accent); }
+    .badges { display: flex; flex-wrap: wrap; gap: 4px; }
+    .badge {
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+    }
+    .badge.danger { background: rgba(248,113,113,0.15); color: var(--red); }
+    .badge.warn { background: rgba(251,146,60,0.15); color: var(--orange); }
+    .badge.muted { background: rgba(107,114,128,0.2); color: var(--gray); }
+    .badge.violet { background: rgba(167,139,250,0.15); color: var(--violet); }
+    .actions { display: flex; gap: 4px; padding: 6px 8px 8px; }
+    .actions button {
+      flex: 1; padding: 6px 8px; font-size: 12px; font-weight: 600;
+      border-radius: 4px; border: 1px solid var(--border); cursor: pointer;
+      background: var(--panel-2); color: var(--text); transition: background 0.1s;
+    }
+    .actions button:hover { background: #2a313e; }
+    .actions button.danger { border-color: rgba(248,113,113,0.4); color: var(--red); }
+    .actions button.danger:hover { background: rgba(248,113,113,0.15); }
+    .actions button.flip { border-color: rgba(79,140,255,0.4); color: var(--accent); }
+    .actions button.flip:hover { background: rgba(79,140,255,0.15); }
+    .stats {
+      padding: 8px 0; color: var(--muted); font-size: 13px;
+      display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+    }
+    .stats .accent { color: var(--text); font-weight: 600; }
+    .pagination { padding: 16px 0; display: flex; gap: 8px; align-items: center; justify-content: center; }
+    .pagination a, .pagination span {
+      padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px;
+      background: var(--panel); color: var(--text); text-decoration: none; font-size: 12px;
+    }
+    .pagination a:hover { background: var(--panel-2); }
+    .pagination .current { background: var(--accent); color: white; border-color: var(--accent); }
+    .pagination .disabled { opacity: 0.4; pointer-events: none; }
+    .bulk-row {
+      padding: 12px 0; display: flex; gap: 12px; align-items: center;
+      border-top: 1px solid var(--border); margin-top: 12px;
+    }
+    .bulk-row button {
+      padding: 8px 14px; font-size: 13px; font-weight: 600;
+      border-radius: 4px; cursor: pointer; background: var(--red); color: white;
+      border: none;
+    }
+    .bulk-row button:disabled { background: var(--panel-2); color: var(--muted); cursor: not-allowed; }
+    .help-banner {
+      background: var(--panel-2); padding: 8px 12px; border-radius: 4px;
+      color: var(--muted); font-size: 12px; margin-bottom: 12px;
+    }
+    .kbd {
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      background: var(--panel); border: 1px solid var(--border); font-size: 11px;
+      font-family: ui-monospace, monospace; color: var(--text);
+    }
+    #grid-loading { color: var(--muted); padding: 20px 0; text-align: center; font-size: 13px; }
+    .htmx-request #grid-loading { display: block; }
+    .htmx-request .grid { opacity: 0.5; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>RFCAI Labeler — training data cleanup</h1>
+    <div class="hint">
+      <span class="kbd">D</span> delete &nbsp;
+      <span class="kbd">F</span> flip gender &nbsp;
+      <span class="kbd">J</span> next &nbsp;
+      <span class="kbd">K</span> prev
+    </div>
+  </header>
+
+  <form class="filters" id="filters"
+        hx-get="/rfcai/labeler/grid"
+        hx-target="#grid-container"
+        hx-trigger="change, input delay:300ms from:input[type=number]"
+        hx-swap="innerHTML"
+        hx-indicator="#filters">
+    <div class="filter-group" style="min-width: 360px;">
+      <label class="title">Classes ({{ total }} total)</label>
+      <div class="checkbox-row">
+        {% for c in classes %}
+        <label>
+          <input type="checkbox" name="cls" value="{{ c }}" checked>
+          {{ c }} <span style="color: var(--muted); font-size: 11px;">({{ counts[c] }})</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="filter-group">
+      <label class="title">Filters</label>
+      <div class="filter-flags">
+        <label><input type="checkbox" name="only_no_circle" value="true"> Only 0-circle</label>
+        <label><input type="checkbox" name="only_multi" value="true"> Only multi-object</label>
+        <label><input type="checkbox" name="hide_dups" value="true"> Hide near-duplicates</label>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label class="title">Sharpness</label>
+      <label style="font-size: 12px;">
+        Hide if blur var &lt;
+        <input type="number" name="blur_threshold" value="0" min="0" max="500" step="10">
+      </label>
+    </div>
+    <div class="filter-group">
+      <label class="title">Sort</label>
+      <select name="sort">
+        <option value="class">Class then filename</option>
+        <option value="blur_asc">Lowest sharpness first</option>
+        <option value="circles_asc">Fewest circles first</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label class="title">Per page</label>
+      <input type="number" name="per_page" value="32" min="8" max="128" step="8">
+    </div>
+  </form>
+
+  <main>
+    <div id="grid-loading" style="display: none;">Loading…</div>
+    <div id="grid-container"
+         hx-get="/rfcai/labeler/grid"
+         hx-trigger="load"
+         hx-include="#filters">
+      <div style="color: var(--muted); padding: 40px 0; text-align: center;">Loading grid…</div>
+    </div>
+  </main>
+
+  <script>
+    // Tile keyboard navigation: J/K to move focus, D delete, F flip.
+    // Focus is purely a CSS class — we don't trap actual DOM focus because
+    // images aren't tabbable.
+    let focusIdx = 0;
+
+    function tiles() {
+      return Array.from(document.querySelectorAll('.tile:not(.gone)'));
+    }
+    function setFocus(idx) {
+      const ts = tiles();
+      if (ts.length === 0) return;
+      focusIdx = Math.max(0, Math.min(idx, ts.length - 1));
+      ts.forEach((t, i) => t.classList.toggle('focused', i === focusIdx));
+      const t = ts[focusIdx];
+      if (t) t.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+    }
+    function clickInFocused(selector) {
+      const ts = tiles();
+      const t = ts[focusIdx];
+      if (!t) return;
+      const btn = t.querySelector(selector);
+      if (btn) btn.click();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      switch (e.key) {
+        case 'j': case 'J': case 'ArrowDown':
+          e.preventDefault(); setFocus(focusIdx + 1); break;
+        case 'k': case 'K': case 'ArrowUp':
+          e.preventDefault(); setFocus(focusIdx - 1); break;
+        case 'h': case 'H': case 'ArrowLeft':
+          e.preventDefault(); setFocus(focusIdx - 4); break;
+        case 'l': case 'L': case 'ArrowRight':
+          e.preventDefault(); setFocus(focusIdx + 4); break;
+        case 'd': case 'D':
+          e.preventDefault(); clickInFocused('button.danger'); break;
+        case 'f': case 'F':
+          e.preventDefault(); clickInFocused('button.flip'); break;
+      }
+    });
+
+    // After grid swaps in, set focus on the first tile.
+    document.body.addEventListener('htmx:afterSwap', (e) => {
+      if (e.detail.target.id === 'grid-container') {
+        setFocus(0);
+      }
+    });
+
+    // After a tile is removed (delete/flip), advance focus to the next visible tile.
+    document.body.addEventListener('htmx:afterRequest', (e) => {
+      const elt = e.detail.elt;
+      if (!elt || !elt.closest) return;
+      const tile = elt.closest('.tile');
+      if (tile) {
+        // The tile was swapped to empty by the server. Re-evaluate focus.
+        setTimeout(() => {
+          const ts = tiles();
+          if (focusIdx >= ts.length) focusIdx = ts.length - 1;
+          if (focusIdx < 0) focusIdx = 0;
+          ts.forEach((t, i) => t.classList.toggle('focused', i === focusIdx));
+        }, 50);
+      }
+    });
+  </script>
+</body>
+</html>
