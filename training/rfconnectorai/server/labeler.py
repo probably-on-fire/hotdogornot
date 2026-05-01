@@ -247,9 +247,9 @@ def create_router() -> APIRouter:
     def index(request: Request, _: str = Depends(_require_basic_auth)):
         counts = _class_counts()
         return templates.TemplateResponse(
+            request,
             "labeler/index.html",
             {
-                "request": request,
                 "classes": CANONICAL_CLASSES,
                 "counts": counts,
                 "total": sum(counts.values()),
@@ -302,9 +302,9 @@ def create_router() -> APIRouter:
         visible = records[start:end]
 
         return templates.TemplateResponse(
+            request,
             "labeler/grid.html",
             {
-                "request": request,
                 "records": visible,
                 "n_total": n_total,
                 "n_visible": n_visible,
