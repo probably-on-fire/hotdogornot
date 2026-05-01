@@ -1,0 +1,48 @@
+{# Just the tiles for one page + a sentinel that loads the next page when
+   it scrolls into view. Used both as a partial response (page > 1, swapped
+   in via outerHTML on the previous sentinel) and included from the full
+   grid.html on initial load. #}
+{% for r in records %}
+<div class="tile" data-path="{{ r.path_str }}">
+  <img src="/rfcai/labeler/img?path={{ r.path_str | urlencode }}" loading="lazy" alt="{{ r.name }}">
+  <div class="tile-meta">
+    <code>{{ r.name }}</code>
+    <span>in <span class="cls">{{ r.cls }}</span></span>
+    <div class="badges">
+      {% if r.n_circles == 0 %}<span class="badge danger">⚠ no circle</span>{% endif %}
+      {% if r.n_circles >= 2 %}<span class="badge warn">⚠ {{ r.n_circles }} circles</span>{% endif %}
+      {% if r.is_duplicate %}<span class="badge violet">≡ near-dup</span>{% endif %}
+      {% if r.blur_var < 50 %}<span class="badge muted">~ soft ({{ r.blur_var | int }})</span>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <button class="danger" type="button"
+            hx-post="/rfcai/labeler/delete"
+            hx-vals='{"path": "{{ r.path_str }}"}'
+            hx-target="closest .tile"
+            hx-swap="outerHTML">
+      ✗ Delete
+    </button>
+    {% if r.flip_target %}
+    <button class="flip" type="button"
+            hx-post="/rfcai/labeler/flip"
+            hx-vals='{"path": "{{ r.path_str }}"}'
+            hx-target="closest .tile"
+            hx-swap="outerHTML"
+            title="Move to {{ r.flip_target }}">
+      ⇄ → {{ r.flip_target.rsplit('-', 1)[1] }}
+    </button>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+{% if has_more %}
+<div class="sentinel"
+     hx-get="/rfcai/labeler/grid?{{ filter_query }}&page={{ next_page }}&partial=true"
+     hx-trigger="revealed"
+     hx-swap="outerHTML"
+     hx-include="#filters">
+  <div class="sentinel-spinner">Loading more…</div>
+</div>
+{% endif %}

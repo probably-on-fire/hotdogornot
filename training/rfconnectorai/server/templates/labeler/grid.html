@@ -1,7 +1,7 @@
 <div class="stats">
   <span><span class="accent">{{ n_visible }}</span> of {{ n_total }} match</span>
   <span>·</span>
-  <span><span class="accent">{{ n_no_circle }}</span> zero-circle (likely junk)</span>
+  <span><span class="accent">{{ n_no_circle }}</span> zero-circle</span>
   <span>·</span>
   <span><span class="accent">{{ n_multi }}</span> multi-object</span>
   <span>·</span>
@@ -10,73 +10,26 @@
 
 {% if records %}
 <div class="grid">
-  {% for r in records %}
-  <div class="tile" data-path="{{ r.path_str }}">
-    <img src="/rfcai/labeler/img?path={{ r.path_str | urlencode }}" loading="lazy" alt="{{ r.name }}">
-    <div class="tile-meta">
-      <code>{{ r.name }}</code>
-      <span>in <span class="cls">{{ r.cls }}</span></span>
-      <div class="badges">
-        {% if r.n_circles == 0 %}<span class="badge danger">⚠ no circle</span>{% endif %}
-        {% if r.n_circles >= 2 %}<span class="badge warn">⚠ {{ r.n_circles }} circles</span>{% endif %}
-        {% if r.is_duplicate %}<span class="badge violet">≡ near-dup</span>{% endif %}
-        {% if r.blur_var < 50 %}<span class="badge muted">~ soft ({{ r.blur_var | int }})</span>{% endif %}
-      </div>
-    </div>
-    <div class="actions">
-      <button class="danger" type="button"
-              hx-post="/rfcai/labeler/delete"
-              hx-vals='{"path": "{{ r.path_str }}"}'
-              hx-target="closest .tile"
-              hx-swap="outerHTML">
-        ✗ Delete
-      </button>
-      {% if r.flip_target %}
-      <button class="flip" type="button"
-              hx-post="/rfcai/labeler/flip"
-              hx-vals='{"path": "{{ r.path_str }}"}'
-              hx-target="closest .tile"
-              hx-swap="outerHTML"
-              title="Move to {{ r.flip_target }}">
-        ⇄ → {{ r.flip_target.rsplit('-', 1)[1] }}
-      </button>
-      {% endif %}
-    </div>
-  </div>
-  {% endfor %}
-</div>
-
-<div class="pagination">
-  {% if page > 1 %}
-    <a href="#" hx-get="/rfcai/labeler/grid?{{ filter_query }}&page={{ page - 1 }}"
-       hx-target="#grid-container">← Prev</a>
-  {% else %}
-    <span class="disabled">← Prev</span>
-  {% endif %}
-  <span class="current">Page {{ page }} of {{ total_pages }}</span>
-  {% if page < total_pages %}
-    <a href="#" hx-get="/rfcai/labeler/grid?{{ filter_query }}&page={{ page + 1 }}"
-       hx-target="#grid-container">Next →</a>
-  {% else %}
-    <span class="disabled">Next →</span>
-  {% endif %}
+  {% include "labeler/grid_batch.html" %}
 </div>
 
 {% if n_visible >= 8 %}
 <div class="bulk-row">
   <label style="font-size: 13px;">
     <input type="checkbox" id="bulk-confirm">
-    Confirm bulk delete of all {{ n_visible }} visible
+    Confirm bulk delete of all loaded tiles
   </label>
   <button type="button" id="bulk-delete-btn" disabled
           hx-post="/rfcai/labeler/bulk-delete"
           hx-vals='js:{paths: Array.from(document.querySelectorAll(".tile:not(.gone)")).map(t => t.dataset.path)}'
           hx-target="#grid-container"
           hx-swap="innerHTML"
-          hx-confirm="Permanently delete all visible images?"
-          onclick="if(!document.getElementById('bulk-confirm').checked){event.stopPropagation();return false;}">
-    ✗ Delete all {{ n_visible }} visible
+          hx-confirm="Permanently delete all currently loaded images?">
+    ✗ Delete all loaded
   </button>
+  <span style="color: var(--muted); font-size: 12px;">
+    Scroll to load more — bulk delete only affects what's already loaded.
+  </span>
 </div>
 <script>
   document.getElementById('bulk-confirm').addEventListener('change', e => {

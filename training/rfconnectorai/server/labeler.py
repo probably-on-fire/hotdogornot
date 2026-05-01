@@ -271,7 +271,8 @@ def create_router() -> APIRouter:
         blur_threshold: int = 0,
         sort: str = "class",
         page: int = 1,
-        per_page: int = 32,
+        per_page: int = 24,
+        partial: bool = False,
     ):
         all_records = _list_records(cls)
         records = list(all_records)
@@ -298,32 +299,38 @@ def create_router() -> APIRouter:
 
         per_page = max(8, min(128, per_page))
         page = max(1, page)
-        total_pages = max(1, (n_visible + per_page - 1) // per_page)
-        if page > total_pages:
-            page = total_pages
         start = (page - 1) * per_page
         end = min(start + per_page, n_visible)
-        visible = records[start:end]
+        batch = records[start:end]
+        has_more = end < n_visible
+
+        # Echo filter params for the next-page sentinel and the bulk-delete form.
+        filter_query = _filter_qs(
+            cls, only_no_circle, only_multi, hide_dups, blur_threshold, sort, per_page,
+        )
+
+        # Subsequent infinite-scroll loads ask for partial=true so we skip
+        # the surrounding chrome (stats line, bulk-delete bar) and just
+        # return the tiles + a new sentinel that the previous one replaces.
+        template = "labeler/grid_batch.html" if partial else "labeler/grid.html"
 
         return templates.TemplateResponse(
             request,
-            "labeler/grid.html",
+            template,
             {
-                "records": visible,
+                "records": batch,
                 "n_total": n_total,
                 "n_visible": n_visible,
                 "n_no_circle": n_no_circle,
                 "n_multi": n_multi,
                 "n_dups": n_dups,
                 "page": page,
-                "total_pages": total_pages,
-                "per_page": per_page,
+                "next_page": page + 1,
+                "has_more": has_more,
                 "start": start,
                 "end": end,
-                # Echo filter params back so pagination links keep them.
-                "filter_query": _filter_qs(
-                    cls, only_no_circle, only_multi, hide_dups, blur_threshold, sort, per_page,
-                ),
+                "per_page": per_page,
+                "filter_query": filter_query,
             },
         )
 

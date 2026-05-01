@@ -137,14 +137,15 @@
       display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
     }
     .stats .accent { color: var(--text); font-weight: 600; }
-    .pagination { padding: 16px 0; display: flex; gap: 8px; align-items: center; justify-content: center; }
-    .pagination a, .pagination span {
-      padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px;
-      background: var(--panel); color: var(--text); text-decoration: none; font-size: 12px;
+    .sentinel {
+      grid-column: 1 / -1;
+      padding: 32px 0; text-align: center; color: var(--muted); font-size: 13px;
     }
-    .pagination a:hover { background: var(--panel-2); }
-    .pagination .current { background: var(--accent); color: white; border-color: var(--accent); }
-    .pagination .disabled { opacity: 0.4; pointer-events: none; }
+    .sentinel-spinner::before {
+      content: "⟳"; display: inline-block; margin-right: 6px;
+      animation: spin 1.2s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .bulk-row {
       padding: 12px 0; display: flex; gap: 12px; align-items: center;
       border-top: 1px solid var(--border); margin-top: 12px;
