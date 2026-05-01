@@ -241,7 +241,11 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
 def create_router() -> APIRouter:
-    r = APIRouter(prefix="/labeler", tags=["labeler"])
+    # Prefix matches the public URL path. nginx on aired.com forwards
+    # /rfcai/* to the predict service backend with the /rfcai prefix
+    # preserved (for paths nginx doesn't have an explicit rewrite for),
+    # so backend routes must include /rfcai/ to be reachable externally.
+    r = APIRouter(prefix="/rfcai/labeler", tags=["labeler"])
 
     @r.get("/", response_class=HTMLResponse)
     def index(request: Request, _: str = Depends(_require_basic_auth)):
