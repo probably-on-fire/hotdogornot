@@ -92,23 +92,89 @@ def _load_classifier(model_dir_str: str | None):
 
 
 @st.cache_data(show_spinner=False)
-def _count_circles_in_crop(img_path_str: str, mtime: float) -> int:
-    """How many connector-like circles does this crop contain? Used to
-    surface multi-object crops (a single image with two connectors in it
-    is poison for training)."""
+def _crop_signals(img_path_str: str, mtime: float) -> dict:
+    """Compute three quality signals for a crop in one image read:
+
+      - n_circles: Hough Circles count. 0 = probably not a connector;
+        2+ = multi-object crop.
+      - blur_var: Laplacian variance. Higher = sharper. Below ~50 is
+        usually clearly out of focus.
+      - dhash_hex: 64-bit perceptual hash for near-duplicate detection.
+
+    Cache key includes mtime so edits to the file invalidate the cache.
+    """
+    import imagehash
+    from PIL import Image
+
     bgr = cv2.imread(img_path_str)
-    if bgr is None: return 0
+    if bgr is None:
+        return {"n_circles": 0, "blur_var": 0.0, "dhash_hex": ""}
     h, w = bgr.shape[:2]
     short = min(h, w)
     gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.medianBlur(gray, 7)
+
+    # Hough on a median-blurred copy to suppress noise.
+    blurred = cv2.medianBlur(gray, 7)
     min_r = max(15, int(short * 0.10))
     max_r = max(min_r + 1, int(short * 0.45))
     circles = cv2.HoughCircles(
-        gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=min_r,
+        blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=min_r,
         param1=80, param2=30, minRadius=min_r, maxRadius=max_r,
     )
-    return 0 if circles is None else len(circles[0])
+    n_circles = 0 if circles is None else len(circles[0])
+
+    # Sharpness — Laplacian variance on the original (non-blurred) gray.
+    blur_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+    # 64-bit dHash for near-duplicate grouping.
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    dhash_hex = str(imagehash.dhash(Image.fromarray(rgb), hash_size=8))
+
+    return {"n_circles": n_circles, "blur_var": blur_var, "dhash_hex": dhash_hex}
+
+
+def _find_duplicate_groups(records: list[dict], max_distance: int = 6) -> dict[str, bool]:
+    """Pairwise hamming-distance grouping. Returns {path_str -> is_keeper},
+    where the sharpest crop in each near-duplicate group is the keeper."""
+    import imagehash
+
+    paths = [str(r["path"]) for r in records]
+    hashes = []
+    for r in records:
+        h = r.get("dhash_hex") or ""
+        hashes.append(imagehash.hex_to_hash(h) if h else None)
+
+    parent = list(range(len(records)))
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb: parent[ra] = rb
+
+    n = len(records)
+    for i in range(n):
+        if hashes[i] is None: continue
+        for j in range(i + 1, n):
+            if hashes[j] is None: continue
+            if (hashes[i] - hashes[j]) <= max_distance:
+                union(i, j)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+
+    is_keeper = {}
+    for root, idxs in groups.items():
+        if len(idxs) == 1:
+            is_keeper[paths[idxs[0]]] = True
+        else:
+            sharpest = max(idxs, key=lambda i: records[i].get("blur_var", 0.0))
+            for i in idxs:
+                is_keeper[paths[i]] = (i == sharpest)
+    return is_keeper
 
 
 @st.cache_data(show_spinner=False)
@@ -357,24 +423,38 @@ with tab_review:
     with fcol2:
         only_disagree = st.checkbox(
             "Only disagreements", value=False, key="td_review_disagree",
-            help="Show only images where the classifier predicts a different class than the folder.",
+            help="Classifier predicts a different class than the folder.",
         )
         only_multi = st.checkbox(
-            "Only multi-object",
-            value=False, key="td_review_multi",
-            help="Show only crops with 2+ circular objects detected — these contain multiple connectors and confuse training.",
+            "Only multi-object", value=False, key="td_review_multi",
+            help="2+ circles detected — usually two connectors in one crop, bad for training.",
+        )
+        only_no_circle = st.checkbox(
+            "Only 0-circle (likely junk)", value=False, key="td_review_nocircle",
+            help="No circles detected — almost certainly not a connector. Auto-delete candidate.",
+        )
+        hide_dups = st.checkbox(
+            "Hide near-duplicates", value=False, key="td_review_hidedups",
+            help="In each near-duplicate group, hide all but the sharpest. "
+                 "Tick this to dedupe consecutive video frames.",
         )
         use_classifier = st.checkbox(
             "Use classifier",
             value=(DEFAULT_MODEL_DIR / "weights.pt").exists(),
             key="td_review_useclf",
-            help="Toggle off to skip classifier scoring (faster, but no disagreement signal).",
+            help="Toggle off to skip classifier scoring (no disagreement signal).",
         )
     with fcol3:
         conf_lo, conf_hi = st.slider(
             "Confidence range", min_value=0, max_value=100, value=(0, 100),
             step=5, key="td_review_confband",
-            help="Narrow to e.g. 0–60% to find low-confidence cases worth a human look.",
+            help="Narrow to e.g. 0–60% to find low-confidence cases.",
+        )
+        blur_threshold = st.number_input(
+            "Hide if blur var < ", min_value=0, max_value=500, value=0, step=10,
+            key="td_review_blur",
+            help="Laplacian variance — sharpness measure. 0 = filter off. "
+                 "50 catches obvious motion blur; 100 is stricter.",
         )
 
     scol1, scol2 = st.columns([1, 1])
@@ -412,11 +492,9 @@ with tab_review:
                         pred, conf = "(no model)", 0.0
                     disagree = pred != cls and pred not in ("(no model)", "(unreadable)")
                     try:
-                        n_circles = _count_circles_in_crop(
-                            str(img_path), img_path.stat().st_mtime
-                        )
+                        sig = _crop_signals(str(img_path), img_path.stat().st_mtime)
                     except Exception:
-                        n_circles = 0
+                        sig = {"n_circles": 0, "blur_var": 0.0, "dhash_hex": ""}
                     all_records.append({
                         "path": img_path,
                         "name": img_path.name,
@@ -424,9 +502,18 @@ with tab_review:
                         "pred": pred,
                         "conf": conf,
                         "disagree": disagree,
-                        "n_circles": n_circles,
-                        "multi": n_circles >= 2,
+                        "n_circles": sig["n_circles"],
+                        "multi": sig["n_circles"] >= 2,
+                        "no_circle": sig["n_circles"] == 0,
+                        "blur_var": sig["blur_var"],
+                        "dhash_hex": sig["dhash_hex"],
                     })
+
+        # Find near-duplicates (same hash within hamming distance 6).
+        # Each group's sharpest crop is the "keeper"; the rest are dups.
+        keep_map = _find_duplicate_groups(all_records, max_distance=6)
+        for r in all_records:
+            r["is_duplicate"] = not keep_map.get(str(r["path"]), True)
 
         # ---- Apply filters ----------------------------------------------
 
@@ -435,6 +522,12 @@ with tab_review:
             records = [r for r in records if r["disagree"]]
         if only_multi:
             records = [r for r in records if r["multi"]]
+        if only_no_circle:
+            records = [r for r in records if r["no_circle"]]
+        if hide_dups:
+            records = [r for r in records if not r["is_duplicate"]]
+        if blur_threshold > 0:
+            records = [r for r in records if r["blur_var"] >= blur_threshold]
         if use_classifier and (conf_lo > 0 or conf_hi < 100):
             lo, hi = conf_lo / 100.0, conf_hi / 100.0
             records = [r for r in records if lo <= r["conf"] <= hi]
@@ -450,11 +543,43 @@ with tab_review:
         n_visible = len(records)
         n_disagree = sum(1 for r in all_records if r["disagree"])
         n_multi = sum(1 for r in all_records if r["multi"])
+        n_nocircle = sum(1 for r in all_records if r["no_circle"])
+        n_dups = sum(1 for r in all_records if r["is_duplicate"])
         st.markdown(
-            f"**{n_visible}** of {n_total} images match — "
-            f"{n_disagree} disagree with classifier · "
-            f"**{n_multi}** are multi-object (≥2 circles)."
+            f"**{n_visible}** of {n_total} images match · "
+            f"{n_disagree} classifier-disagree · "
+            f"{n_multi} multi-object · "
+            f"**{n_nocircle}** zero-circle (likely junk) · "
+            f"**{n_dups}** near-duplicates"
         )
+
+        # Bulk-delete: applies to whatever the current filter has surfaced.
+        # Behind a confirm checkbox to prevent accidents.
+        if n_visible > 0:
+            bd1, bd2 = st.columns([1, 4])
+            confirm = bd1.checkbox(
+                "Confirm bulk delete", value=False, key="td_bulk_confirm",
+                help="Tick to enable the Delete-all-visible button.",
+            )
+            if bd2.button(
+                f"✗ Delete all {n_visible} visible image(s) permanently",
+                type="primary", disabled=not confirm,
+                key="td_bulk_delete_visible",
+            ):
+                deleted = 0
+                for r in records:
+                    p = Path(str(r["path"]))
+                    if p.exists():
+                        try:
+                            p.unlink()
+                            deleted += 1
+                        except Exception:
+                            pass
+                _crop_signals.clear()
+                _predict_path.clear()
+                st.session_state.td_bulk_confirm = False
+                st.success(f"Deleted {deleted} image(s).")
+                st.rerun()
 
         if n_visible == 0:
             st.info("No images match the current filters.")
@@ -475,7 +600,7 @@ with tab_review:
             @st.fragment
             def _review_tile(path_str: str, cls: str, name: str,
                              pred: str, conf: float, disagree: bool,
-                             n_circles: int):
+                             n_circles: int, blur_var: float, is_duplicate: bool):
                 path = Path(path_str)
 
                 # If this image was deleted or moved (file gone from this
@@ -497,10 +622,17 @@ with tab_review:
                     st.markdown(
                         f":{color}[{badge} classifier: **{pred}** {conf:.0%}]"
                     )
+                badges = []
                 if n_circles >= 2:
-                    st.markdown(
-                        f":orange[⚠ multi-object: **{n_circles}** circles detected]"
-                    )
+                    badges.append(f":orange[⚠ multi-object ({n_circles})]")
+                elif n_circles == 0:
+                    badges.append(":red[⚠ no circle detected]")
+                if is_duplicate:
+                    badges.append(":violet[≡ near-duplicate]")
+                if blur_var < 50:
+                    badges.append(f":gray[~ blur var {blur_var:.0f} (soft)]")
+                if badges:
+                    st.markdown(" · ".join(badges))
 
                 bc1, bc2 = st.columns(2)
                 if bc1.button(
@@ -551,6 +683,8 @@ with tab_review:
                             conf=float(rec["conf"]),
                             disagree=bool(rec["disagree"]),
                             n_circles=int(rec["n_circles"]),
+                            blur_var=float(rec["blur_var"]),
+                            is_duplicate=bool(rec["is_duplicate"]),
                         )
 
 # ===========================================================================

@@ -20,6 +20,7 @@ dependencies = [
     "onnx>=1.16",
     "onnxruntime>=1.18",
     "matplotlib>=3.8",
+    "imagehash>=4.3",
     # Web image fetchers (DDG primary, icrawler kept as legacy)
     "ddgs>=4.0",
     "icrawler>=0.6",
