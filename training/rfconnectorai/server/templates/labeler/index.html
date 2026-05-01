@@ -78,12 +78,39 @@
       transition: opacity 0.2s, transform 0.2s;
     }
     .tile.gone { opacity: 0; transform: scale(0.9); pointer-events: none; }
-    .tile.focused { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .tile {
+      position: relative;
+    }
     .tile img {
       width: 100%; aspect-ratio: 1/1; object-fit: cover;
       display: block; background: #0a0c11;
       cursor: zoom-in;
     }
+    .gender-badge {
+      position: absolute; top: 6px; right: 6px;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px; font-weight: 800;
+      border-radius: 50%;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+      pointer-events: none;
+      letter-spacing: 0;
+    }
+    .gender-badge.M {
+      background: rgba(79, 140, 255, 0.85);   /* blue */
+      color: white;
+      border: 2px solid rgba(255,255,255,0.6);
+    }
+    .gender-badge.F {
+      background: rgba(244, 114, 182, 0.85);  /* pink */
+      color: white;
+      border: 2px solid rgba(255,255,255,0.6);
+    }
+    .tile.focused { outline: 3px solid var(--accent); outline-offset: -3px; }
+    /* Subtle gender hint on tile border too, for peripheral awareness. */
+    .tile.gender-M { border-color: rgba(79, 140, 255, 0.4); }
+    .tile.gender-F { border-color: rgba(244, 114, 182, 0.4); }
     .lightbox {
       position: fixed; inset: 0;
       background: rgba(0, 0, 0, 0.92);
@@ -93,11 +120,18 @@
       cursor: zoom-out;
     }
     .lightbox[hidden] { display: none; }
+    .lightbox-img-wrap { position: relative; }
     .lightbox img {
       max-width: 92vw; max-height: 86vh;
       object-fit: contain;
       box-shadow: 0 8px 40px rgba(0,0,0,0.5);
       border-radius: 4px;
+      display: block;
+    }
+    .lightbox .gender-badge {
+      position: absolute; top: 12px; right: 12px;
+      width: 64px; height: 64px;
+      font-size: 36px;
     }
     .lightbox-meta {
       position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -247,7 +281,10 @@
   </main>
 
   <div id="lightbox" class="lightbox" hidden>
-    <img id="lightbox-img" src="" alt="">
+    <div class="lightbox-img-wrap">
+      <img id="lightbox-img" src="" alt="">
+      <span id="lightbox-gender" class="gender-badge"></span>
+    </div>
     <div class="lightbox-meta" id="lightbox-meta"></div>
     <div class="lightbox-hint">
       <span class="kbd">D</span> delete &nbsp;
@@ -294,6 +331,16 @@
       // Pull caption text out of the tile to show under the big image.
       const meta = tile.querySelector('.tile-meta');
       lightboxMeta.textContent = meta ? meta.innerText.replace(/\s+/g, ' ').trim() : '';
+      // Mirror the gender badge from the tile into the lightbox.
+      const lbGender = document.getElementById('lightbox-gender');
+      const tileBadge = tile.querySelector('.gender-badge');
+      if (tileBadge) {
+        lbGender.textContent = tileBadge.textContent;
+        lbGender.className = 'gender-badge ' + (tile.classList.contains('gender-M') ? 'M' : 'F');
+        lbGender.style.display = '';
+      } else {
+        lbGender.style.display = 'none';
+      }
       lightbox.removeAttribute('hidden');
     }
     function closeLightbox() {

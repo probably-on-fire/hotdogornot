@@ -3,8 +3,10 @@
    in via outerHTML on the previous sentinel) and included from the full
    grid.html on initial load. #}
 {% for r in records %}
-<div class="tile" data-path="{{ r.path_str }}">
+{% set gender = r.cls.rsplit('-', 1)[1] %}
+<div class="tile gender-{{ gender }}" data-path="{{ r.path_str }}">
   <img src="/rfcai/labeler/img?path={{ r.path_str | urlencode }}" loading="lazy" alt="{{ r.name }}">
+  <span class="gender-badge {{ gender }}" title="Currently labeled {{ r.cls }}">{{ gender }}</span>
   <div class="tile-meta">
     <code>{{ r.name }}</code>
     <span>in <span class="cls">{{ r.cls }}</span></span>
