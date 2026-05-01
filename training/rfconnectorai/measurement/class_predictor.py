@@ -33,9 +33,12 @@ from rfconnectorai.measurement.gender_detector import detect_gender
 from rfconnectorai.measurement.hex_detector import detect_hex
 
 
-# Known hex flat-to-flat sizes (mm) for the coupling nut.
-HEX_SIZE_LARGE_MM = 7.94   # 5/16 inch — SMA, 3.5 mm, 2.92 mm
-HEX_SIZE_SMALL_MM = 6.35   # 1/4 inch  — 2.4 mm
+# Single hex flat-to-flat (mm) used as the absolute scale reference.
+# Per the actual hardware in use, all four connector families take the
+# same wrench — the hex grip area is constant across SMA / 3.5mm /
+# 2.92mm / 2.4mm. So we don't need to enumerate hex hypotheses; one
+# measurement → one pixels-per-mm.
+HEX_SIZE_MM = 7.94   # 5/16 inch flats
 HEX_TOLERANCE_MM = 0.8
 
 # Precision-connector size buckets (mm). The 2.92 vs 2.4 boundary is
@@ -117,15 +120,13 @@ def predict_class(
             reason="hex detected but aperture not detected",
         )
 
-    # Scale calibration: try each standard hex size and pick the hypothesis
-    # that yields a consistent downstream interpretation.
+    # Scale calibration: hex grip is constant across all 4 connector
+    # families (same wrench fits all) so one hex measurement → one
+    # pixels-per-mm. Only the ArUco override changes the scale.
     if assumed_pixels_per_mm is not None:
         hypotheses = [(hex_det.flat_to_flat_px / assumed_pixels_per_mm, assumed_pixels_per_mm)]
     else:
-        hypotheses = [
-            (HEX_SIZE_LARGE_MM, hex_det.flat_to_flat_px / HEX_SIZE_LARGE_MM),
-            (HEX_SIZE_SMALL_MM, hex_det.flat_to_flat_px / HEX_SIZE_SMALL_MM),
-        ]
+        hypotheses = [(HEX_SIZE_MM, hex_det.flat_to_flat_px / HEX_SIZE_MM)]
 
     # The pin (or socket) occupies roughly 30-45% of the aperture radius
     # depending on the family. Excluding 50% from the family-brightness
@@ -150,12 +151,11 @@ def predict_class(
     for hex_ff_mm, ppm in hypotheses:
         aperture_mm = aperture_det.diameter_px / ppm
 
-        # Family determines which aperture interpretation we use.
+        # Hex is constant; we don't gate on hex size at all. The
+        # aperture in mm directly maps to a class (with family from
+        # dielectric brightness as a tiebreaker for the SMA / 3.5mm
+        # case where face/aperture sizes are nearly identical).
         if family_det.family == "sma":
-            # SMA expects ~4.2 mm bore with PTFE. Precision-size buckets don't
-            # apply. Hex must be the large size.
-            if abs(hex_ff_mm - HEX_SIZE_LARGE_MM) > HEX_TOLERANCE_MM:
-                continue
             delta = abs(aperture_mm - SMA_APERTURE_MM)
             if delta > SMA_APERTURE_TOLERANCE_MM:
                 continue
@@ -166,14 +166,7 @@ def predict_class(
                     candidate, hex_ff_mm, aperture_mm, ppm, family_det, gender_det
                 )
         else:
-            # Precision: the aperture directly maps to a bucket (2.4/2.92/3.5).
-            # Validate hex-family consistency too.
             for size_label, (nominal_mm, tolerance_mm) in PRECISION_SIZE_BUCKETS.items():
-                expected_hex = (
-                    HEX_SIZE_SMALL_MM if size_label == "2.4mm" else HEX_SIZE_LARGE_MM
-                )
-                if abs(hex_ff_mm - expected_hex) > HEX_TOLERANCE_MM:
-                    continue
                 delta = abs(aperture_mm - nominal_mm)
                 if delta > tolerance_mm:
                     continue

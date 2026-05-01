@@ -82,6 +82,9 @@ def detect_hex(image: np.ndarray) -> HexDetection | None:
 
     # Always include the "no anchor" fallback so a clean bench shot
     # without obvious face circle still passes through Otsu.
+    # When we DO have a face anchor, also enforce the physical
+    # constraint: hex must encircle the face, so flat_to_flat must
+    # be at least ~1.4x the face diameter and at most ~3.0x.
     best: HexDetection | None = None
     best_score = -1.0
 
@@ -114,16 +117,22 @@ def detect_hex(image: np.ndarray) -> HexDetection | None:
                               det.bounding_box[2], det.bounding_box[3]),
             )
 
-        # Score: prefer detections concentric with their anchor, with a
-        # flat-to-flat that's plausibly 1.3-2.5x the anchor face radius
-        # (typical hex/face ratio across the connector families).
-        score = det.flat_to_flat_px
+        # Hard physical constraints when we have a face anchor:
+        # the hex must encircle the face. Reject any candidate whose
+        # flat_to_flat is < 1.3x face diameter (impossible — hex is
+        # bigger than the face) or > 3.0x (way too big — likely a
+        # background object or photo border).
         if anchor is not None:
             cx, cy, r = anchor
             offset = ((det.center[0] - cx) ** 2 + (det.center[1] - cy) ** 2) ** 0.5
             ratio = det.flat_to_flat_px / max(1.0, 2 * r)
-            if 1.0 < ratio < 3.0 and offset < r * 1.5:
-                score *= 1.5   # boost concentric hex detections
+            if ratio < 1.3 or ratio > 3.0:
+                continue
+            if offset > r * 1.0:
+                continue   # not concentric — different object
+            score = det.flat_to_flat_px * 2.0   # prefer hex anchored to a face
+        else:
+            score = det.flat_to_flat_px
 
         if score > best_score:
             best_score = score
