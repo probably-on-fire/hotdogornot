@@ -41,17 +41,23 @@ def make_train_transforms() -> transforms.Compose:
     all break shortcut cues."""
     return transforms.Compose([
         transforms.Resize(256),
-        transforms.RandomResizedCrop(INPUT_SIZE, scale=(0.5, 1.0), ratio=(0.85, 1.18)),
+        # Tight scale crops force the model to identify the central
+        # connector instead of relying on background.
+        transforms.RandomResizedCrop(INPUT_SIZE, scale=(0.55, 1.0), ratio=(0.85, 1.18)),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomVerticalFlip(p=0.2),
-        transforms.RandomRotation(degrees=30),
-        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.3, hue=0.05),
-        transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 1.5))], p=0.3),
+        # NO vertical flip: connectors have a top/bottom in our shots and
+        # flipping breaks pin-vs-hole appearance.
+        transforms.RandomRotation(degrees=20),
+        # Mild ColorJitter — anything stronger than ~0.3 brightness erases
+        # the M-vs-F cue (bright pin vs dark hollow). Keep saturation
+        # modest so material colors stay recognizable.
+        transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.15, hue=0.02),
+        transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 1.0))], p=0.2),
         transforms.ToTensor(),
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
-        # Erase a random rectangle. Forces features distributed across the
-        # crop instead of one corner shortcut.
-        transforms.RandomErasing(p=0.35, scale=(0.02, 0.18), ratio=(0.3, 3.3)),
+        # Smaller erase patches — anything over ~12% can hit the center
+        # and destroy the gender feature.
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.10), ratio=(0.3, 3.3)),
     ])
 
 
