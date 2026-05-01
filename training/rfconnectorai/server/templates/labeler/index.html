@@ -82,6 +82,32 @@
     .tile img {
       width: 100%; aspect-ratio: 1/1; object-fit: cover;
       display: block; background: #0a0c11;
+      cursor: zoom-in;
+    }
+    .lightbox {
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0.92);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+      cursor: zoom-out;
+    }
+    .lightbox[hidden] { display: none; }
+    .lightbox img {
+      max-width: 92vw; max-height: 86vh;
+      object-fit: contain;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+      border-radius: 4px;
+    }
+    .lightbox-meta {
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: var(--panel); border: 1px solid var(--border);
+      padding: 8px 16px; border-radius: 6px;
+      color: var(--text); font-size: 13px; pointer-events: none;
+    }
+    .lightbox-hint {
+      position: absolute; top: 20px; right: 20px;
+      color: var(--muted); font-size: 12px; pointer-events: none;
     }
     .tile-meta { padding: 8px 10px; font-size: 12px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
     .tile-meta code { color: var(--muted); font-size: 11px; }
@@ -210,11 +236,24 @@
     </div>
   </main>
 
+  <div id="lightbox" class="lightbox" hidden>
+    <img id="lightbox-img" src="" alt="">
+    <div class="lightbox-meta" id="lightbox-meta"></div>
+    <div class="lightbox-hint">
+      <span class="kbd">D</span> delete &nbsp;
+      <span class="kbd">F</span> flip &nbsp;
+      <span class="kbd">Esc</span> close
+    </div>
+  </div>
+
   <script>
     // Tile keyboard navigation: J/K to move focus, D delete, F flip.
     // Focus is purely a CSS class — we don't trap actual DOM focus because
     // images aren't tabbable.
     let focusIdx = 0;
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    const lightboxMeta = document.getElementById('lightbox-meta');
 
     function tiles() {
       return Array.from(document.querySelectorAll('.tile:not(.gone)'));
@@ -234,15 +273,63 @@
       const btn = t.querySelector(selector);
       if (btn) btn.click();
     }
+    function isLightboxOpen() {
+      return !lightbox.hasAttribute('hidden');
+    }
+    function openLightboxForTile(tile) {
+      const img = tile.querySelector('img');
+      if (!img) return;
+      lightboxImg.src = img.src;
+      lightboxImg.alt = img.alt || '';
+      // Pull caption text out of the tile to show under the big image.
+      const meta = tile.querySelector('.tile-meta');
+      lightboxMeta.textContent = meta ? meta.innerText.replace(/\s+/g, ' ').trim() : '';
+      lightbox.removeAttribute('hidden');
+    }
+    function closeLightbox() {
+      lightbox.setAttribute('hidden', '');
+      lightboxImg.src = '';
+    }
+
+    // Click an image → focus its tile + open lightbox.
+    document.body.addEventListener('click', (e) => {
+      if (e.target.tagName === 'IMG' && e.target.closest('.tile')) {
+        const tile = e.target.closest('.tile');
+        const idx = tiles().indexOf(tile);
+        if (idx >= 0) setFocus(idx);
+        openLightboxForTile(tile);
+      }
+    });
+    // Click on the dark background closes (clicks on the IMG bubble too,
+    // but we only close if the click target was the lightbox div itself).
+    lightbox.addEventListener('click', (e) => {
+      if (e.target === lightbox || e.target === lightboxImg) closeLightbox();
+    });
 
     document.addEventListener('keydown', (e) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // Esc always closes the lightbox if open.
+      if (e.key === 'Escape' && isLightboxOpen()) {
+        e.preventDefault(); closeLightbox(); return;
+      }
+
       switch (e.key) {
         case 'j': case 'J': case 'ArrowDown':
-          e.preventDefault(); setFocus(focusIdx + 1); break;
+          e.preventDefault();
+          if (isLightboxOpen()) {
+            setFocus(focusIdx + 1);
+            const t = tiles()[focusIdx]; if (t) openLightboxForTile(t);
+          } else { setFocus(focusIdx + 1); }
+          break;
         case 'k': case 'K': case 'ArrowUp':
-          e.preventDefault(); setFocus(focusIdx - 1); break;
+          e.preventDefault();
+          if (isLightboxOpen()) {
+            setFocus(focusIdx - 1);
+            const t = tiles()[focusIdx]; if (t) openLightboxForTile(t);
+          } else { setFocus(focusIdx - 1); }
+          break;
         case 'h': case 'H': case 'ArrowLeft':
           e.preventDefault(); setFocus(focusIdx - 4); break;
         case 'l': case 'L': case 'ArrowRight':
@@ -251,6 +338,13 @@
           e.preventDefault(); clickInFocused('button.danger'); break;
         case 'f': case 'F':
           e.preventDefault(); clickInFocused('button.flip'); break;
+        case 'Enter':
+          // Enter on a focused tile opens the lightbox.
+          if (!isLightboxOpen()) {
+            const t = tiles()[focusIdx];
+            if (t) { e.preventDefault(); openLightboxForTile(t); }
+          }
+          break;
       }
     });
 
@@ -261,18 +355,24 @@
       }
     });
 
-    // After a tile is removed (delete/flip), advance focus to the next visible tile.
+    // After a tile is removed (delete/flip), advance focus to the next visible
+    // tile and close the lightbox if it was showing this tile.
     document.body.addEventListener('htmx:afterRequest', (e) => {
       const elt = e.detail.elt;
       if (!elt || !elt.closest) return;
       const tile = elt.closest('.tile');
       if (tile) {
-        // The tile was swapped to empty by the server. Re-evaluate focus.
         setTimeout(() => {
           const ts = tiles();
           if (focusIdx >= ts.length) focusIdx = ts.length - 1;
           if (focusIdx < 0) focusIdx = 0;
           ts.forEach((t, i) => t.classList.toggle('focused', i === focusIdx));
+          // If the lightbox is open, advance it to the new focused tile so
+          // the user can keep pressing D/F without re-clicking.
+          if (isLightboxOpen()) {
+            const t = ts[focusIdx];
+            if (t) openLightboxForTile(t); else closeLightbox();
+          }
         }, 50);
       }
     });
