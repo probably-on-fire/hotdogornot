@@ -297,7 +297,7 @@ def create_router() -> APIRouter:
         n_multi = sum(1 for r in all_records if r.n_circles >= 2)
         n_dups = sum(1 for r in all_records if r.is_duplicate)
 
-        per_page = max(8, min(128, per_page))
+        per_page = max(8, min(5000, per_page))
         page = max(1, page)
         start = (page - 1) * per_page
         end = min(start + per_page, n_visible)

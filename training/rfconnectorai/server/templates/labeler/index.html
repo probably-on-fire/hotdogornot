@@ -222,8 +222,17 @@
       </select>
     </div>
     <div class="filter-group">
-      <label class="title">Per page</label>
-      <input type="number" name="per_page" value="32" min="8" max="128" step="8">
+      <label class="title">Per batch</label>
+      <input type="number" name="per_page" value="24" min="8" max="5000" step="8">
+    </div>
+    <div class="filter-group">
+      <label class="title">&nbsp;</label>
+      <button type="button" id="load-all"
+              style="padding: 6px 12px; background: var(--panel-2); color: var(--text);
+                     border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
+                     font-size: 12px;">
+        Load all
+      </button>
     </div>
   </form>
 
@@ -354,6 +363,15 @@
       if (e.detail.target.id === 'grid-container') {
         setFocus(0);
       }
+    });
+
+    // "Load all" button — set per-batch high enough to fetch every match
+    // in one request, then trigger the form to reload the grid.
+    document.getElementById('load-all').addEventListener('click', () => {
+      const pp = document.querySelector('input[name="per_page"]');
+      pp.value = 5000;
+      // htmx fires on change of any form input, so dispatch a change event.
+      pp.dispatchEvent(new Event('change', {bubbles: true}));
     });
 
     // After a tile is removed (delete/flip), advance focus to the next visible
