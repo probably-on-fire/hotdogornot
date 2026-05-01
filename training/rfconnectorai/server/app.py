@@ -41,10 +41,11 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 from fastapi import (
     Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile,
 )
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 
 DEFAULT_INCOMING = Path("./incoming")
@@ -233,6 +234,59 @@ def create_app(config: dict | None = None) -> FastAPI:
     @app.get("/healthz")
     def healthz():
         return {"status": "ok", "model_version": (_read_manifest() or {}).get("version", 0)}
+
+    # --- labeler proxy ----------------------------------------------------
+    #
+    # The training-data labeler runs on the training box (where the data
+    # lives) and is reverse-tunneled to 127.0.0.1:8504 here. nginx already
+    # forwards /rfcai/* to this relay app, so we proxy /labeler/* through
+    # to the tunnel. All headers and bodies pass through unchanged so HTTP
+    # Basic auth, HTMX requests, and image responses all just work.
+
+    _LABELER_BACKEND = os.environ.get(
+        "RFCAI_LABELER_BACKEND", "http://127.0.0.1:8504"
+    )
+    # Strip hop-by-hop headers per RFC 7230 §6.1.
+    _HOP_BY_HOP = {
+        "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+        "te", "trailers", "transfer-encoding", "upgrade",
+        "content-length", "content-encoding",
+    }
+
+    async def _proxy_labeler(request: Request, suffix: str) -> Response:
+        target = f"{_LABELER_BACKEND}/rfcai/labeler/{suffix}"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        fwd_headers = {
+            k: v for k, v in request.headers.items()
+            if k.lower() not in _HOP_BY_HOP and k.lower() != "host"
+        }
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            upstream = await client.request(
+                method=request.method,
+                url=target,
+                headers=fwd_headers,
+                content=body,
+                follow_redirects=False,
+            )
+        resp_headers = {
+            k: v for k, v in upstream.headers.items()
+            if k.lower() not in _HOP_BY_HOP
+        }
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            headers=resp_headers,
+        )
+
+    @app.api_route("/labeler", methods=["GET", "POST"])
+    async def labeler_root(request: Request):
+        return await _proxy_labeler(request, "")
+
+    @app.api_route("/labeler/{suffix:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    async def labeler_path(request: Request, suffix: str):
+        return await _proxy_labeler(request, suffix)
 
     return app
 
