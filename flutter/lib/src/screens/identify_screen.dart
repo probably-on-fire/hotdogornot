@@ -1,11 +1,22 @@
 import 'dart:io';
 
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
 import '../settings.dart';
 import '../theme.dart';
+
+const _kCanonicalClasses = [
+  'SMA-M', 'SMA-F',
+  '3.5mm-M', '3.5mm-F',
+  '2.92mm-M', '2.92mm-F',
+  '2.4mm-M', '2.4mm-F',
+];
+
+enum _Mode { photo, video }
 
 class IdentifyScreen extends StatefulWidget {
   const IdentifyScreen({super.key, required this.settings});
@@ -15,75 +26,209 @@ class IdentifyScreen extends StatefulWidget {
   State<IdentifyScreen> createState() => _IdentifyScreenState();
 }
 
-const _kCanonicalClasses = [
-  'SMA-M', 'SMA-F',
-  '3.5mm-M', '3.5mm-F',
-  '2.92mm-M', '2.92mm-F',
-  '2.4mm-M', '2.4mm-F',
-];
+class _IdentifyScreenState extends State<IdentifyScreen>
+    with WidgetsBindingObserver {
+  CameraController? _cam;
+  bool _camInitFailed = false;
+  String? _camInitError;
 
-class _IdentifyScreenState extends State<IdentifyScreen> {
-  File? _image;
-  bool _loading = false;
-  bool _contributing = false;
+  _Mode _mode = _Mode.photo;
+  bool _busy = false;       // capture / classify in flight
+  bool _recording = false;  // video record in progress
   String? _error;
-  PredictResponse? _response;
+  PredictResponse? _result;
+  File? _capturedFile;      // photo or video that produced _result
   String? _contributionStatus;
+  bool _contributing = false;
 
-  Future<void> _pickFromCamera() => _pickImage(ImageSource.camera);
-  Future<void> _pickFromGallery() => _pickImage(ImageSource.gallery);
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _initCamera();
+  }
 
-  Future<void> _pickImage(ImageSource source) async {
-    final picker = ImagePicker();
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _cam?.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final cam = _cam;
+    if (cam == null || !cam.value.isInitialized) return;
+    if (state == AppLifecycleState.inactive) {
+      cam.dispose();
+    } else if (state == AppLifecycleState.resumed) {
+      _initCamera();
+    }
+  }
+
+  Future<void> _initCamera() async {
+    if (kIsWeb) {
+      // Browser camera access through this plugin is fiddly; fall back
+      // to image_picker on web (tap shutter → OS file picker).
+      setState(() => _camInitFailed = true);
+      return;
+    }
     try {
-      final pf = await picker.pickImage(
-        source: source,
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        setState(() {
+          _camInitFailed = true;
+          _camInitError = 'No cameras found on this device.';
+        });
+        return;
+      }
+      final rear = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+      final controller = CameraController(
+        rear,
+        ResolutionPreset.high,
+        enableAudio: false,
+      );
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _cam = controller;
+        _camInitFailed = false;
+      });
+    } catch (e) {
+      setState(() {
+        _camInitFailed = true;
+        _camInitError = '$e';
+      });
+    }
+  }
+
+  Future<void> _onShutter() async {
+    if (_busy) return;
+    if (_mode == _Mode.video) {
+      await _toggleRecording();
+    } else {
+      await _capturePhoto();
+    }
+  }
+
+  Future<void> _capturePhoto() async {
+    final cam = _cam;
+    File? file;
+    if (cam != null && cam.value.isInitialized) {
+      try {
+        final shot = await cam.takePicture();
+        file = File(shot.path);
+      } catch (e) {
+        setState(() => _error = 'Capture failed: $e');
+        return;
+      }
+    } else {
+      // Web / no-camera fallback: use image_picker.
+      final pf = await ImagePicker().pickImage(
+        source: ImageSource.camera,
         imageQuality: 92,
         maxWidth: 4032,
       );
       if (pf == null) return;
-      setState(() {
-        _image = File(pf.path);
-        _response = null;
-        _error = null;
-        _contributionStatus = null;
-      });
-      await _classify();
-    } catch (e) {
-      setState(() => _error = 'Pick failed: $e');
+      file = File(pf.path);
+    }
+    await _classifyPhoto(file);
+  }
+
+  Future<void> _toggleRecording() async {
+    final cam = _cam;
+    if (cam == null || !cam.value.isInitialized) {
+      setState(() => _error = 'Camera not available for video on this platform.');
+      return;
+    }
+    if (!_recording) {
+      try {
+        await cam.startVideoRecording();
+        setState(() => _recording = true);
+      } catch (e) {
+        setState(() => _error = 'Record start failed: $e');
+      }
+    } else {
+      try {
+        final clip = await cam.stopVideoRecording();
+        setState(() => _recording = false);
+        await _classifyVideo(File(clip.path));
+      } catch (e) {
+        setState(() {
+          _recording = false;
+          _error = 'Record stop failed: $e';
+        });
+      }
     }
   }
 
-  Future<void> _classify() async {
-    final image = _image;
-    if (image == null) return;
+  Future<void> _classifyPhoto(File f) async {
     setState(() {
-      _loading = true;
+      _busy = true;
       _error = null;
-      _response = null;
+      _result = null;
+      _capturedFile = f;
       _contributionStatus = null;
     });
     try {
-      final api = ApiClient(widget.settings);
-      final r = await api.predict(image);
-      setState(() => _response = r);
+      final r = await ApiClient(widget.settings).predict(f);
+      setState(() => _result = r);
     } catch (e) {
       setState(() => _error = '$e');
     } finally {
-      setState(() => _loading = false);
+      setState(() => _busy = false);
     }
   }
 
+  Future<void> _classifyVideo(File f) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+      _result = null;
+      _capturedFile = f;
+      _contributionStatus = null;
+    });
+    try {
+      final r = await ApiClient(widget.settings).predictVideo(f);
+      setState(() => _result = r);
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  void _resetToLive() {
+    setState(() {
+      _result = null;
+      _error = null;
+      _capturedFile = null;
+      _contributionStatus = null;
+    });
+  }
+
   Future<void> _contribute(String cls) async {
-    final image = _image;
-    if (image == null) return;
+    final f = _capturedFile;
+    if (f == null) return;
+    // Video contribution would need a different endpoint; only photos
+    // route to /labeler/upload-train today.
+    if (_mode == _Mode.video) {
+      setState(() => _contributionStatus =
+          'Video contribution: open Contribute tab and use the Video uploader.');
+      return;
+    }
     setState(() {
       _contributing = true;
       _contributionStatus = null;
     });
     try {
-      final api = ApiClient(widget.settings);
-      await api.uploadTrainingPhoto(image, cls);
+      await ApiClient(widget.settings).uploadTrainingPhoto(f, cls);
       setState(() => _contributionStatus = '✓ Added to training as $cls');
     } catch (e) {
       setState(() => _contributionStatus = 'Upload failed: $e');
@@ -106,7 +251,9 @@ class _IdentifyScreenState extends State<IdentifyScreen> {
                       c,
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: c == suggested ? FontWeight.bold : FontWeight.normal,
+                        fontWeight: c == suggested
+                            ? FontWeight.bold
+                            : FontWeight.normal,
                       ),
                     ),
                   ),
@@ -120,129 +267,169 @@ class _IdentifyScreenState extends State<IdentifyScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Identify')),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
-                child: _buildBody(),
+      backgroundColor: Colors.black,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          _buildPreview(),
+          // Mode toggle (photo / video) — hidden while showing a result.
+          if (_result == null && _error == null)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 12,
+              left: 0,
+              right: 0,
+              child: Center(child: _buildModeToggle()),
+            ),
+          // Bottom shutter (or back-to-live when result is showing).
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: MediaQuery.of(context).padding.bottom + 100,
+            child: Center(child: _buildShutterArea()),
+          ),
+          // Result overlay slides up from the bottom over the frozen frame.
+          if (_result != null || _error != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 96),
+                  child: _buildResultPanel(),
+                ),
               ),
             ),
-            _buildBottomBar(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_image == null) {
-      return Container(
-        height: 360,
-        margin: const EdgeInsets.symmetric(vertical: 40),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          border: Border.all(color: const Color(0xFF2A313E)),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.add_a_photo, size: 56,
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4)),
-            const SizedBox(height: 16),
-            Text('Tap below to take a photo',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                  fontSize: 15,
-                )),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.file(_image!, fit: BoxFit.cover),
-        ),
-        const SizedBox(height: 16),
-        if (_loading) const _LoadingCard(),
-        if (_error != null) _ErrorCard(message: _error!),
-        if (_response != null) _ResultCard(response: _response!),
-        if (_response != null && _response!.predictions.isNotEmpty)
-          _ContributeCard(
-            suggestedClass: _response!.predictions.first.className,
-            busy: _contributing,
-            status: _contributionStatus,
-            onConfirm: () => _contribute(_response!.predictions.first.className),
-            onCorrect: () => _pickCorrectClass(_response!.predictions.first.className),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildBottomBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        border: const Border(top: BorderSide(color: Color(0xFF2A313E))),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: _loading ? null : _pickFromCamera,
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('Camera'),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: _loading ? null : _pickFromGallery,
-              icon: const Icon(Icons.photo_library),
-              label: const Text('Gallery'),
-            ),
-          ),
         ],
       ),
     );
   }
-}
 
-class _LoadingCard extends StatelessWidget {
-  const _LoadingCard();
-  @override
-  Widget build(BuildContext context) {
-    return const Card(
-      child: Padding(
-        padding: EdgeInsets.all(24),
-        child: Row(
-          children: [
-            SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5)),
-            SizedBox(width: 16),
-            Text('Identifying…', style: TextStyle(fontSize: 16)),
-          ],
+  Widget _buildPreview() {
+    // When we have a result, freeze the captured photo on screen instead
+    // of showing the live preview.
+    if (_capturedFile != null && _result != null && _mode == _Mode.photo) {
+      return Image.file(
+        _capturedFile!,
+        fit: BoxFit.cover,
+        alignment: Alignment.center,
+      );
+    }
+    final cam = _cam;
+    if (cam != null && cam.value.isInitialized) {
+      return Center(
+        child: AspectRatio(
+          aspectRatio: cam.value.aspectRatio,
+          child: CameraPreview(cam),
         ),
+      );
+    }
+    if (_camInitFailed) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.photo_camera_outlined,
+                    size: 72, color: Colors.white38),
+                const SizedBox(height: 16),
+                Text(
+                  kIsWeb
+                      ? 'Live preview not available in browser.\nTap the shutter to pick a photo.'
+                      : (_camInitError ?? 'Camera unavailable.'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return const Center(
+      child: CircularProgressIndicator(color: Colors.white),
+    );
+  }
+
+  Widget _buildModeToggle() {
+    Widget pill(_Mode m, IconData icon, String label) {
+      final selected = _mode == m;
+      return GestureDetector(
+        onTap: _busy || _recording
+            ? null
+            : () => setState(() => _mode = m),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16,
+                  color: selected ? Colors.black : Colors.white),
+              const SizedBox(width: 6),
+              Text(label,
+                  style: TextStyle(
+                    color: selected ? Colors.black : Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  )),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          pill(_Mode.photo, Icons.photo_camera, 'Photo'),
+          const SizedBox(width: 4),
+          pill(_Mode.video, Icons.videocam, 'Video'),
+        ],
       ),
     );
   }
-}
 
-class _ErrorCard extends StatelessWidget {
-  const _ErrorCard({required this.message});
-  final String message;
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+  Widget _buildShutterArea() {
+    if (_result != null || _error != null) {
+      // Result is up; primary action is "scan again".
+      return _RoundIconButton(
+        icon: Icons.refresh,
+        label: 'Scan again',
+        onTap: _resetToLive,
+      );
+    }
+    if (_busy) {
+      return const _ShutterButton(
+        recording: false,
+        videoMode: false,
+        busy: true,
+      );
+    }
+    return _ShutterButton(
+      recording: _recording,
+      videoMode: _mode == _Mode.video,
+      busy: false,
+      onTap: _onShutter,
+    );
+  }
+
+  Widget _buildResultPanel() {
+    if (_error != null) {
+      return _ResultCard(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -253,187 +440,212 @@ class _ErrorCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Identification failed',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text(message,
                       style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                        fontSize: 13,
-                      )),
+                          fontSize: 15, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text(_error!,
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 13)),
                 ],
               ),
             ),
           ],
         ),
+      );
+    }
+    final r = _result!;
+    if (r.predictions.isEmpty) {
+      return _ResultCard(
+        child: const Padding(
+          padding: EdgeInsets.symmetric(vertical: 12),
+          child: Center(
+            child: Text(
+              'No connector detected.\nTry a clearer mating-face shot.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16),
+            ),
+          ),
+        ),
+      );
+    }
+    final p = r.predictions.first;
+    final hot = p.isMale;
+    final color = hot ? kHotDogColor : kNotHotDogColor;
+    final label = hot ? 'HOT DOG' : 'NOT HOT DOG';
+    return _ResultCard(
+      child: Column(
+        children: [
+          Text(label,
+              style: TextStyle(
+                color: color,
+                fontSize: 38,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.0,
+              )),
+          const SizedBox(height: 8),
+          Text(p.family,
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w600,
+              )),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              '${(p.confidence * 100).toStringAsFixed(0)}% confidence  ·  ${p.className}',
+              style: TextStyle(
+                  color: color, fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _contributing ? null : () => _contribute(p.className),
+                  icon: const Icon(Icons.check, size: 18),
+                  label: Text('Confirm ${p.className}'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4ADE80),
+                    foregroundColor: Colors.black,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _contributing
+                      ? null
+                      : () => _pickCorrectClass(p.className),
+                  icon: const Icon(Icons.edit, size: 18),
+                  label: const Text('Correct…'),
+                ),
+              ),
+            ],
+          ),
+          if (_contributing)
+            const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          if (_contributionStatus != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                _contributionStatus!,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: _contributionStatus!.startsWith('✓')
+                      ? const Color(0xFF4ADE80)
+                      : Colors.redAccent,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
 class _ResultCard extends StatelessWidget {
-  const _ResultCard({required this.response});
-  final PredictResponse response;
+  const _ResultCard({required this.child});
+  final Widget child;
   @override
   Widget build(BuildContext context) {
-    if (response.predictions.isEmpty) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Center(
-            child: Text('No connector detected.\nTry a clearer mating-face photo.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16)),
-          ),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.78),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _ShutterButton extends StatelessWidget {
+  const _ShutterButton({
+    required this.recording,
+    required this.videoMode,
+    required this.busy,
+    this.onTap,
+  });
+  final bool recording;
+  final bool videoMode;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final outerColor = Colors.white.withOpacity(0.9);
+    final innerColor = videoMode ? Colors.redAccent : Colors.white;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 78,
+        height: 78,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: outerColor, width: 4),
         ),
-      );
-    }
-    final p = response.predictions.first;
-    final hotDog = p.isMale;
-    final color = hotDog ? kHotDogColor : kNotHotDogColor;
-    final label = hotDog ? 'HOT DOG' : 'NOT HOT DOG';
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
-        child: Column(
-          children: [
-            // BIG hot-dog / not-hot-dog verdict.
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 44,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.0,
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Family below.
-            Text(
-              p.family,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface,
-                fontSize: 28,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                '${(p.confidence * 100).toStringAsFixed(0)}% confidence',
-                style: TextStyle(
-                  color: color,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+        child: Center(
+          child: busy
+              ? const SizedBox(
+                  width: 28, height: 28,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 3, color: Colors.white))
+              : AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: recording ? 28 : 60,
+                  height: recording ? 28 : 60,
+                  decoration: BoxDecoration(
+                    color: innerColor,
+                    borderRadius: BorderRadius.circular(recording ? 6 : 30),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              p.className,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-                fontSize: 12,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ],
         ),
       ),
     );
   }
 }
 
-class _ContributeCard extends StatelessWidget {
-  const _ContributeCard({
-    required this.suggestedClass,
-    required this.busy,
-    required this.status,
-    required this.onConfirm,
-    required this.onCorrect,
+class _RoundIconButton extends StatelessWidget {
+  const _RoundIconButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
   });
-  final String suggestedClass;
-  final bool busy;
-  final String? status;
-  final VoidCallback onConfirm;
-  final VoidCallback onCorrect;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Help train the model',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Add this photo to the training set so the model gets better at recognizing this connector.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: busy ? null : onConfirm,
-                      icon: const Icon(Icons.check, size: 18),
-                      label: Text('Confirm $suggestedClass'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF4ADE80),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: busy ? null : onCorrect,
-                      icon: const Icon(Icons.edit, size: 18),
-                      label: const Text('Correct…'),
-                    ),
-                  ),
-                ],
-              ),
-              if (busy)
-                const Padding(
-                  padding: EdgeInsets.only(top: 12),
-                  child: Center(child: CircularProgressIndicator()),
-                ),
-              if (status != null)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(
-                    status!,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: status!.startsWith('✓')
-                          ? const Color(0xFF4ADE80)
-                          : Colors.redAccent,
-                    ),
-                  ),
-                ),
-            ],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: 64, height: 64,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.18),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white70, width: 2),
+            ),
+            child: Icon(icon, color: Colors.white, size: 28),
           ),
         ),
-      ),
+        const SizedBox(height: 6),
+        Text(label,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+      ],
     );
   }
 }

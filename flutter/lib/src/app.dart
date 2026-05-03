@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'screens/home_screen.dart';
+import 'screens/main_shell.dart';
 import 'theme.dart';
 
 class ConnectorIdApp extends StatelessWidget {
@@ -12,7 +12,7 @@ class ConnectorIdApp extends StatelessWidget {
       title: 'Connector ID',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-      home: const HomeScreen(),
+      home: const MainShell(),
     );
   }
 }

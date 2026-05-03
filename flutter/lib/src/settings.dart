@@ -47,6 +47,8 @@ class Settings {
 
   String get predictUrl => '$relayBaseUrl/predict';
 
+  String get predictVideoUrl => '$relayBaseUrl/predict-video';
+
   String labelerUploadTrainUrl() => '$relayBaseUrl/labeler/upload-train';
 
   String labelerUploadVideoUrl() => '$relayBaseUrl/labeler/upload-video';

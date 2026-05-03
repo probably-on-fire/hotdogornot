@@ -88,6 +88,20 @@ class ApiClient {
     return PredictResponse.fromJson(jsonDecode(resp.body));
   }
 
+  /// POST a video clip to /predict-video. Server samples at 1 fps and
+  /// returns the highest-confidence single-frame prediction.
+  Future<PredictResponse> predictVideo(File videoFile) async {
+    final req = http.MultipartRequest('POST', Uri.parse(settings.predictVideoUrl));
+    req.headers['X-Device-Token'] = settings.deviceToken;
+    req.files.add(await http.MultipartFile.fromPath('video', videoFile.path));
+    final streamed = await req.send().timeout(const Duration(seconds: 120));
+    final resp = await http.Response.fromStream(streamed);
+    if (resp.statusCode != 200) {
+      throw _ApiError(resp.statusCode, resp.body);
+    }
+    return PredictResponse.fromJson(jsonDecode(resp.body));
+  }
+
   /// POST a training photo to the labeler. cls is the canonical class
   /// e.g. "2.4mm-M".
   Future<String> uploadTrainingPhoto(File imageFile, String cls) async {
