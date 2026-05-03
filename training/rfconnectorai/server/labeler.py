@@ -420,6 +420,52 @@ def create_router() -> APIRouter:
                     pass
         return HTMLResponse(f"<div class='success'>Deleted {deleted} image(s).</div>")
 
+    @r.post("/upload-train", response_class=HTMLResponse)
+    async def upload_train(
+        cls: str = Form(...),
+        images: list[UploadFile] = File(...),
+        _: str = Depends(_require_basic_auth),
+    ):
+        """Drop phone photos directly into the training set for a class.
+
+        Use this when you want to add a high-resolution photo as a training
+        sample (vs the video-extraction path which gives lower-res crops).
+        Saved to data/labeled/embedder/<class>/photo_<stem><ext>.
+
+        Cache-bust the signal cache so the new photos appear in Review."""
+        if cls not in CANONICAL_CLASSES:
+            raise HTTPException(400, f"unknown class {cls!r}")
+        out_dir = _data_root() / cls
+        out_dir.mkdir(parents=True, exist_ok=True)
+        saved = []
+        for image in images:
+            if not image.filename:
+                continue
+            ext = Path(image.filename).suffix.lower()
+            if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+                continue
+            stem = Path(image.filename).stem or f"upload_{int(time.time())}"
+            stem = Path(stem).name
+            # photo_ prefix so these are easy to filter from Hough crops.
+            dst = out_dir / f"photo_{stem}{ext}"
+            n = 1
+            while dst.exists():
+                dst = out_dir / f"photo_{stem}_dup{n}{ext}"
+                n += 1
+            data = await image.read()
+            dst.write_bytes(data)
+            saved.append(dst.name)
+        global _signals_cache
+        _signals_cache = {}
+        if not saved:
+            return HTMLResponse(
+                "<div style='color:#f87171'>No valid images saved (jpg/png/webp only).</div>"
+            )
+        return HTMLResponse(
+            f"<div style='color:#4ade80'>Saved {len(saved)} training image(s) to "
+            f"<code>data/labeled/embedder/{cls}/</code>: {', '.join(saved)}</div>"
+        )
+
     @r.post("/upload-test", response_class=HTMLResponse)
     async def upload_test(
         cls: str = Form(...),
