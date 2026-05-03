@@ -39,6 +39,7 @@ test_*.jpg
 # Throwaway one-shot deploy helpers (anything prefixed with underscore
 # in scripts/ is local-only by convention).
 scripts/_*.py
+scripts/_out/
 
 # Environment
 .env

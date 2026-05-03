@@ -108,6 +108,26 @@ These were tried and don't work on this data:
   detected ppm is 2× wrong — FFT locks onto reflections / sensor
   patterns instead of the threaded barrel (which isn't actually
   visible in face-on shots).
+- **Body/bore diameter ratio** (geometric): scaffolded in
+  `scripts/_exp_barrel_scale.py`. The pitch was: rembg silhouette →
+  body OD circle, then darkness-thresholded central blob → bore. Take
+  the ratio, look up against datasheet `bore_id_mm / body_od_mm`
+  (SMA=0.66, 3.5mm=0.55, 2.92mm=0.46, 2.4mm=0.47). **Result: 0/8 on
+  held-out.** Two reasons it's stuck:
+    1. **The datasheet `bore_id_mm` is the inner-conductor bore** —
+       a small feature buried inside the chamfered mating-face cavity.
+       What we can detect from a face-on photo is the *outer* dark
+       recess (the entire chamfered cavity), which is geometrically a
+       different, larger ring than the bore the datasheet specifies.
+       Measured ratios came in at 0.5–0.73 against expected 0.46–0.66.
+    2. Even if we ignored the datasheet and used empirical signatures,
+       2.4mm and 2.92mm produce nearly identical visible-recess ratios
+       (~0.6 each) — same near-indistinguishability the trained
+       classifier hits, for the same physical reason (the
+       discriminating features are sub-resolution).
+  Scraped product shots in `data/archive/scraped/*` are side-view
+  marketing photography, not face-on, so they can't be used to build
+  per-class empirical distributions either.
 - **DINOv2 linear probe**: 100% in-distribution val but same held-out
   plateau as everything else — feature distribution shift dominates.
 - **Procedural background composite synthesis** (5 backgrounds per
