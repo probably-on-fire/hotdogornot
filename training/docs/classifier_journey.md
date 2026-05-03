@@ -1,0 +1,215 @@
+# Connector Classifier — Project Journey & Findings
+
+This doc captures the iteration history, key findings, and current state
+of the RF connector classifier. Read this before making more changes.
+
+## Goal
+
+iPhone/Android (eventually) classifier for 8 RF connector classes:
+SMA / 3.5mm / 2.92mm / 2.4mm × M / F. Supports a take-a-photo demo
+plus a continuous-learning loop where phone uploads grow the dataset.
+
+## Hard data constraint
+
+- **3 source videos**, ~10s each, all on the same wood bench under one
+  lighting condition. Filenames: `2_4mm.MOV`, `2_92mm.MOV`, `3_5mm.MOV`.
+- **No SMA video** at all — the SMA classes have zero training samples
+  by definition.
+- **8 phone-shot held-out images** in `data/test_holdout/` for evaluation.
+- Source videos are 1920×1080, held-out photos are 4032×3024 (12 MP).
+
+## Two critical labeling/data findings
+
+### 1. Labeling convention swap (2026-05-02)
+
+Originally the user labeled M/F by **plumbing convention**: external
+threads visible on the body = "M" (like a male pipe end), smooth/hex
+outside = "F". This is **opposite** of standard RF connector convention,
+which goes by the contact-end pin/socket: pin = M, socket = F. Plumbing
+M = RF F and vice versa.
+
+We swapped all `<family>-M/` ↔ `<family>-F/` folders to align with RF
+spec. Backups at `/home/rfcai/backups/embedder_pre_swap_*.tar.gz` and
+mirrored to local `backups/`.
+
+**Going forward: M = pin side, F = socket side.** Click that way in the
+labeler when reviewing or uploading new samples.
+
+### 2. Resolution mismatch (2026-05-02)
+
+Training crops are 850×850 saved, but the *real* signal is the
+50–100px Hough crop from the original 1920×1080 video frame, *upscaled*.
+The central pin/hole feature in the original video is ~5–10 pixels —
+**below the visual resolution at which gender can be reliably
+classified**. Held-out photos at 4032×3024 have the central feature at
+~20–50 pixels, which IS distinguishable.
+
+This explains the entire gender accuracy oscillation across all our
+experiments: there is no reliable gender feature in the training data
+to learn. **Family is partly learnable from videos; gender requires
+photo-resolution training data.**
+
+## Architecture
+
+Two-stage detect-then-classify, plus a parallel deterministic
+geometry pipeline:
+
+```
+Phone frame
+   ↓
+Hough Circle (rfconnectorai/data_fetch/connector_crops.py)
+   ↓
+Tight padded crop (~2.7× face radius)
+   ↓
+ResNet-18 fine-tune (rfconnectorai/classifier/predict.py)
+   → 8-class softmax
+```
+
+Best variant: **two-classifier split** — separate family classifier
+on rembg-clean full crops, separate gender classifier on tight central
+crops (script: `scripts/_exp_gender_v2.py`).
+
+Secondary path (built but not currently usable on phone shots):
+geometric pipeline using hex / aperture / family / gender detectors
+plus optional ArUco for absolute scale (`rfconnectorai/measurement/`).
+
+## Experiments tried (held-out: 8 images, ±12% per-prediction noise)
+
+Note: gender numbers below were measured against the OLD plumbing
+labels. After the 2026-05-02 swap they're effectively inverted (75% →
+25% for the same physical predictions). Family numbers are unaffected.
+
+| Run | Train | Held-out Full | Family | Gender (old labels) |
+|---|---|---|---|---|
+| Baseline ResNet-18 | 99.6% | 12% | 25% | 75% |
+| + aggressive aug + class-balanced sampler | 96% | 0% | **62%** | 0% |
+| + label smoothing + cosine LR + WD | 99% | 25% | 38% | 38% |
+| + zoom synth (888 samples) | 98% | 12% | 38% | 50% |
+| + bg-mask synth (1184 samples) | 98% | 12% | 50% | 25% |
+| Two-head architecture | 99% | 25% | 38% | 38% |
+| Two-head + 2664 synth-bg samples | 100% | 25% | 38% | 38% |
+| rembg-clean train + rembg eval | 100% | 12% | 50% | 25% |
+| Two-classifier (resnet+resnet, central crop) | 99% | 25% | 62% | 50% |
+| **Two-classifier v2 (mobilenet-gen + 8x TTA)** | 99% | **38%** | 38% | **75%** |
+| DINOv2 linear probe + gender v2 | 100% | 25% | 38% | 62% |
+| DINOv2 + linear probe (3-class, no SMA) | 100% | 25% | 38% | 62% |
+
+## Failure modes proven exhausted
+
+These were tried and don't work on this data:
+
+- **Hex polygon detection** (geometric): fails on wood-grain background;
+  Otsu lumps connector + grain together. 0/8 held-out detections.
+- **GrabCut body segmentation** (geometric): 70–97% failure rate; can't
+  separate metallic gray from light wood.
+- **Wide-pad re-extraction for hex measurement**: even more wood grain
+  in frame → noise dominates.
+- **Thread-pitch FFT** for absolute scale: fires on every image but the
+  detected ppm is 2× wrong — FFT locks onto reflections / sensor
+  patterns instead of the threaded barrel (which isn't actually
+  visible in face-on shots).
+- **DINOv2 linear probe**: 100% in-distribution val but same held-out
+  plateau as everything else — feature distribution shift dominates.
+- **Procedural background composite synthesis** (5 backgrounds per
+  crop): didn't break OOD generalization because procedural patterns
+  don't look like real bench/desk backgrounds.
+
+## What works
+
+- **`rembg`** (U²-Net) as a foreground-segmentation tool. Clean
+  silhouettes on cluttered backgrounds. Used for background-removed
+  training and for inference-time preprocessing.
+- **`scripts/pages/1_Training_Data.py`** Streamlit labeler with
+  filters (only-disagreements, only-multi-object, only-no-circle,
+  hide-near-duplicates, blur threshold), per-tile delete + flip,
+  Focus mode with hotkeys.
+- **`rfconnectorai/server/labeler.py`** FastAPI + HTMX labeler at
+  `https://aired.com/rfcai/labeler/` (admin / 663800c2f2a8f2c4e33f2c43)
+  with held-out upload, training-video upload, multi-class filter,
+  bulk-delete, image lightbox.
+- **VLM upper-bound test**: Claude classifies the 8 held-out photos
+  at 87.5% (would be 8/8 except one image is mislabeled — `IMG_0274`
+  is byte-identical to `2_4mm-m.jpeg` but lives in different folder).
+  This proves the task is *doable from the held-out resolution*; the
+  ResNet-18 fine-tune just can't learn it from the video crops alone.
+
+## Known data-quality issues
+
+- **`IMG_0274.jpeg` and `2_4mm-m.jpeg` are byte-identical** but live
+  in different held-out folders — one of the labels is wrong, so the
+  practical held-out ceiling is 7/8 by construction. Should be deleted
+  from one folder.
+- After the M/F swap, gender labels in the held-out folders may need
+  re-verification by a human who can physically inspect the actual
+  connector each photo represents.
+
+## Current best model
+
+Two-classifier setup (script: `scripts/_exp_gender_v2.py`):
+- Family classifier: ResNet-18 fine-tune on rembg-clean crops
+- Gender classifier: MobileNetV3-Small on tight rembg-cleaned central
+  crops (96×96)
+- Heavy 8× TTA at inference (4 rotations × 2 flips)
+- ~38% Full / 38% Family / 75% Gender (pre-swap labels)
+
+Live at `aired.com/rfcai/predict` via the predict service. Demo at
+`aired.com/demo/`. Labeler at `aired.com/rfcai/labeler/`.
+
+## Tooling built (reusable regardless of model)
+
+- `rembg` integration for foreground segmentation
+- HTMX-based labeler (faster than Streamlit, no scroll-jump)
+- Backup script: `scripts/backup_training_data.sh`
+- Held-out evaluation harness with no-TTA / TTA comparison
+- VLM-as-classifier validation (Claude reads images directly)
+- Procedural background synthesis pipeline
+- Synthetic zoom variants (`_z70`, `_z50`)
+- Background masking pipeline (`_mask`, `_clean`)
+- Distillation pool: 1002 fresh crops from videos at fps=12 in
+  `data/distill_pool/`
+
+## Path forward (per Codex review + 2026-05-02 findings)
+
+1. **Take phone PHOTOS, not videos**, for new training data. ~30 per
+   class. 12 MP gives the central pin/socket feature plenty of
+   resolution. Drop into the labeler upload UI.
+2. **Vary the scene** when shooting: different surfaces, different
+   lighting, different angles. Diversity is what lets the model
+   generalize beyond the bench.
+3. **Use Claude (via this conversation, no API cost on Max plan) to
+   pre-label** new photos as they're uploaded — drag photo, Claude
+   classifies, user confirms.
+4. **Train an on-device model** (MobileNetV3-Small or similar) on the
+   expanded photo dataset. The student model inherits the VLM's
+   generalization without needing the VLM at runtime.
+5. **For family classification, the existing video-crop dataset is
+   fine** — keep it as auxiliary training data.
+
+## Anti-recommendations (don't bother)
+
+- More architecture iteration with current data: every variant lands
+  in the same `25–38% Full / 38–62% Family / 25–75% Gender` band on
+  the 8-image held-out. Ceiling is real.
+- Geometric measurement on the existing wood-bench shots: hex / body
+  segmentation just doesn't work without ArUco or cleaner backgrounds.
+- VLM-at-inference: can't deploy on phone. VLM-at-development for
+  distillation IS the play.
+
+## Data layout reference
+
+```
+training/data/
+  videos/                      ← 3 source .MOV files
+  labeled/embedder/<CLASS>/    ← cleaned training crops (gitignored)
+    <name>.jpg                 ← original Hough crop
+    <name>_z70.jpg, _z50.jpg   ← center-cropped zoom variants
+    <name>_mask.jpg            ← gray-masked variant (legacy)
+    <name>_clean.jpg           ← rembg-cleaned (background→neutral gray)
+    <name>_bg{0..4}.jpg        ← procedural-background composites
+    <name>_central.jpg         ← tight central crop (50% face radius)
+    <name>_centralv2.jpg       ← rembg-cleaned tight central (gender)
+  test_holdout/<CLASS>/        ← 8 hand-verified phone photos
+  distill_pool/<FAMILY>/       ← 1002 fresh crops awaiting VLM labeling
+  archive/                     ← legacy scraped images (don't use)
+  reference/                   ← committed vendor reference photos
+```
