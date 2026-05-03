@@ -37,6 +37,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from rfconnectorai.classifier.predict import ConnectorClassifier
@@ -65,6 +66,18 @@ def create_app(config: dict | None = None) -> FastAPI:
     max_detections: int = cfg["max_detections"]
 
     app = FastAPI(title="RF Connector AI prediction service", version="1.0.0")
+
+    # CORS: allow the Flutter web build (and any future browser-side
+    # client) to call /predict and /labeler/* from a different origin.
+    # Auth is via header (X-Device-Token / Basic), so the browser sends
+    # a preflight OPTIONS — without this it gets blocked.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],   # internal R&D tool; tighten if exposed publicly
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
     # Load classifier once at boot so each request is fast.
     classifier: ConnectorClassifier | None = None
