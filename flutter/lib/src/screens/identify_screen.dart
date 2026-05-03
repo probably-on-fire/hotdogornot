@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -37,7 +38,8 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   bool _recording = false;  // video record in progress
   String? _error;
   PredictResponse? _result;
-  File? _capturedFile;      // photo or video that produced _result
+  File? _capturedFile;      // photo or video that produced _result (native)
+  Uint8List? _capturedBytes;// bytes path used on web (no usable file path)
   String? _contributionStatus;
   bool _contributing = false;
 
@@ -119,26 +121,29 @@ class _IdentifyScreenState extends State<IdentifyScreen>
 
   Future<void> _capturePhoto() async {
     final cam = _cam;
-    File? file;
     if (cam != null && cam.value.isInitialized) {
       try {
         final shot = await cam.takePicture();
-        file = File(shot.path);
+        await _classifyPhotoFile(File(shot.path));
       } catch (e) {
         setState(() => _error = 'Capture failed: $e');
-        return;
       }
-    } else {
-      // Web / no-camera fallback: use image_picker.
-      final pf = await ImagePicker().pickImage(
-        source: ImageSource.camera,
-        imageQuality: 92,
-        maxWidth: 4032,
-      );
-      if (pf == null) return;
-      file = File(pf.path);
+      return;
     }
-    await _classifyPhoto(file);
+    // Web / no-camera fallback: use image_picker. On web XFile.path is
+    // a blob URL we can't open as a File, so route through bytes.
+    final pf = await ImagePicker().pickImage(
+      source: ImageSource.camera,
+      imageQuality: 92,
+      maxWidth: 4032,
+    );
+    if (pf == null) return;
+    if (kIsWeb) {
+      final bytes = await pf.readAsBytes();
+      await _classifyPhotoBytes(bytes, pf.name);
+    } else {
+      await _classifyPhotoFile(File(pf.path));
+    }
   }
 
   Future<void> _toggleRecording() async {
@@ -168,16 +173,37 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     }
   }
 
-  Future<void> _classifyPhoto(File f) async {
+  Future<void> _classifyPhotoFile(File f) async {
     setState(() {
       _busy = true;
       _error = null;
       _result = null;
       _capturedFile = f;
+      _capturedBytes = null;
       _contributionStatus = null;
     });
     try {
       final r = await ApiClient(widget.settings).predict(f);
+      setState(() => _result = r);
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _classifyPhotoBytes(Uint8List bytes, String filename) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+      _result = null;
+      _capturedFile = null;
+      _capturedBytes = bytes;
+      _contributionStatus = null;
+    });
+    try {
+      final r = await ApiClient(widget.settings)
+          .predictBytes(bytes, filename: filename);
       setState(() => _result = r);
     } catch (e) {
       setState(() => _error = '$e');
@@ -192,6 +218,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       _error = null;
       _result = null;
       _capturedFile = f;
+      _capturedBytes = null;
       _contributionStatus = null;
     });
     try {
@@ -209,13 +236,12 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       _result = null;
       _error = null;
       _capturedFile = null;
+      _capturedBytes = null;
       _contributionStatus = null;
     });
   }
 
   Future<void> _contribute(String cls) async {
-    final f = _capturedFile;
-    if (f == null) return;
     // Video contribution would need a different endpoint; only photos
     // route to /labeler/upload-train today.
     if (_mode == _Mode.video) {
@@ -223,12 +249,20 @@ class _IdentifyScreenState extends State<IdentifyScreen>
           'Video contribution: open Contribute tab and use the Video uploader.');
       return;
     }
+    final file = _capturedFile;
+    final bytes = _capturedBytes;
+    if (file == null && bytes == null) return;
     setState(() {
       _contributing = true;
       _contributionStatus = null;
     });
     try {
-      await ApiClient(widget.settings).uploadTrainingPhoto(f, cls);
+      final api = ApiClient(widget.settings);
+      if (file != null) {
+        await api.uploadTrainingPhoto(file, cls);
+      } else {
+        await api.uploadTrainingPhotoBytes(bytes!, cls);
+      }
       setState(() => _contributionStatus = '✓ Added to training as $cls');
     } catch (e) {
       setState(() => _contributionStatus = 'Upload failed: $e');
@@ -309,12 +343,15 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   Widget _buildPreview() {
     // When we have a result, freeze the captured photo on screen instead
     // of showing the live preview.
-    if (_capturedFile != null && _result != null && _mode == _Mode.photo) {
-      return Image.file(
-        _capturedFile!,
-        fit: BoxFit.cover,
-        alignment: Alignment.center,
-      );
+    if (_result != null && _mode == _Mode.photo) {
+      if (_capturedBytes != null) {
+        return Image.memory(_capturedBytes!,
+            fit: BoxFit.cover, alignment: Alignment.center);
+      }
+      if (_capturedFile != null) {
+        return Image.file(_capturedFile!,
+            fit: BoxFit.cover, alignment: Alignment.center);
+      }
     }
     final cam = _cam;
     if (cam != null && cam.value.isInitialized) {
@@ -468,7 +505,11 @@ class _IdentifyScreenState extends State<IdentifyScreen>
         ),
       );
     }
-    final p = r.predictions.first;
+    // Server returns detections in detector order, not by confidence —
+    // sort so we always show the most confident one as the headline.
+    final sorted = [...r.predictions]
+      ..sort((a, b) => b.confidence.compareTo(a.confidence));
+    final p = sorted.first;
     final hot = p.isMale;
     final color = hot ? kHotDogColor : kNotHotDogColor;
     final label = hot ? 'HOT DOG' : 'NOT HOT DOG';

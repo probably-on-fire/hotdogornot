@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -75,11 +76,25 @@ class ApiClient {
   final Settings settings;
 
   /// POST a JPEG to the /predict endpoint and return parsed predictions.
-  /// Throws on non-2xx, network error, or invalid JSON.
+  /// Native path — uses on-disk file, avoids reading bytes into memory.
   Future<PredictResponse> predict(File imageFile) async {
+    return predictBytes(
+      await imageFile.readAsBytes(),
+      filename: imageFile.uri.pathSegments.isNotEmpty
+          ? imageFile.uri.pathSegments.last
+          : 'image.jpg',
+    );
+  }
+
+  /// POST raw image bytes to /predict. Web-safe — works without dart:io
+  /// path access (XFile.path is a blob URL in browser).
+  Future<PredictResponse> predictBytes(
+    Uint8List bytes, {
+    String filename = 'image.jpg',
+  }) async {
     final req = http.MultipartRequest('POST', Uri.parse(settings.predictUrl));
     req.headers['X-Device-Token'] = settings.deviceToken;
-    req.files.add(await http.MultipartFile.fromPath('image', imageFile.path));
+    req.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
     final streamed = await req.send().timeout(const Duration(seconds: 30));
     final resp = await http.Response.fromStream(streamed);
     if (resp.statusCode != 200) {
@@ -91,9 +106,22 @@ class ApiClient {
   /// POST a video clip to /predict-video. Server samples at 1 fps and
   /// returns the highest-confidence single-frame prediction.
   Future<PredictResponse> predictVideo(File videoFile) async {
+    return predictVideoBytes(
+      await videoFile.readAsBytes(),
+      filename: videoFile.uri.pathSegments.isNotEmpty
+          ? videoFile.uri.pathSegments.last
+          : 'video.mp4',
+    );
+  }
+
+  /// Bytes variant of predictVideo for web/no-path-access environments.
+  Future<PredictResponse> predictVideoBytes(
+    Uint8List bytes, {
+    String filename = 'video.mp4',
+  }) async {
     final req = http.MultipartRequest('POST', Uri.parse(settings.predictVideoUrl));
     req.headers['X-Device-Token'] = settings.deviceToken;
-    req.files.add(await http.MultipartFile.fromPath('video', videoFile.path));
+    req.files.add(http.MultipartFile.fromBytes('video', bytes, filename: filename));
     final streamed = await req.send().timeout(const Duration(seconds: 120));
     final resp = await http.Response.fromStream(streamed);
     if (resp.statusCode != 200) {
@@ -110,6 +138,21 @@ class ApiClient {
       fields: {'cls': cls},
       fileField: 'images',
       file: imageFile,
+    );
+  }
+
+  /// Bytes variant of uploadTrainingPhoto for web/no-path-access.
+  Future<String> uploadTrainingPhotoBytes(
+    Uint8List bytes,
+    String cls, {
+    String filename = 'photo.jpg',
+  }) async {
+    return _uploadMultipartBytes(
+      url: settings.labelerUploadTrainUrl(),
+      fields: {'cls': cls},
+      fileField: 'images',
+      bytes: bytes,
+      filename: filename,
     );
   }
 
@@ -135,13 +178,31 @@ class ApiClient {
     required String fileField,
     required File file,
   }) async {
+    return _uploadMultipartBytes(
+      url: url,
+      fields: fields,
+      fileField: fileField,
+      bytes: await file.readAsBytes(),
+      filename: file.uri.pathSegments.isNotEmpty
+          ? file.uri.pathSegments.last
+          : 'upload.bin',
+    );
+  }
+
+  Future<String> _uploadMultipartBytes({
+    required String url,
+    required Map<String, String> fields,
+    required String fileField,
+    required Uint8List bytes,
+    required String filename,
+  }) async {
     final req = http.MultipartRequest('POST', Uri.parse(url));
     final basic = base64Encode(utf8.encode(
       '${settings.labelerUser}:${settings.labelerPass}',
     ));
     req.headers['Authorization'] = 'Basic $basic';
     req.fields.addAll(fields);
-    req.files.add(await http.MultipartFile.fromPath(fileField, file.path));
+    req.files.add(http.MultipartFile.fromBytes(fileField, bytes, filename: filename));
     final streamed = await req.send().timeout(const Duration(seconds: 120));
     final resp = await http.Response.fromStream(streamed);
     if (resp.statusCode != 200) {
