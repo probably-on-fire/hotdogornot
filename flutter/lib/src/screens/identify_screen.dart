@@ -15,11 +15,20 @@ class IdentifyScreen extends StatefulWidget {
   State<IdentifyScreen> createState() => _IdentifyScreenState();
 }
 
+const _kCanonicalClasses = [
+  'SMA-M', 'SMA-F',
+  '3.5mm-M', '3.5mm-F',
+  '2.92mm-M', '2.92mm-F',
+  '2.4mm-M', '2.4mm-F',
+];
+
 class _IdentifyScreenState extends State<IdentifyScreen> {
   File? _image;
   bool _loading = false;
+  bool _contributing = false;
   String? _error;
   PredictResponse? _response;
+  String? _contributionStatus;
 
   Future<void> _pickFromCamera() => _pickImage(ImageSource.camera);
   Future<void> _pickFromGallery() => _pickImage(ImageSource.gallery);
@@ -37,6 +46,7 @@ class _IdentifyScreenState extends State<IdentifyScreen> {
         _image = File(pf.path);
         _response = null;
         _error = null;
+        _contributionStatus = null;
       });
       await _classify();
     } catch (e) {
@@ -51,6 +61,7 @@ class _IdentifyScreenState extends State<IdentifyScreen> {
       _loading = true;
       _error = null;
       _response = null;
+      _contributionStatus = null;
     });
     try {
       final api = ApiClient(widget.settings);
@@ -61,6 +72,49 @@ class _IdentifyScreenState extends State<IdentifyScreen> {
     } finally {
       setState(() => _loading = false);
     }
+  }
+
+  Future<void> _contribute(String cls) async {
+    final image = _image;
+    if (image == null) return;
+    setState(() {
+      _contributing = true;
+      _contributionStatus = null;
+    });
+    try {
+      final api = ApiClient(widget.settings);
+      await api.uploadTrainingPhoto(image, cls);
+      setState(() => _contributionStatus = '✓ Added to training as $cls');
+    } catch (e) {
+      setState(() => _contributionStatus = 'Upload failed: $e');
+    } finally {
+      setState(() => _contributing = false);
+    }
+  }
+
+  Future<void> _pickCorrectClass(String suggested) async {
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (_) => SimpleDialog(
+        title: const Text('Add to training as…'),
+        children: _kCanonicalClasses
+            .map((c) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(context, c),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(
+                      c,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: c == suggested ? FontWeight.bold : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                ))
+            .toList(),
+      ),
+    );
+    if (picked != null) await _contribute(picked);
   }
 
   @override
@@ -120,6 +174,14 @@ class _IdentifyScreenState extends State<IdentifyScreen> {
         if (_loading) const _LoadingCard(),
         if (_error != null) _ErrorCard(message: _error!),
         if (_response != null) _ResultCard(response: _response!),
+        if (_response != null && _response!.predictions.isNotEmpty)
+          _ContributeCard(
+            suggestedClass: _response!.predictions.first.className,
+            busy: _contributing,
+            status: _contributionStatus,
+            onConfirm: () => _contribute(_response!.predictions.first.className),
+            onCorrect: () => _pickCorrectClass(_response!.predictions.first.className),
+          ),
       ],
     );
   }
@@ -280,6 +342,96 @@ class _ResultCard extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ContributeCard extends StatelessWidget {
+  const _ContributeCard({
+    required this.suggestedClass,
+    required this.busy,
+    required this.status,
+    required this.onConfirm,
+    required this.onCorrect,
+  });
+  final String suggestedClass;
+  final bool busy;
+  final String? status;
+  final VoidCallback onConfirm;
+  final VoidCallback onCorrect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Help train the model',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Add this photo to the training set so the model gets better at recognizing this connector.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: busy ? null : onConfirm,
+                      icon: const Icon(Icons.check, size: 18),
+                      label: Text('Confirm $suggestedClass'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4ADE80),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: busy ? null : onCorrect,
+                      icon: const Icon(Icons.edit, size: 18),
+                      label: const Text('Correct…'),
+                    ),
+                  ),
+                ],
+              ),
+              if (busy)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+              if (status != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                    status!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: status!.startsWith('✓')
+                          ? const Color(0xFF4ADE80)
+                          : Colors.redAccent,
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
