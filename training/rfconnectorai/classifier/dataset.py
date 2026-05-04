@@ -38,7 +38,14 @@ def make_train_transforms() -> transforms.Compose:
     across our training videos but absent from real-world held-out
     photos. Small RandomResizedCrop scales include "tight zoom on the
     connector" cases. Rotation, ColorJitter, blur, and RandomErasing
-    all break shortcut cues."""
+    all break shortcut cues.
+
+    2026-05-04 update: bumped ColorJitter brightness 0.25->0.35 and
+    contrast 0.25->0.35 (held-out phone shots vary much more in
+    lighting than the training videos), and Gaussian blur p 0.2->0.4
+    (held-out shots are sometimes slightly out of focus). Risk to the
+    M-vs-F cue is minor at these ranges since the central pin/hole
+    luminance contrast is much larger than 0.35 brightness span."""
     return transforms.Compose([
         transforms.Resize(256),
         # Tight scale crops force the model to identify the central
@@ -48,11 +55,8 @@ def make_train_transforms() -> transforms.Compose:
         # NO vertical flip: connectors have a top/bottom in our shots and
         # flipping breaks pin-vs-hole appearance.
         transforms.RandomRotation(degrees=20),
-        # Mild ColorJitter — anything stronger than ~0.3 brightness erases
-        # the M-vs-F cue (bright pin vs dark hollow). Keep saturation
-        # modest so material colors stay recognizable.
-        transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.15, hue=0.02),
-        transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 1.0))], p=0.2),
+        transforms.ColorJitter(brightness=0.35, contrast=0.35, saturation=0.15, hue=0.02),
+        transforms.RandomApply([transforms.GaussianBlur(kernel_size=5, sigma=(0.1, 1.5))], p=0.4),
         transforms.ToTensor(),
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
         # Tiny RandomErasing patches: scale up to 5% only — small enough

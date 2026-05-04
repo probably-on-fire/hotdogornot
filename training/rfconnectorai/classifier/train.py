@@ -60,7 +60,11 @@ class TrainConfig:
     # this, a 3-image class gets weight 1/3=0.33 vs an 80-image class at
     # 1/80=0.0125, producing batches dominated by the same handful of
     # crops with augmentation noise. Cap = max(weight, 1/(majority*cap)).
-    max_oversample_ratio: float = 5.0
+    # 2026-05-04: tightened from 5.0 to 2.0 because the v5 model showed
+    # a strong 3.5mm-M bias on held-out (4 of 8 phone shots predicted
+    # as 3.5mm-* when truth was spread across families). Tighter cap
+    # forces the per-batch class distribution closer to uniform.
+    max_oversample_ratio: float = 2.0
 
 
 @dataclass
@@ -246,19 +250,24 @@ def train(config: TrainConfig) -> dict:
     # class contributes the same per-epoch gradient signal as an 86-sample
     # class. Without this, the model defaults to the most-frequent class
     # on out-of-distribution inputs.
-    # Cap the oversample ratio so a class with N=3 doesn't end up with
-    # 1/3 weight vs a majority class at 1/80 — that's a 27× imbalance
-    # that produces batches dominated by the same handful of crops with
-    # augmentation noise. Cap caller-tunable via `max_oversample_ratio`.
+    # Cap so that a rare class isn't upsampled by more than
+    # `max_oversample_ratio` relative to the majority class. Without
+    # this a 3-image class gets per-draw probability 1/3 vs majority's
+    # 1/1000 — 333× imbalance, batches dominated by a handful of crops
+    # with augmentation noise.
+    # Mechanism: weight is min(1/count, max_oversample_ratio/majority).
+    # Earlier version had this inverted (used max with a min_weight
+    # floor) — that lifted *low* weights, leaving the upper end
+    # uncapped, so the named "cap" was a no-op in practice.
     train_labels = [train_ds.samples[i][1] for i in train_idx]
     label_counts = {l: train_labels.count(l) for l in set(train_labels)}
     if not label_counts:
         raise RuntimeError("train split empty after grouped-split — "
                            "dataset has no usable labeled images.")
     majority_count = max(label_counts.values())
-    min_weight = 1.0 / (majority_count * config.max_oversample_ratio)
+    max_weight = config.max_oversample_ratio / float(majority_count)
     sample_weights = [
-        max(1.0 / label_counts[l], min_weight) for l in train_labels
+        min(1.0 / label_counts[l], max_weight) for l in train_labels
     ]
     sampler = WeightedRandomSampler(
         weights=sample_weights,
