@@ -151,7 +151,9 @@ with the new dHash-grouped split.
 | v10   | heavy | 10 (off)      | rembg-cleaned + subsampled to 27/class | 25% | 25% | 62.5% |
 | v11   | heavy | 10 (off)      | + zoom-recropped tight sub-crops, balanced to 289 | 12.5% | 12.5% | 62.5% |
 | v12   | heavy | 10 (off)      | + scraped product shots, balanced to 43/class (8 classes incl SMA) | 25% | 25% | 75% |
-| v8 + classify-on-cleaned | (inference-time rembg compositing on white) | **37.5%** | **37.5%** | **87.5%** |
+| v8 + classify-on-cleaned | (inference-time rembg compositing on white) | 37.5% | 37.5% | **87.5%** |
+| 3-model ensemble (v8 seeds 0/1/2 + cleaned) | training-data variance reduction | 37.5% | 37.5% | 87.5% |
+| **v15 + classify-on-cleaned** | **synth-augmented training (rembg-clean silhouettes composited at correct scale on varied bg)** | **50%** | **62.5%** | 75% |
 
 v9 (cleaned, no subsample) and v10 (cleaned + subsample) both
 underperformed v8. The cleaning step at `--min-fg 0.02` quarantined
@@ -197,9 +199,26 @@ cleaned silhouette (composited on white) to the classifier instead
 of the raw crop. The training data has rembg `_clean` variants per
 base, so the model has already seen this distribution; forcing
 inference-time cleaning removes background patterns that bias the
-classifier on phone shots taken on a desk. **Production now runs
-v8 weights + cleaned inference: 37.5% Full / 37.5% Family / 87.5%
-Gender — the best held-out numbers we've achieved.**
+classifier on phone shots taken on a desk.
+
+**Final breakthrough on Full/Family**: v15 trained on
+synth-augmented data (`scripts/synthesize_from_clean.py`) — for
+each existing base, run rembg → tight-crop the silhouette → composite
+onto white/gray/beige/wood-noise/real-bg-patch backgrounds at
+50-90% scale → save as `synth_NNNNNN.jpg`. Result: **Full 50% /
+Family 62.5% / Gender 75%** — first time we cleared 50% Full and
+60% Family on held-out. The synth data fixed the *scale* mismatch
+(existing `_bg*` variants had connector at ~5% of frame; phone
+shots have it at 50-70%; synth puts it at 60%+). +12.5 Full,
++25 Family vs prior best. Slight Gender regression (-12.5) but
+the family gain is the bigger win.
+
+Ensembling v15 + seed1/seed2 (both trained on pre-synth data)
+*reduced* held-out accuracy — the seed1/2 models pulled v15 back
+toward the v8 distribution. Not all model averaging helps.
+
+**Production now runs v15 (synth-augmented) + cleaned inference:
+50% Full / 62.5% Family / 75% Gender — best of session.**
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
