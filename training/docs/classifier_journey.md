@@ -94,6 +94,46 @@ labels. After the 2026-05-02 swap they're effectively inverted (75% →
 | DINOv2 linear probe + gender v2 | 100% | 25% | 38% | 62% |
 | DINOv2 + linear probe (3-class, no SMA) | 100% | 25% | 38% | 62% |
 
+## 2026-05-04 training-data quality audit
+
+A look at actual training crops uncovered a major issue: many "training
+crops" are not tight crops on a connector — they're 1080×1500 wide
+shots of a wood desk with a connector tiny in one corner. The original
+edge-density extractor (`detect_connector_crops`, `pad_frac=0.35`) can
+return wide bounding rects that include multiple connectors or texture
+regions, producing crops where the connector is < 5% of the frame.
+
+The model had been "learning" 2.4mm-M = wood-grain pattern at the
+bottom of a 1080×1200 image. No wonder it doesn't generalize to
+held-out phone shots that look very different.
+
+`scripts/audit_training_quality.py` runs the same rembg fg filter
+the predict service uses, but with a relaxed `--min-fg 0.02` (vs the
+0.05 inference threshold) so it kills only crops with essentially no
+foreground silhouette while keeping moderate-zoom captures. Also
+groups bases with their rembg-derived variants (`_clean`, `_bg0-4`,
+`_central`, etc.) so a quarantined base takes its variants with it.
+
+Result on the 4042-file pre-clean dataset: **2934 files quarantined
+(72%)** moved to `data/labeled/_quarantine_lowq/`. Per-class survivors:
+
+| Class | Pre | Post |
+|-------|-----|------|
+| 2.4mm-F | 877 | 108 |
+| 2.4mm-M | 575 | 27 |
+| 2.92mm-F | 272 | 56 |
+| 2.92mm-M | 628 | 63 |
+| 3.5mm-F | 484 | 267 |
+| 3.5mm-M | 1206 | 587 |
+
+3.5mm classes lost the least (~50% kept), 2.4mm-M lost the most
+(95% killed). The 2.4mm source video must have been captured in a
+way that consistently produced wide bbox crops with the connector
+small. **This is a source-video quality issue: the data extracted
+from `2_4mm.MOV` is mostly junk no matter how we slice it.** Fix
+requires re-shooting that video with the connector filling more of
+the frame.
+
 ## 2026-05-04 retrain trials (v5 → v8, after pipeline-bug fixes)
 
 Four back-to-back single-seed retrains on the box's full data
