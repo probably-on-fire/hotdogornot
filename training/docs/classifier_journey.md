@@ -150,6 +150,8 @@ with the new dHash-grouped split.
 | v9    | heavy | 10 (off)      | rembg-cleaned, no subsample | 25% | 25% | 75% |
 | v10   | heavy | 10 (off)      | rembg-cleaned + subsampled to 27/class | 25% | 25% | 62.5% |
 | v11   | heavy | 10 (off)      | + zoom-recropped tight sub-crops, balanced to 289 | 12.5% | 12.5% | 62.5% |
+| v12   | heavy | 10 (off)      | + scraped product shots, balanced to 43/class (8 classes incl SMA) | 25% | 25% | 75% |
+| v8 + classify-on-cleaned | (inference-time rembg compositing on white) | **37.5%** | **37.5%** | **87.5%** |
 
 v9 (cleaned, no subsample) and v10 (cleaned + subsample) both
 underperformed v8. The cleaning step at `--min-fg 0.02` quarantined
@@ -187,6 +189,17 @@ video diversity** — only 3 source videos, all shot in similar
 conditions, with the 2.4mm video framed worse than the 3.5mm one.
 Every contributor video uploaded through the Flutter app's contribute
 screen moves the ceiling up; nightly auto-retrain will pick them up.
+
+**Late-session breakthrough on gender accuracy**: enabling
+`RFCAI_CLASSIFY_ON_CLEANED=1` pushed gender from 75% to 87.5%
+without retraining. The flag makes predict_service feed the rembg-
+cleaned silhouette (composited on white) to the classifier instead
+of the raw crop. The training data has rembg `_clean` variants per
+base, so the model has already seen this distribution; forcing
+inference-time cleaning removes background patterns that bias the
+classifier on phone shots taken on a desk. **Production now runs
+v8 weights + cleaned inference: 37.5% Full / 37.5% Family / 87.5%
+Gender — the best held-out numbers we've achieved.**
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6

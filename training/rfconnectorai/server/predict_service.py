@@ -208,6 +208,7 @@ def create_app(config: dict | None = None) -> FastAPI:
             "status": "ok",
             "classifier_loaded": classifier is not None,
             "max_detections": max_detections,
+            "classify_on_cleaned": classify_on_cleaned,
             "fg_filter": {
                 "enabled": fg_filter_enabled,
                 "available": rembg_session is not None,
