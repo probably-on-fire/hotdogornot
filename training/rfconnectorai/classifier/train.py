@@ -64,7 +64,14 @@ class TrainConfig:
     # a strong 3.5mm-M bias on held-out (4 of 8 phone shots predicted
     # as 3.5mm-* when truth was spread across families). Tighter cap
     # forces the per-batch class distribution closer to uniform.
-    max_oversample_ratio: float = 2.0
+    # Sized as a safety net only — full inverse-frequency balancing is
+    # the ideal when class counts are >= ~100 each. The cap fires only
+    # when a class is < ~majority/10, e.g., a 3-sample class with a
+    # 1000-sample majority would be capped at 10x oversampling instead
+    # of natural 333x. v6 trial with cap=2.0 made the held-out family
+    # bias *worse* (under-samples non-majority classes during training),
+    # so we want the cap effectively off for typical data.
+    max_oversample_ratio: float = 10.0
 
 
 @dataclass
