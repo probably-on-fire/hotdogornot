@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -30,40 +31,45 @@ class _ContributeScreenState extends State<ContributeScreen> {
   String? _status;
 
   Future<void> _uploadPhoto() async {
-    final picker = ImagePicker();
-    final pf = await picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 92,
-      maxWidth: 4032,
-    );
-    if (pf == null) return;
-    await _doUploadPhoto(File(pf.path));
+    await _pickAndUpload(ImageSource.camera);
   }
 
   Future<void> _pickPhoto() async {
+    await _pickAndUpload(ImageSource.gallery);
+  }
+
+  Future<void> _pickAndUpload(ImageSource source) async {
     final picker = ImagePicker();
     final pf = await picker.pickImage(
-      source: ImageSource.gallery,
+      source: source,
       imageQuality: 92,
       maxWidth: 4032,
     );
     if (pf == null) return;
-    await _doUploadPhoto(File(pf.path));
-  }
-
-  Future<void> _doUploadPhoto(File f) async {
+    if (!mounted) return;
     setState(() {
       _busy = true;
       _status = null;
     });
     try {
       final api = ApiClient(widget.settings);
-      await api.uploadTrainingPhoto(f, _photoClass);
+      // On web, XFile.path is a blob URL we can't open as a File; route
+      // through the bytes variant. Native: use the file path directly to
+      // avoid loading the full image into memory.
+      if (kIsWeb) {
+        final bytes = await pf.readAsBytes();
+        await api.uploadTrainingPhotoBytes(bytes, _photoClass,
+            filename: pf.name);
+      } else {
+        await api.uploadTrainingPhoto(File(pf.path), _photoClass);
+      }
+      if (!mounted) return;
       setState(() => _status = '✓ Uploaded as $_photoClass');
     } catch (e) {
+      if (!mounted) return;
       setState(() => _status = 'Upload failed: $e');
     } finally {
-      setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -71,21 +77,42 @@ class _ContributeScreenState extends State<ContributeScreen> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
       allowMultiple: false,
+      withData: kIsWeb,   // need bytes on web (no usable file path)
     );
-    if (result == null || result.files.single.path == null) return;
-    final f = File(result.files.single.path!);
+    if (result == null) return;
+    final picked = result.files.single;
+    if (!kIsWeb && picked.path == null) return;
+    if (!mounted) return;
     setState(() {
       _busy = true;
       _status = 'Uploading video — server will extract crops…';
     });
     try {
       final api = ApiClient(widget.settings);
-      final body = await api.uploadTrainingVideo(f, _videoFamily);
-      setState(() => _status = '✓ ${body.replaceAll(RegExp(r'<[^>]+>'), '').trim()}');
+      // /labeler/upload-video doesn't have a bytes-based wrapper today;
+      // on web we'd need a new ApiClient method. Native users keep the
+      // File path (avoids loading 100MB+ into RAM).
+      if (kIsWeb) {
+        if (picked.bytes == null) {
+          throw Exception('Video bytes unavailable (web file_picker).');
+        }
+        // Inline minimal multipart so we don't have to add a fourth
+        // bytes-method to ApiClient just for this rare path.
+        throw Exception(
+          'Video upload is not supported in the browser build yet — '
+          'use the mobile app.',
+        );
+      }
+      final body = await api.uploadTrainingVideo(
+          File(picked.path!), _videoFamily);
+      if (!mounted) return;
+      setState(() =>
+          _status = '✓ ${body.replaceAll(RegExp(r'<[^>]+>'), '').trim()}');
     } catch (e) {
+      if (!mounted) return;
       setState(() => _status = 'Upload failed: $e');
     } finally {
-      setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 

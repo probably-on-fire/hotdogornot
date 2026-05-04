@@ -79,12 +79,23 @@ This app is a thin client over the FastAPI service in
 
 - **POST** `/rfcai/predict` (multipart `image=<jpeg>`, header
   `X-Device-Token`) — returns `{predictions: [{class_name, confidence,
-  probabilities, bbox}, ...], image_width, image_height}`.
+  probabilities, bbox}, ...], image_width, image_height}`. Each crop is
+  pre-filtered by rembg to drop background-only Hough hits before
+  classification.
+- **POST** `/rfcai/predict-video` (multipart `video=<mp4|mov|...>`,
+  header `X-Device-Token`) — server samples the clip at 1 fps (capped
+  at 30 frames), runs detect+classify on every frame, returns the single
+  highest-confidence prediction. Same response shape as `/predict` but
+  with extra fields `frames_scanned` and `best_frame_index`.
 - **POST** `/rfcai/labeler/upload-train` (multipart `cls`, `images=[...]`,
   HTTP Basic) — saves to `data/labeled/embedder/<class>/photo_*`.
 - **POST** `/rfcai/labeler/upload-video` (multipart `family`, `fps`,
   `sensitivity`, `max_crops`, `file=<video>`, HTTP Basic) — server
   extracts crops via Hough and dumps them to `<family>-M`.
+- **GET** `/rfcai/healthz` (no auth) — `{"status": "ok",
+  "classifier_loaded": ..., "fg_filter": {...}}`. Use after a server
+  redeploy to confirm the foreground filter actually loaded
+  (`fg_filter.available` should be `true`).
 
 If the predict service moves or the auth changes, edit Settings inside
 the app rather than touching code.

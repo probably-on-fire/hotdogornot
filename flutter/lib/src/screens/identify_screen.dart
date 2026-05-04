@@ -595,23 +595,36 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     }
     final r = _result!;
     final imageArea = r.imageWidth * r.imageHeight;
-    // First filter: drop tiny-bbox detections that almost always come
-    // from spurious Hough circles on background texture, then sort by
-    // confidence so we always show the most confident one as the
-    // headline.
-    final sorted = [...r.predictions]
-      ..removeWhere((p) {
-        if (imageArea <= 0) return false;
-        final area = p.bbox['w']! * p.bbox['h']!;
-        return area / imageArea < _kMinBboxFractionOfImage;
-      })
+    // Sort first so we know the unfiltered top, then apply the
+    // bbox-fraction filter. Distinguishing "server returned nothing"
+    // vs "we filtered out a tiny-bbox detection" gives the user better
+    // guidance ("move closer" vs "no connector here").
+    final sortedAll = [...r.predictions]
       ..sort((a, b) => b.confidence.compareTo(a.confidence));
+    final sorted = sortedAll
+        .where((p) {
+          if (imageArea <= 0) return true;
+          final area = p.bbox['w']! * p.bbox['h']!;
+          return area / imageArea >= _kMinBboxFractionOfImage;
+        })
+        .toList();
     if (sorted.isEmpty || sorted.first.confidence < _kMinAcceptedConfidence) {
-      final hint = sorted.isEmpty
-          ? 'No connector detected.'
-          : 'No clear connector — best guess was '
-            '${sorted.first.className} at '
-            '${(sorted.first.confidence * 100).toStringAsFixed(0)}%.';
+      final filteredOutTinyHigh = sorted.isEmpty
+          && sortedAll.any((p) => p.confidence >= _kMinAcceptedConfidence);
+      final String hint;
+      final String subhint;
+      if (sortedAll.isEmpty) {
+        hint = 'No connector detected.';
+        subhint = 'Hold the connector face-on, center it, fill the frame.';
+      } else if (filteredOutTinyHigh) {
+        hint = 'Connector too small in frame.';
+        subhint = 'Move the camera closer so the connector face fills the frame.';
+      } else {
+        hint = 'No clear connector — best guess was '
+               '${sortedAll.first.className} at '
+               '${(sortedAll.first.confidence * 100).toStringAsFixed(0)}%.';
+        subhint = 'Hold the connector face-on, center it, fill more of the frame.';
+      }
       return _ResultCard(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -623,10 +636,10 @@ class _IdentifyScreenState extends State<IdentifyScreen>
                 style: const TextStyle(fontSize: 16),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Hold the connector face-on, center it, fill more of the frame.',
+              Text(
+                subhint,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.white70),
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
               ),
             ],
           ),

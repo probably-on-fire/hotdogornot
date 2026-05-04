@@ -12,7 +12,9 @@ The two predictors run independently and cross-check each other:
 - **Agreement** → high confidence
 - **Disagreement** → app prompts the user to recapture
 
-Both targets the Unity AR app under `unity/RFConnectorAR`.
+Primary client is the Flutter app under `flutter/` (cross-platform iOS +
+Android, talks to `aired.com/rfcai/predict`). The earlier Unity AR app
+under `unity/RFConnectorAR` is sidelined.
 
 ---
 
@@ -218,9 +220,14 @@ print(pred.class_name, pred.confidence, pred.probabilities)
 .venv/Scripts/python.exe -m pytest tests/ -q
 ```
 
-122 tests covering each detector, the class predictor, the frame averager,
-the video extractor, the classifier (round-trip train+predict), the
-thread-pitch FFT, and the synthetic renderers.
+38 test files covering each detector, the class predictor, the frame
+averager, the video extractor, the classifier (round-trip train+predict),
+the thread-pitch FFT, and the synthetic renderers.
+
+Coverage gap to be aware of: there is no test for
+`predict_service._crop_passes_fg_filter` (the rembg-based foreground
+pre-filter that gates every prediction) — verified by hand against
+held-out + background scenarios; see `docs/classifier_journey.md`.
 
 ---
 
