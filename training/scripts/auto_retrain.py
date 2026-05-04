@@ -112,6 +112,10 @@ def main() -> int:
     ap.add_argument("--val-fraction", type=float, default=0.2)
     ap.add_argument("--force", action="store_true",
                     help="Retrain regardless of new-sample count.")
+    ap.add_argument("--balance-to-smallest", action="store_true",
+                    help="Subsample every class down to the smallest "
+                         "class's count before training. Eliminates the "
+                         "raw-count family bias that WRS alone can't fix.")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args()
 
@@ -157,6 +161,7 @@ def main() -> int:
         batch_size=args.batch_size,
         learning_rate=args.lr,
         val_fraction=args.val_fraction,
+        balance_to_smallest=args.balance_to_smallest,
     )
     try:
         metrics = train(config)

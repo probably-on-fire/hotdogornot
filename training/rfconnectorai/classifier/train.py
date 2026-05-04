@@ -72,6 +72,15 @@ class TrainConfig:
     # bias *worse* (under-samples non-majority classes during training),
     # so we want the cap effectively off for typical data.
     max_oversample_ratio: float = 10.0
+    # Subsample each class down to the count of the smallest class
+    # before training. Forces strict count parity — different from WRS,
+    # which only rebalances per-batch sampling probabilities. With this
+    # on, the model literally sees the same number of unique-scene
+    # crops per class. Costs data quantity (loses ~75% of the largest
+    # class on our distribution) but eliminates count-driven family
+    # bias. Pair with use_grouped_split=True so the cluster diversity
+    # is preserved.
+    balance_to_smallest: bool = False
 
 
 @dataclass
@@ -243,6 +252,27 @@ def train(config: TrainConfig) -> dict:
             f"no labeled images found under {config.data_dir} for classes "
             f"{config.class_names}"
         )
+
+    # Balance to smallest before splitting. Subsamples each class down
+    # to the smallest class's count using a deterministic seed-based
+    # shuffle, so train/val splits remain reproducible. This eliminates
+    # the count-driven family bias that WRS alone can't fix.
+    if config.balance_to_smallest:
+        rng_balance = np.random.default_rng(config.seed)
+        by_class: dict[int, list[int]] = {}
+        for idx, (_path, label) in enumerate(train_ds.samples):
+            by_class.setdefault(label, []).append(idx)
+        target = min(len(v) for v in by_class.values())
+        balanced_indices: list[int] = []
+        for label, idx_list in by_class.items():
+            order = rng_balance.permutation(len(idx_list))[:target]
+            balanced_indices.extend(idx_list[i] for i in order)
+        balanced_indices.sort()
+        before = len(train_ds.samples)
+        train_ds.samples = [train_ds.samples[i] for i in balanced_indices]
+        eval_ds.samples = [eval_ds.samples[i] for i in balanced_indices]
+        print(f"[train] balance_to_smallest=True: {before} -> "
+              f"{len(train_ds.samples)} samples ({target}/class)")
 
     if config.use_grouped_split:
         train_idx, val_idx = _grouped_stratified_split(
