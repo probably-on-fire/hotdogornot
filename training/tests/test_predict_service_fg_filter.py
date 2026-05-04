@@ -56,6 +56,7 @@ def _build_filter(tmp_path: Path, **overrides):
         "min_uniform_fg": 0.20,
         "low_center_ratio": 2.0,
         "high_center_ratio": 5.0,
+        "classify_on_cleaned": False,
     }
     cfg.update(overrides)
     # Building the app loads rembg, gives us a healthz that confirms it.

@@ -58,6 +58,12 @@ DEFAULT_VIDEO_MAX_FRAMES = 30                 # cap at ~30s of video
 # Hough latched onto). 0.20 keeps real connector crops easily,
 # rejects ~all random-noise/junk crops, catches most wood-texture
 # false positives in our local benchmark.
+DEFAULT_CLASSIFY_ON_CLEANED = False
+# When True, the rembg-cleaned crop (alpha composited on white) is fed
+# to the classifier instead of the raw crop. Training data includes
+# both raw and rembg-cleaned variants so the model has seen both, and
+# inferring on cleaned crops removes background patterns that may bias
+# the classifier. Toggle via RFCAI_CLASSIFY_ON_CLEANED env var.
 DEFAULT_MIN_FG_FRACTION = 0.05      # below this rembg saw essentially nothing
 # Bimodal center-density rule. detect_connector_crops returns TIGHT
 # crops, so a real connector silhouette appears in one of two ways:
@@ -88,6 +94,7 @@ def _config_from_env() -> dict:
         "min_uniform_fg": float(os.environ.get("RFCAI_MIN_UNIFORM_FG", DEFAULT_MIN_UNIFORM_FG)),
         "low_center_ratio": float(os.environ.get("RFCAI_LOW_CENTER_RATIO", DEFAULT_LOW_CENTER_RATIO)),
         "high_center_ratio": float(os.environ.get("RFCAI_HIGH_CENTER_RATIO", DEFAULT_HIGH_CENTER_RATIO)),
+        "classify_on_cleaned": os.environ.get("RFCAI_CLASSIFY_ON_CLEANED", "0") in ("1", "true", "True"),
     }
 
 
@@ -105,6 +112,7 @@ def create_app(config: dict | None = None) -> FastAPI:
     min_uniform_fg: float = cfg["min_uniform_fg"]
     low_center_ratio: float = cfg["low_center_ratio"]
     high_center_ratio: float = cfg["high_center_ratio"]
+    classify_on_cleaned: bool = cfg["classify_on_cleaned"]
 
     app = FastAPI(title="RF Connector AI prediction service", version="1.0.0")
 
@@ -146,35 +154,31 @@ def create_app(config: dict | None = None) -> FastAPI:
             print(f"[predict_service] rembg unavailable, fg filter disabled: {e}")
             rembg_session = None
 
-    def _crop_passes_fg_filter(crop_bgr: np.ndarray) -> tuple[bool, float, float]:
-        """Returns (keep, fg_fraction, center_density_ratio).
-        keep = the crop has a centered, well-defined foreground object
-        consistent with a real connector face. The two scalars are
-        diagnostic (returned in the API response under `_diag`)."""
+    def _crop_passes_fg_filter(
+        crop_bgr: np.ndarray,
+    ) -> tuple[bool, float, float, np.ndarray | None]:
+        """Returns (keep, fg_fraction, center_density_ratio, rgba).
+        rgba is the rembg output (H,W,4) on success — useful for the
+        optional 'classify on cleaned crop' path."""
         if rembg_session is None:
-            return True, 1.0, 1.0
+            return True, 1.0, 1.0, None
         try:
             from rembg import remove   # type: ignore
             # rembg treats raw ndarrays as RGB; we have BGR from cv2.
             crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
             rgba = remove(crop_rgb, session=rembg_session)
         except Exception:
-            return True, 1.0, 1.0   # fail open on rembg errors
+            return True, 1.0, 1.0, None   # fail open on rembg errors
         if rgba.ndim != 3 or rgba.shape[2] != 4:
-            # Rembg config drift can return RGB-without-alpha; fail open
-            # but log once so we notice the filter silently degraded.
             print(f"[predict_service] WARNING: rembg returned non-RGBA "
                   f"({rgba.shape}); fg filter inactive on this crop")
-            return True, 1.0, 1.0
+            return True, 1.0, 1.0, None
         alpha = rgba[:, :, 3]
         h, w = alpha.shape
         if h == 0 or w == 0:
-            return False, 0.0, 0.0
+            return False, 0.0, 0.0, rgba
         fg_total = (alpha > 32)
         fg_frac = float(fg_total.sum()) / float(alpha.size)
-        # Inner 50% box (center-weighted): a real connector silhouette
-        # is concentrated in the middle of the crop; wood-pattern false
-        # positives have foreground scattered to edges.
         cy0, cy1 = h // 4, h - h // 4
         cx0, cx1 = w // 4, w - w // 4
         inner = fg_total[cy0:cy1, cx0:cx1]
@@ -185,12 +189,11 @@ def create_app(config: dict | None = None) -> FastAPI:
         center_ratio = (inner_density / outer_density) if outer_density > 1e-6 \
                        else (10.0 if inner_density > 0 else 0.0)
         if fg_frac < min_fg_fraction:
-            return False, fg_frac, center_ratio
-        # Either pattern is connector-like:
+            return False, fg_frac, center_ratio, rgba
         keep_uniform = (fg_frac >= min_uniform_fg
                         and center_ratio <= low_center_ratio)
         keep_centered = center_ratio >= high_center_ratio
-        return (keep_uniform or keep_centered), fg_frac, center_ratio
+        return (keep_uniform or keep_centered), fg_frac, center_ratio, rgba
 
     def require_token(x_device_token: str = Header(None)) -> str:
         if not device_token:
@@ -224,11 +227,23 @@ def create_app(config: dict | None = None) -> FastAPI:
         crops = detect_connector_crops(bgr, max_crops=max_detections)
         out = []
         for c in crops:
-            keep, fg_frac, center_ratio = _crop_passes_fg_filter(c.crop)
+            keep, fg_frac, center_ratio, rgba = _crop_passes_fg_filter(c.crop)
             if not keep:
                 continue
-            rgb_crop = cv2.cvtColor(c.crop, cv2.COLOR_BGR2RGB)
-            pred = classifier.predict(rgb_crop)
+            if classify_on_cleaned and rgba is not None:
+                # Composite the rembg silhouette over white, drop alpha.
+                # Training data includes _clean variants so the model
+                # has seen this distribution; should reduce background-
+                # pattern bias in the prediction.
+                rgb_pixels = rgba[:, :, :3].astype(np.float32)
+                alpha = rgba[:, :, 3:4].astype(np.float32) / 255.0
+                white = np.full_like(rgb_pixels, 255.0)
+                composited = (rgb_pixels * alpha + white * (1.0 - alpha)).astype(np.uint8)
+                # rembg returned RGB ordering already.
+                pred = classifier.predict(composited)
+            else:
+                rgb_crop = cv2.cvtColor(c.crop, cv2.COLOR_BGR2RGB)
+                pred = classifier.predict(rgb_crop)
             x, y, bw, bh = c.bbox
             out.append({
                 "class_name": pred.class_name,
