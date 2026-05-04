@@ -100,6 +100,12 @@ def main() -> int:
                     help="Where the trained model lives, e.g. models/connector_classifier/")
     ap.add_argument("--min-new-samples", type=int, default=20,
                     help="Skip retrain unless at least this many new samples have been added.")
+    ap.add_argument("--min-samples-per-class", type=int,
+                    default=MIN_SAMPLES_PER_CLASS,
+                    help="Drop classes with fewer than this many images "
+                         "from the trained head (zero-data classes leak "
+                         "label-smoothing gradient and produce confident "
+                         "wrong predictions on background frames).")
     ap.add_argument("--epochs", type=int, default=8)
     ap.add_argument("--batch-size", type=int, default=16)
     ap.add_argument("--lr", type=float, default=3e-4)
@@ -119,7 +125,7 @@ def main() -> int:
         return 2
 
     classes = _populated_classes(args.data_dir, CANONICAL_CLASSES,
-                                 MIN_SAMPLES_PER_CLASS)
+                                 args.min_samples_per_class)
     if len(classes) < 2:
         log.error("only %d class(es) have enough samples; need at least 2 "
                   "to train a classifier", len(classes))

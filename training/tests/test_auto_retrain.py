@@ -82,6 +82,10 @@ def test_first_run_no_prior_model(tmp_path):
         "--data-dir", str(data),
         "--model-dir", str(model),
         "--min-new-samples", "20",
+        # Test seeds 4 per class; relax the per-class threshold so the
+        # test still exercises the no-prior-model code path. Production
+        # default is MIN_SAMPLES_PER_CLASS=5 which would drop these.
+        "--min-samples-per-class", "1",
     ]
     with patch.object(sys, "argv", argv), patch.object(auto_retrain, "train") as mock_train:
         mock_train.return_value = {"history": [{"val_acc": 0.5}]}
