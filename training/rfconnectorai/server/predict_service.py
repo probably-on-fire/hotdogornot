@@ -42,7 +42,9 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadF
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from rfconnectorai.classifier.predict import ConnectorClassifier
+from rfconnectorai.classifier.predict import (
+    ConnectorClassifier, EnsembleClassifier,
+)
 from rfconnectorai.data_fetch.connector_crops import detect_connector_crops
 from rfconnectorai.server.labeler import create_router as create_labeler_router
 
@@ -129,12 +131,29 @@ def create_app(config: dict | None = None) -> FastAPI:
     )
 
     # Load classifier once at boot so each request is fast.
-    classifier: ConnectorClassifier | None = None
+    # If RFCAI_ENSEMBLE_WEIGHTS=path1,path2,... is set, also load those
+    # weights and use an EnsembleClassifier — averages softmax across
+    # all models for variance reduction. All weights must share the
+    # same labels.json (same class set + input_size).
+    classifier = None
     if (model_dir / "weights.pt").exists() and (model_dir / "labels.json").exists():
         try:
-            classifier = ConnectorClassifier.load(model_dir)
+            ensemble_paths_raw = os.environ.get("RFCAI_ENSEMBLE_WEIGHTS", "").strip()
+            if ensemble_paths_raw:
+                extra = [Path(p.strip()) for p in ensemble_paths_raw.split(",") if p.strip()]
+                weights = [model_dir / "weights.pt"] + extra
+                missing = [p for p in weights if not p.exists()]
+                if missing:
+                    raise FileNotFoundError(
+                        f"ensemble weight(s) missing: {missing}")
+                classifier = ConnectorClassifier.load_ensemble(
+                    weights, model_dir / "labels.json",
+                )
+                print(f"[predict_service] loaded ENSEMBLE of {len(weights)} "
+                      f"models: {[p.name for p in weights]}")
+            else:
+                classifier = ConnectorClassifier.load(model_dir)
         except Exception as e:
-            # Don't fail to start — endpoint surfaces the error per-request.
             print(f"[predict_service] classifier load failed: {e}")
 
     # rembg session for the foreground pre-filter. Lazy import so the
@@ -207,6 +226,9 @@ def create_app(config: dict | None = None) -> FastAPI:
         return {
             "status": "ok",
             "classifier_loaded": classifier is not None,
+            "ensemble_size": (len(classifier.models)
+                              if isinstance(classifier, EnsembleClassifier)
+                              else 1 if classifier else 0),
             "max_detections": max_detections,
             "classify_on_cleaned": classify_on_cleaned,
             "fg_filter": {
