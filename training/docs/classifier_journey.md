@@ -147,6 +147,23 @@ with the new dHash-grouped split.
 | v6    | heavy | 2.0 (real cap)| counts as-is | 25% | 25% | **87.5%** |
 | v7    | heavy | 10 (off)      | counts as-is | 12.5% | 12.5% | 62.5% |
 | v8    | heavy | 10 (off)      | **subsampled to 261/class** | **37.5%** | **37.5%** | 75% |
+| v9    | heavy | 10 (off)      | rembg-cleaned, no subsample | 25% | 25% | 75% |
+| v10   | heavy | 10 (off)      | rembg-cleaned + subsampled to 27/class | 25% | 25% | 62.5% |
+
+v9 (cleaned, no subsample) and v10 (cleaned + subsample) both
+underperformed v8. The cleaning step at `--min-fg 0.02` quarantined
+72% of training data — more importantly, it amplified the 4× class
+imbalance into a 22× imbalance because the 2.4mm source video had
+worse framing than the 3.5mm source video. v9 then learned to
+predict 3.5mm 7/8 of the time. v10 with subsample-to-smallest=27
+didn't have enough data per class to learn anything generalizable.
+
+**Lesson: data quality cleanup helps only when the resulting per-class
+counts are still adequate, AND when cleanup affects all classes
+equally.** Our cleanup is gated by source-video framing quality, which
+varies wildly between the 3 source videos. Result: cleaning
+worsened the imbalance instead of fixing the bias. v8 (uncleaned +
+subsampled to 261) remains best.
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
