@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
@@ -160,6 +162,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
 
   Future<void> _onShutter() async {
     if (_busy) return;
+    HapticFeedback.lightImpact();
     if (_mode == _Mode.video) {
       await _toggleRecording();
     } else {
@@ -233,6 +236,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     try {
       final r = await ApiClient(widget.settings).predict(f);
       if (!mounted) return;
+      _hapticOnResult(r);
       setState(() => _result = r);
     } catch (e) {
       if (!mounted) return;
@@ -255,6 +259,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       final r = await ApiClient(widget.settings)
           .predictBytes(bytes, filename: filename);
       if (!mounted) return;
+      _hapticOnResult(r);
       setState(() => _result = r);
     } catch (e) {
       if (!mounted) return;
@@ -276,6 +281,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     try {
       final r = await ApiClient(widget.settings).predictVideo(f);
       if (!mounted) return;
+      _hapticOnResult(r);
       setState(() => _result = r);
     } catch (e) {
       if (!mounted) return;
@@ -324,6 +330,23 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       setState(() => _contributionStatus = 'Upload failed: ${_friendlyError(e)}');
     } finally {
       if (mounted) setState(() => _contributing = false);
+    }
+  }
+
+  /// Buzz on prediction land. Confident detection => medium impact;
+  /// no-detection / low-conf => short selection-style click.
+  void _hapticOnResult(PredictResponse r) {
+    final imageArea = r.imageWidth * r.imageHeight;
+    final goodHit = r.predictions.any((p) {
+      if (p.confidence < _kMinAcceptedConfidence) return false;
+      if (imageArea <= 0) return true;
+      final area = p.bbox['w']! * p.bbox['h']!;
+      return area / imageArea >= _kMinBboxFractionOfImage;
+    });
+    if (goodHit) {
+      HapticFeedback.mediumImpact();
+    } else {
+      HapticFeedback.selectionClick();
     }
   }
 
@@ -395,6 +418,11 @@ class _IdentifyScreenState extends State<IdentifyScreen>
         fit: StackFit.expand,
         children: [
           _buildPreview(),
+          // Centered target reticle to help users frame the connector
+          // — only visible on the live preview (hide when showing
+          // a captured photo + result).
+          if (_result == null && _error == null && !_busy && !_camInitFailed)
+            const IgnorePointer(child: _ReticleOverlay()),
           // Mode toggle (photo / video) — hidden while showing a result.
           if (_result == null && _error == null)
             Positioned(
@@ -790,6 +818,72 @@ class _ShutterButton extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ReticleOverlay extends StatelessWidget {
+  const _ReticleOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _ReticlePainter(),
+      child: const SizedBox.expand(),
+    );
+  }
+}
+
+class _ReticlePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final r = math.min(size.width, size.height) * 0.28;
+    final ringPaint = Paint()
+      ..color = Colors.white.withOpacity(0.55)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5;
+    final dashPaint = Paint()
+      ..color = Colors.white.withOpacity(0.85)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0;
+    // Outer guide ring — where the connector face should fit.
+    canvas.drawCircle(Offset(cx, cy), r, ringPaint);
+    // Four corner ticks at the inscribed-square corners — gives a
+    // sharper target than a single circle without cluttering the view.
+    final tick = r * 0.18;
+    final s = r / math.sqrt(2);   // half-side of inscribed square
+    for (final sx in const [-1.0, 1.0]) {
+      for (final sy in const [-1.0, 1.0]) {
+        final ax = cx + sx * s;
+        final ay = cy + sy * s;
+        canvas.drawLine(Offset(ax, ay), Offset(ax - sx * tick, ay), dashPaint);
+        canvas.drawLine(Offset(ax, ay), Offset(ax, ay - sy * tick), dashPaint);
+      }
+    }
+    // Tiny crosshair in the dead center.
+    final ch = r * 0.08;
+    canvas.drawLine(Offset(cx - ch, cy), Offset(cx + ch, cy), dashPaint);
+    canvas.drawLine(Offset(cx, cy - ch), Offset(cx, cy + ch), dashPaint);
+
+    // "CENTER CONNECTOR" hint above the reticle.
+    final tp = TextPainter(
+      text: TextSpan(
+        text: 'CENTER CONNECTOR',
+        style: TextStyle(
+          color: Colors.white.withOpacity(0.7),
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.5,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    tp.layout();
+    tp.paint(canvas, Offset(cx - tp.width / 2, cy - r - tp.height - 8));
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReticlePainter oldDelegate) => false;
 }
 
 class _RoundIconButton extends StatelessWidget {
