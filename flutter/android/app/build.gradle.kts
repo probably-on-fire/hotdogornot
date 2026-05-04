@@ -8,7 +8,9 @@ plugins {
 android {
     namespace = "com.aired.connector_id"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Local NDK 26.3.x install is corrupt (missing source.properties);
+    // 21.4.7075529 is the only complete NDK on this box.
+    ndkVersion = "21.4.7075529"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

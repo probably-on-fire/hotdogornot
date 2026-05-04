@@ -17,6 +17,19 @@ const _kCanonicalClasses = [
   '2.4mm-M', '2.4mm-F',
 ];
 
+// Below this top-class confidence we treat the prediction as "no real
+// connector found" rather than a verdict — the classifier always emits
+// a softmax over 8 classes, so on background-only frames it returns a
+// best-of-noise pick that we'd otherwise show as a confident answer.
+const _kMinAcceptedConfidence = 0.40;
+
+// Background frames produce many tiny spurious Hough detections (often
+// well under 1% of image area, sometimes with very high softmax conf
+// because the classifier has no "background" class). A real connector
+// held up to the camera occupies a much larger fraction of the frame.
+// Reject any single-detection bbox below this fraction of the image.
+const _kMinBboxFractionOfImage = 0.02;
+
 enum _Mode { photo, video }
 
 class IdentifyScreen extends StatefulWidget {
@@ -90,10 +103,18 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       );
       final controller = CameraController(
         rear,
-        ResolutionPreset.high,
+        // Sensor's native max — connector identification benefits from
+        // the highest possible resolution at the central pin/socket.
+        ResolutionPreset.max,
         enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
       );
       await controller.initialize();
+      // Lock focus + exposure to a single autofocus pass on init so the
+      // preview doesn't pulse-hunt while the user composes the shot.
+      try {
+        await controller.setFocusMode(FocusMode.auto);
+      } catch (_) {/* not all devices support manual focus mode */}
       if (!mounted) {
         await controller.dispose();
         return;
@@ -355,10 +376,24 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     }
     final cam = _cam;
     if (cam != null && cam.value.isInitialized) {
-      return Center(
-        child: AspectRatio(
-          aspectRatio: cam.value.aspectRatio,
-          child: CameraPreview(cam),
+      // Sensor returns landscape dimensions (width = sensor long edge);
+      // for portrait UI we have to swap to get the right aspect, then
+      // FittedBox.cover lets the image fill the screen without
+      // squishing. Without this, CameraPreview alone shows a stretched
+      // / wrong-orientation feed on most Androids.
+      final preview = cam.value.previewSize;
+      final pw = preview?.height ?? 1;  // swap intentional
+      final ph = preview?.width ?? 1;
+      return ClipRect(
+        child: SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: pw,
+              height: ph,
+              child: CameraPreview(cam),
+            ),
+          ),
         ),
       );
     }
@@ -491,24 +526,45 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       );
     }
     final r = _result!;
-    if (r.predictions.isEmpty) {
+    final imageArea = r.imageWidth * r.imageHeight;
+    // First filter: drop tiny-bbox detections that almost always come
+    // from spurious Hough circles on background texture, then sort by
+    // confidence so we always show the most confident one as the
+    // headline.
+    final sorted = [...r.predictions]
+      ..removeWhere((p) {
+        if (imageArea <= 0) return false;
+        final area = p.bbox['w']! * p.bbox['h']!;
+        return area / imageArea < _kMinBboxFractionOfImage;
+      })
+      ..sort((a, b) => b.confidence.compareTo(a.confidence));
+    if (sorted.isEmpty || sorted.first.confidence < _kMinAcceptedConfidence) {
+      final hint = sorted.isEmpty
+          ? 'No connector detected.'
+          : 'No clear connector — best guess was '
+            '${sorted.first.className} at '
+            '${(sorted.first.confidence * 100).toStringAsFixed(0)}%.';
       return _ResultCard(
-        child: const Padding(
-          padding: EdgeInsets.symmetric(vertical: 12),
-          child: Center(
-            child: Text(
-              'No connector detected.\nTry a clearer mating-face shot.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16),
-            ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            children: [
+              Text(
+                hint,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Hold the connector face-on, center it, fill more of the frame.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+            ],
           ),
         ),
       );
     }
-    // Server returns detections in detector order, not by confidence —
-    // sort so we always show the most confident one as the headline.
-    final sorted = [...r.predictions]
-      ..sort((a, b) => b.confidence.compareTo(a.confidence));
     final p = sorted.first;
     final hot = p.isMale;
     final color = hot ? kHotDogColor : kNotHotDogColor;

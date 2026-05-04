@@ -12,9 +12,16 @@
 // editable via a Settings screen.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'src/app.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Camera-first UX is a portrait experience; locking avoids preview
+  // re-rotation glitches and keeps the layout predictable.
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
   runApp(const ConnectorIdApp());
 }
