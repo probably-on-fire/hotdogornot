@@ -69,7 +69,7 @@ DEFAULT_MIN_FG_FRACTION = 0.05      # below this rembg saw essentially nothing
 # centered blob that doesn't look like either pattern. We KEEP crops
 # with ratio <= LOW_RATIO OR ratio >= HIGH_RATIO, and reject the
 # in-between zone.
-DEFAULT_LOW_CENTER_RATIO = 1.5
+DEFAULT_LOW_CENTER_RATIO = 2.0     # tuned to recover 2.4mm-F crops at 1.74/2.14
 DEFAULT_HIGH_CENTER_RATIO = 5.0
 DEFAULT_MIN_UNIFORM_FG = 0.20       # for the "fills the crop" pattern
 

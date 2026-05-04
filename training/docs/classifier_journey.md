@@ -152,6 +152,19 @@ These were tried and don't work on this data:
   is byte-identical to `2_4mm-m.jpeg` but lives in different folder).
   This proves the task is *doable from the held-out resolution*; the
   ResNet-18 fine-tune just can't learn it from the video crops alone.
+- **rembg foreground pre-filter** (`predict_service._crop_passes_fg_filter`):
+  the trained classifier has no "background" class, so on any frame
+  without a real connector the softmax still confidently picks one of
+  the 8 classes (typically 2.92mm-M @ 0.85+). The fix runs each Hough
+  crop through rembg and computes (a) foreground fraction and (b)
+  inner-vs-outer-density ratio. Real connector crops show one of two
+  patterns: silhouette filling the tight crop edge-to-edge (low
+  ratio) OR a small centered object (very high ratio). Wood-texture
+  false positives that fool rembg consistently land in the middle
+  ratio range (2-4) and get rejected. Local benchmark: 8/8 held-out
+  connectors pass, 0/3 background scenarios (wood, noise, solid)
+  produce false detections. Tunable via env vars on the box; set
+  `RFCAI_FG_FILTER=0` to disable.
 
 ## Known data-quality issues
 
