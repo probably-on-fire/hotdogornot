@@ -29,16 +29,14 @@ VALID_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
-# Bumped 224 -> 384 (2026-05-04). Phone-shot connector crops at full
-# resolution often have the connector face at 200-400px diameter; the
-# old 224 was throwing away most of that detail. ResNet-18's conv
-# layers are size-agnostic (only the final FC depends), so raising
-# INPUT_SIZE costs ~3x compute per forward pass but doesn't require
-# arch changes. Expected to help Full/Family discrimination since the
-# differentiating features (bore_id, dielectric appearance, threading)
-# are a few pixels at 224 but tens of pixels at 384.
-INPUT_SIZE = 384
-RESIZE_BEFORE_CROP = int(INPUT_SIZE * 1.14)   # was 256 = 224 * 1.14
+# 384 was tried (commit 13023b0) and regressed: model collapsed to
+# constant 3.5mm-M predictions at 6-class/balanced=289 setup. Reverted
+# to 224 — ResNet-18's receptive field doesn't usefully scale to 384
+# on our small dataset. Higher resolution only helps when the discriminating
+# features are sub-pixel at lower res, which doesn't apply here once
+# Hough has already produced a tight crop centered on the connector.
+INPUT_SIZE = 224
+RESIZE_BEFORE_CROP = int(INPUT_SIZE * 1.14)
 
 
 def make_train_transforms() -> transforms.Compose:
