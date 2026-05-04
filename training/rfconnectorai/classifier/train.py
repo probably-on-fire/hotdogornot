@@ -52,6 +52,15 @@ class TrainConfig:
     learning_rate: float = 3e-4
     val_fraction: float = 0.2
     seed: int = 0
+    # Use dHash-grouped split so adjacent video frames don't leak between
+    # train and val (the classic mistake on this dataset). Set False to
+    # restore the old random-split behavior — only useful for ablation.
+    use_grouped_split: bool = True
+    # Hard cap on how aggressively a minority class is upsampled. Without
+    # this, a 3-image class gets weight 1/3=0.33 vs an 80-image class at
+    # 1/80=0.0125, producing batches dominated by the same handful of
+    # crops with augmentation noise. Cap = max(weight, 1/(majority*cap)).
+    max_oversample_ratio: float = 5.0
 
 
 @dataclass
@@ -84,6 +93,87 @@ def _split_indices(n: int, val_fraction: float, seed: int) -> tuple[list[int], l
     rng.shuffle(indices)
     n_val = max(1, int(n * val_fraction))
     return indices[n_val:], indices[:n_val]
+
+
+def _grouped_stratified_split(
+    samples: list[tuple[str, int]],
+    val_fraction: float,
+    seed: int,
+    hash_distance_threshold: int = 8,
+) -> tuple[list[int], list[int]]:
+    """Split into train/val keeping near-duplicate images on the same side.
+
+    The data pipeline extracts frames from short videos at fps=4, so a
+    naive random split puts adjacent frames (250ms apart, visually
+    near-identical) on opposite sides — making val_acc essentially a
+    memorization metric. We compute dHash per image and group images
+    within `hash_distance_threshold` Hamming distance into the same
+    cluster; then split clusters (not images) per-class so each class
+    keeps at least one cluster on each side. A class with a single
+    cluster goes entirely to train.
+    """
+    import imagehash
+    from PIL import Image
+
+    rng = np.random.default_rng(seed)
+    by_class: dict[int, list[int]] = {}
+    for idx, (_path, label) in enumerate(samples):
+        by_class.setdefault(label, []).append(idx)
+
+    train_idx: list[int] = []
+    val_idx: list[int] = []
+
+    def _dhash(p: str) -> imagehash.ImageHash | None:
+        try:
+            return imagehash.dhash(Image.open(p).convert("RGB"), hash_size=8)
+        except Exception:
+            return None
+
+    for label, idx_list in by_class.items():
+        # Compute hashes once per image in this class.
+        hashes: list[imagehash.ImageHash | None] = [
+            _dhash(samples[i][0]) for i in idx_list
+        ]
+        # Union-find over near-duplicate hashes.
+        parent = list(range(len(idx_list)))
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+        for i in range(len(idx_list)):
+            if hashes[i] is None:
+                continue
+            for j in range(i + 1, len(idx_list)):
+                if hashes[j] is None:
+                    continue
+                if (hashes[i] - hashes[j]) <= hash_distance_threshold:
+                    union(i, j)
+        clusters: dict[int, list[int]] = {}
+        for i in range(len(idx_list)):
+            clusters.setdefault(find(i), []).append(idx_list[i])
+        cluster_ids = list(clusters.keys())
+        rng.shuffle(cluster_ids)
+        n_clusters = len(cluster_ids)
+        # At least one cluster to val if class has > 1 cluster, otherwise
+        # everything to train (single-cluster classes can't be evaluated
+        # without leaking — better to know we have no val signal there).
+        n_val_clusters = max(1, int(round(n_clusters * val_fraction))) \
+                         if n_clusters > 1 else 0
+        val_cluster_ids = set(cluster_ids[:n_val_clusters])
+        for cid, members in clusters.items():
+            if cid in val_cluster_ids:
+                val_idx.extend(members)
+            else:
+                train_idx.extend(members)
+
+    rng.shuffle(train_idx)
+    rng.shuffle(val_idx)
+    return train_idx, val_idx
 
 
 def _run_epoch(
@@ -143,15 +233,33 @@ def train(config: TrainConfig) -> dict:
             f"{config.class_names}"
         )
 
-    train_idx, val_idx = _split_indices(len(train_ds), config.val_fraction, config.seed)
+    if config.use_grouped_split:
+        train_idx, val_idx = _grouped_stratified_split(
+            train_ds.samples, config.val_fraction, config.seed,
+        )
+    else:
+        train_idx, val_idx = _split_indices(
+            len(train_ds), config.val_fraction, config.seed,
+        )
 
     # Class-balanced sampling: oversample minority classes so a 22-sample
     # class contributes the same per-epoch gradient signal as an 86-sample
     # class. Without this, the model defaults to the most-frequent class
-    # on out-of-distribution inputs (the held-out 3.5mm-bias we just hit).
+    # on out-of-distribution inputs.
+    # Cap the oversample ratio so a class with N=3 doesn't end up with
+    # 1/3 weight vs a majority class at 1/80 — that's a 27× imbalance
+    # that produces batches dominated by the same handful of crops with
+    # augmentation noise. Cap caller-tunable via `max_oversample_ratio`.
     train_labels = [train_ds.samples[i][1] for i in train_idx]
     label_counts = {l: train_labels.count(l) for l in set(train_labels)}
-    sample_weights = [1.0 / label_counts[l] for l in train_labels]
+    if not label_counts:
+        raise RuntimeError("train split empty after grouped-split — "
+                           "dataset has no usable labeled images.")
+    majority_count = max(label_counts.values())
+    min_weight = 1.0 / (majority_count * config.max_oversample_ratio)
+    sample_weights = [
+        max(1.0 / label_counts[l], min_weight) for l in train_labels
+    ]
     sampler = WeightedRandomSampler(
         weights=sample_weights,
         num_samples=len(train_idx),

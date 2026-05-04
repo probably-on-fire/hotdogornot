@@ -43,6 +43,36 @@ CANONICAL_CLASSES = [
     "2.4mm-M", "2.4mm-F",
 ]
 
+# A class needs at least this many training samples to be included in
+# the model's output head. Below this we drop the class entirely rather
+# than ship it as a softmax slot that can never be predicted correctly
+# but still sucks gradient via label smoothing's uniform mass.
+MIN_SAMPLES_PER_CLASS = 5
+
+
+def _populated_classes(data_dir: Path, candidates: list[str],
+                       min_samples: int) -> list[str]:
+    """Filter `candidates` to classes whose folder under `data_dir` has at
+    least `min_samples` images. Empty / undersized classes get dropped
+    entirely from the trained head — their presence as zero-data softmax
+    slots actively hurts inference (see classifier_journey.md)."""
+    out = []
+    skipped = []
+    for c in candidates:
+        d = data_dir / c
+        n = sum(1 for p in d.glob("*.[jpJP]*[gG]")) if d.is_dir() else 0
+        if n >= min_samples:
+            out.append(c)
+        else:
+            skipped.append((c, n))
+    if skipped:
+        log.warning(
+            "dropping %d undersized class(es) from training head: %s",
+            len(skipped),
+            ", ".join(f"{c}(n={n})" for c, n in skipped),
+        )
+    return out
+
 log = logging.getLogger("auto_retrain")
 
 
@@ -88,13 +118,21 @@ def main() -> int:
         log.error("data dir %s does not exist", args.data_dir)
         return 2
 
-    current = _current_dataset_size(args.data_dir, CANONICAL_CLASSES)
+    classes = _populated_classes(args.data_dir, CANONICAL_CLASSES,
+                                 MIN_SAMPLES_PER_CLASS)
+    if len(classes) < 2:
+        log.error("only %d class(es) have enough samples; need at least 2 "
+                  "to train a classifier", len(classes))
+        return 2
+
+    current = _current_dataset_size(args.data_dir, classes)
     last = _last_training_size(args.model_dir) or 0
     delta = current - last
 
     log.info(
-        "dataset size: current=%d, at_last_train=%d, delta=%d, threshold=%d",
-        current, last, delta, args.min_new_samples,
+        "dataset size: current=%d (across %d classes), at_last_train=%d, "
+        "delta=%d, threshold=%d",
+        current, len(classes), last, delta, args.min_new_samples,
     )
 
     if not args.force and delta < args.min_new_samples:
@@ -108,7 +146,7 @@ def main() -> int:
     config = TrainConfig(
         data_dir=args.data_dir,
         out_dir=args.model_dir,
-        class_names=CANONICAL_CLASSES,
+        class_names=classes,
         epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr,

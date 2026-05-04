@@ -94,6 +94,37 @@ labels. After the 2026-05-02 swap they're effectively inverted (75% →
 | DINOv2 linear probe + gender v2 | 100% | 25% | 38% | 62% |
 | DINOv2 + linear probe (3-class, no SMA) | 100% | 25% | 38% | 62% |
 
+## ⚠ The "data ceiling" claim is suspect — likely measurement bugs
+
+A 2026-05-03 code review surfaced three training-pipeline bugs that
+together undermine the basis for calling the held-out plateau a
+"data ceiling":
+
+1. **Train/val split leaks adjacent video frames** (was `train.py:81-86`,
+   now fixed). Frames extracted at fps=4 from short videos are visually
+   near-identical (~250ms apart). The old random index split put frame
+   N in train and frame N+1 in val, so the 97.7% val_acc on
+   `models/connector_classifier/version.json` measured memorization,
+   not generalization. The held-out gap of 38% wasn't a data ceiling —
+   it was the only honest metric we had. **Fix shipped: dHash-grouped
+   stratified split (`_grouped_stratified_split`).** Retrain to get a
+   real val_acc number.
+2. **3 of 8 classes have zero training data** but still occupied output
+   slots (SMA-M, SMA-F, 2.4mm-F). Label-smoothing at 0.1 distributed
+   uniform mass to those slots every batch, leaking gradient into
+   classes the model could never predict correctly. On any noisy crop
+   the model could still emit "SMA-M @ 0.30" purely from this
+   dynamic. **Fix shipped: `auto_retrain._populated_classes` drops
+   classes with < MIN_SAMPLES_PER_CLASS=5.**
+3. **`WeightedRandomSampler` over-sampled minority classes** by 25-30×
+   (3-image class at weight 1/3 = 0.33 vs majority at 1/80 = 0.0125),
+   producing batches dominated by augmentation noise on the same 2-3
+   crops. **Fix shipped: `max_oversample_ratio=5.0` cap in `TrainConfig`.**
+
+After the next retrain, the held-out numbers below should be
+re-measured. The plateau may move significantly. Until then, treat the
+"failure modes" list as findings against a broken yardstick.
+
 ## Failure modes proven exhausted
 
 These were tried and don't work on this data:
