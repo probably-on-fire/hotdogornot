@@ -29,7 +29,16 @@ VALID_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
 
-INPUT_SIZE = 224
+# Bumped 224 -> 384 (2026-05-04). Phone-shot connector crops at full
+# resolution often have the connector face at 200-400px diameter; the
+# old 224 was throwing away most of that detail. ResNet-18's conv
+# layers are size-agnostic (only the final FC depends), so raising
+# INPUT_SIZE costs ~3x compute per forward pass but doesn't require
+# arch changes. Expected to help Full/Family discrimination since the
+# differentiating features (bore_id, dielectric appearance, threading)
+# are a few pixels at 224 but tens of pixels at 384.
+INPUT_SIZE = 384
+RESIZE_BEFORE_CROP = int(INPUT_SIZE * 1.14)   # was 256 = 224 * 1.14
 
 
 def make_train_transforms() -> transforms.Compose:
@@ -47,7 +56,7 @@ def make_train_transforms() -> transforms.Compose:
     M-vs-F cue is minor at these ranges since the central pin/hole
     luminance contrast is much larger than 0.35 brightness span."""
     return transforms.Compose([
-        transforms.Resize(256),
+        transforms.Resize(RESIZE_BEFORE_CROP),
         # Tight scale crops force the model to identify the central
         # connector instead of relying on background.
         transforms.RandomResizedCrop(INPUT_SIZE, scale=(0.55, 1.0), ratio=(0.85, 1.18)),
@@ -70,7 +79,7 @@ def make_train_transforms() -> transforms.Compose:
 
 def make_eval_transforms() -> transforms.Compose:
     return transforms.Compose([
-        transforms.Resize(256),
+        transforms.Resize(RESIZE_BEFORE_CROP),
         transforms.CenterCrop(INPUT_SIZE),
         transforms.ToTensor(),
         transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
