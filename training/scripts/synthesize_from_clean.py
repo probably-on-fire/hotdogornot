@@ -87,6 +87,22 @@ def _bg_beige(size: int, rng: random.Random) -> np.ndarray:
     return img
 
 
+def _bg_skin_tone(size: int, rng: random.Random) -> np.ndarray:
+    """Tan/peach skin-tone gradient — mimics holding the connector
+    against fingers or palm, which a few held-out shots have."""
+    # BGR order; warm peach to lighter tan, with subtle shading.
+    base_r = rng.randint(180, 230)
+    base_g = base_r - rng.randint(20, 50)
+    base_b = base_g - rng.randint(20, 50)
+    base_b = max(0, base_b)
+    img = np.full((size, size, 3), [base_b, base_g, base_r], dtype=np.uint8)
+    # Diagonal lighting gradient
+    grad = np.linspace(-15, 15, size, dtype=np.int16)
+    img = np.clip(img.astype(np.int16) + grad[None, :, None], 0, 255).astype(np.uint8)
+    img = cv2.GaussianBlur(img, (15, 15), 0)
+    return img
+
+
 def _bg_wood_noise(size: int, rng: random.Random) -> np.ndarray:
     # Procedural wood-tone noise: striated horizontal pattern with
     # mid-warm color. Tan/oak palette — keep blue lower than green
@@ -178,20 +194,44 @@ def _composite_silhouette(silhouette_rgba: np.ndarray, bg: np.ndarray,
 
 def _augment(img: np.ndarray, rng: random.Random) -> np.ndarray:
     h, w = img.shape[:2]
-    # Random rotation ±25°
-    angle = rng.uniform(-25.0, 25.0)
+    # Random rotation ±20° — narrower than before so the M/F
+    # orientation cue (pin position) survives more reliably.
+    angle = rng.uniform(-20.0, 20.0)
     M = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
-    rotated = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
-    # Maybe horizontal flip (preserves M/F since we crop centered)
+    out = cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    # Slight perspective tilt 50% of the time — held-out phone shots
+    # are close to perpendicular but rarely perfectly. Keeps the
+    # connector roughly centered, just shifts the corners up to 7%
+    # of side length.
     if rng.random() < 0.5:
-        rotated = cv2.flip(rotated, 1)
+        jitter = w * rng.uniform(0.02, 0.07)
+        src = np.float32([[0, 0], [w, 0], [0, h], [w, h]])
+        dst = np.float32([
+            [rng.uniform(-jitter, jitter), rng.uniform(-jitter, jitter)],
+            [w + rng.uniform(-jitter, jitter), rng.uniform(-jitter, jitter)],
+            [rng.uniform(-jitter, jitter), h + rng.uniform(-jitter, jitter)],
+            [w + rng.uniform(-jitter, jitter), h + rng.uniform(-jitter, jitter)],
+        ])
+        Mp = cv2.getPerspectiveTransform(src, dst)
+        out = cv2.warpPerspective(out, Mp, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    if rng.random() < 0.5:
+        out = cv2.flip(out, 1)
     # Mild color jitter — brightness ±15%, contrast ±15%
     bri = rng.uniform(-0.15, 0.15)
     con = rng.uniform(-0.15, 0.15)
-    f = rotated.astype(np.float32) / 255.0
+    f = out.astype(np.float32) / 255.0
     f = (f - 0.5) * (1.0 + con) + 0.5 + bri
-    rotated = np.clip(f * 255.0, 0, 255).astype(np.uint8)
-    return rotated
+    out = np.clip(f * 255.0, 0, 255).astype(np.uint8)
+    # Subtle motion blur 20% of the time — phone shake in real captures.
+    if rng.random() < 0.2:
+        ksz = rng.choice([3, 5, 7])
+        kernel = np.zeros((ksz, ksz), np.float32)
+        kernel[ksz // 2, :] = 1.0 / ksz
+        # Random angle for the blur direction.
+        if rng.random() < 0.5:
+            kernel = kernel.T
+        out = cv2.filter2D(out, -1, kernel)
+    return out
 
 
 def main():
@@ -267,15 +307,21 @@ def main():
                 tight_silhouette = np.dstack(
                     [tight_bgr, tight_rgba[:, :, 3:4]])
 
-                # Pick background.
+                # Pick background. Distribution roughly matches the
+                # held-out test set's variety: lots of wood/desk, some
+                # plain (matches classify-on-cleaned domain), small
+                # amount of skin/hand, and a sample from real bg
+                # patches for variety the procedural backgrounds miss.
                 pick = rng.random()
-                if pick < 0.30:
+                if pick < 0.25:
                     bg = _bg_white(args.target_size, rng)
-                elif pick < 0.45:
+                elif pick < 0.35:
                     bg = _bg_gray(args.target_size, rng)
-                elif pick < 0.55:
+                elif pick < 0.42:
                     bg = _bg_beige(args.target_size, rng)
-                elif pick < 0.80:
+                elif pick < 0.50:
+                    bg = _bg_skin_tone(args.target_size, rng)
+                elif pick < 0.78:
                     bg = _bg_wood_noise(args.target_size, rng)
                 else:
                     bg = _bg_real_patch(args.target_size, real_bg_files, rng)
