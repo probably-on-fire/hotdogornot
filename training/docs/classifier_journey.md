@@ -149,6 +149,7 @@ with the new dHash-grouped split.
 | v8    | heavy | 10 (off)      | **subsampled to 261/class** | **37.5%** | **37.5%** | 75% |
 | v9    | heavy | 10 (off)      | rembg-cleaned, no subsample | 25% | 25% | 75% |
 | v10   | heavy | 10 (off)      | rembg-cleaned + subsampled to 27/class | 25% | 25% | 62.5% |
+| v11   | heavy | 10 (off)      | + zoom-recropped tight sub-crops, balanced to 289 | 12.5% | 12.5% | 62.5% |
 
 v9 (cleaned, no subsample) and v10 (cleaned + subsample) both
 underperformed v8. The cleaning step at `--min-fg 0.02` quarantined
@@ -164,6 +165,28 @@ equally.** Our cleanup is gated by source-video framing quality, which
 varies wildly between the 3 source videos. Result: cleaning
 worsened the imbalance instead of fixing the bias. v8 (uncleaned +
 subsampled to 261) remains best.
+
+v11 (`scripts/zoom_recrop_training.py`) tried the same lesson again
+from a different angle: instead of throwing wide bbox crops away,
+re-run Hough on each one to produce tight sub-crops around the actual
+connector. Spot check confirmed the salvage works (a 1080×1203 crop
+with 2 tiny connectors yields a clean 408×408 tight crop). 428 tight
+sub-crops were saved across 333 parents (42% salvage rate). But the
+salvage rate was again class-biased — 168 tight crops added to
+3.5mm-M vs only 17 to 2.92mm-F — so the class imbalance got *worse*
+not better, and v11 collapsed to 12.5% Full with 7/8 predicting
+3.5mm. The 2.4mm and 2.92mm source videos simply don't have enough
+in-focus frames where the connector is a substantial fraction of the
+bounding box, no matter how we re-crop.
+
+**Bottom line on the data ceiling: the held-out plateau in this
+session held firm at v8's 37.5% Full / 37.5% Family / 75% Gender
+across pipeline tweaks (val-leak fix, WRS cap, augmentation,
+cleaning, salvaging). The remaining gap is genuinely about source
+video diversity** — only 3 source videos, all shot in similar
+conditions, with the 2.4mm video framed worse than the 3.5mm one.
+Every contributor video uploaded through the Flutter app's contribute
+screen moves the ceiling up; nightly auto-retrain will pick them up.
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
