@@ -94,18 +94,19 @@ labels. After the 2026-05-02 swap they're effectively inverted (75% →
 | DINOv2 linear probe + gender v2 | 100% | 25% | 38% | 62% |
 | DINOv2 + linear probe (3-class, no SMA) | 100% | 25% | 38% | 62% |
 
-## 2026-05-04 retrain trials (v5 → v7, after pipeline-bug fixes)
+## 2026-05-04 retrain trials (v5 → v8, after pipeline-bug fixes)
 
-Three back-to-back single-seed retrains on the box's full data
+Four back-to-back single-seed retrains on the box's full data
 (3544 images across 6 populated classes; SMA-M/SMA-F still at 0
-samples and dropped per the new auto_retrain logic). All val_acc
-98.2-98.3% with the new dHash-grouped split.
+samples and dropped per the new auto_retrain logic). val_acc 97-98%
+with the new dHash-grouped split.
 
-| Model | aug   | WRS cap | Full | Family | Gender |
-|-------|-------|---------|------|--------|--------|
-| v5    | mild  | 5 (no-op bug) | 25% | 25% | 62.5% |
-| v6    | heavy | 2.0 (real cap)| 25% | 25% | **87.5%** |
-| v7    | heavy | 10  (effectively off) | 12.5% | 12.5% | 62.5% |
+| Model | aug   | WRS cap | Class balance | Full | Family | Gender |
+|-------|-------|---------|---------------|------|--------|--------|
+| v5    | mild  | 5 (no-op bug) | counts as-is | 25% | 25% | 62.5% |
+| v6    | heavy | 2.0 (real cap)| counts as-is | 25% | 25% | **87.5%** |
+| v7    | heavy | 10 (off)      | counts as-is | 12.5% | 12.5% | 62.5% |
+| v8    | heavy | 10 (off)      | **subsampled to 261/class** | **37.5%** | **37.5%** | 75% |
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
@@ -115,12 +116,28 @@ oversampling, model learns more general gender features). But
 single-trial variance makes this hard to confirm without a 5-seed
 ensemble re-run.
 
-**Decision: v6 promoted as production model** (best trial result),
-revert performed via `cp weights.0006.{pt,onnx} weights.{pt,onnx}` +
-patched version.json. The source code in master keeps `cap=10` as
-the principled default for general data — re-training will produce
-v7-recipe results unless the cap is explicitly tuned. Old weights
-(v4 = pre-fixes, v5/v7 = trial alternatives) preserved on disk.
+**Decision: v8 promoted as production model** (best held-out
+overall — first to break the 25% Family ceiling). Subsampling each
+class to 261 (the smallest's count) gave us 1566 training samples
+from 3544 raw, but eliminated the count-driven 3.5mm bias. The
+deployed model is `weights.0007.pt` containing the v8 balanced
+training run.
+
+The source code in master keeps `balance_to_smallest=False` as the
+default — explicit `--balance-to-smallest` on auto_retrain (or the
+`_kick_retrain.sh` helper which now passes it) opts in. Old weights
+preserved on disk: weights.0004.pt (pre-fixes), weights.0006.pt
+(v6 = best gender trial), v5/v7 overwritten by v8.
+
+**Re-extracting at higher fps was considered and rejected.** Only
+3 source videos exist on the box (`2_4mm.MOV`, `2_92mm.MOV`,
+`3_5mm.MOV`). Extracting at fps=12 instead of fps=4 would 3× the
+frame count, but adjacent frames at fps=12 are 80ms apart vs 250ms
+— dHash clustering would lump them together as the same scene, so
+the grouped split puts them all on one side of train/val and they
+add ~zero generalization signal. The source-video diversity is the
+real ceiling, and the only path to fix it is more videos in
+varied environments via the contribute screen.
 
 **3.5mm bias is data-bound, not pipeline-bound.** All three trials
 predicted 3.5mm 4-6 of 8 times. The training set has 1032 unique
