@@ -424,3 +424,22 @@ training/data/
   archive/                     ← legacy scraped images (don't use)
   reference/                   ← committed vendor reference photos
 ```
+
+## CLIP zero-shot baseline (2026-05-04)
+
+`scripts/_exp_clip_zeroshot.py` runs `open_clip` ViT-B/32 (OpenAI
+pretrain) zero-shot on the 8-image held-out, scoring each image
+against six text prompts of the form "a photo of a <family> <gender>
+RF coaxial connector with a center pin/socket". No fine-tuning.
+
+Result: **1/8 Full (12.5%), 3/8 Family (37.5%), 4/8 Gender (50%)**.
+
+Worse than v8+cleaned-inference on every axis. CLIP has the
+generic "RF connector" concept but can't distinguish 2.4mm vs
+2.92mm vs 3.5mm vs SMA from natural-language prompts. Gender at
+50% is essentially random — text cues for "pin" vs "socket"
+don't correspond to CLIP's image features at this scale.
+
+Implication for CLIP fine-tune: per the journey doc, DINOv2
+linear probe also showed in-distribution-strong / held-out-flat
+behavior. CLIP fine-tune would likely repeat that. Not pursuing.
