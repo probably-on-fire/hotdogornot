@@ -116,6 +116,9 @@ def main() -> int:
                     help="Subsample every class down to the smallest "
                          "class's count before training. Eliminates the "
                          "raw-count family bias that WRS alone can't fix.")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="Training seed. Vary to train multiple models "
+                         "for ensembling.")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args()
 
@@ -162,6 +165,7 @@ def main() -> int:
         learning_rate=args.lr,
         val_fraction=args.val_fraction,
         balance_to_smallest=args.balance_to_smallest,
+        seed=args.seed,
     )
     try:
         metrics = train(config)
