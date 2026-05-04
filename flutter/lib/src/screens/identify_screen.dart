@@ -44,6 +44,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     with WidgetsBindingObserver {
   CameraController? _cam;
   bool _camInitFailed = false;
+  bool _camInitInFlight = false;   // re-entrancy guard for _initCamera
   String? _camInitError;
 
   _Mode _mode = _Mode.photo;
@@ -73,28 +74,51 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final cam = _cam;
-    if (cam == null || !cam.value.isInitialized) return;
-    if (state == AppLifecycleState.inactive) {
-      cam.dispose();
+    if (state == AppLifecycleState.inactive
+        || state == AppLifecycleState.paused) {
+      // Tear down the controller and forget it. Leaving _cam pointing
+      // at a disposed controller would cause _buildPreview to call
+      // .value.isInitialized on a dead object on the next frame.
+      // Also reset _recording so that on resume the shutter doesn't
+      // try to stop a recording that the new controller never started.
+      if (cam != null) {
+        cam.dispose();
+        if (mounted) {
+          setState(() {
+            _cam = null;
+            _recording = false;
+          });
+        } else {
+          _cam = null;
+          _recording = false;
+        }
+      }
     } else if (state == AppLifecycleState.resumed) {
-      _initCamera();
+      if (_cam == null && !_camInitInFlight) {
+        _initCamera();
+      }
     }
   }
 
   Future<void> _initCamera() async {
+    if (_camInitInFlight) return;
+    _camInitInFlight = true;
     if (kIsWeb) {
       // Browser camera access through this plugin is fiddly; fall back
       // to image_picker on web (tap shutter → OS file picker).
-      setState(() => _camInitFailed = true);
+      _camInitInFlight = false;
+      if (mounted) setState(() => _camInitFailed = true);
       return;
     }
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
-        setState(() {
-          _camInitFailed = true;
-          _camInitError = 'No cameras found on this device.';
-        });
+        if (mounted) {
+          setState(() {
+            _camInitFailed = true;
+            _camInitError = 'No cameras found on this device.';
+          });
+        }
         return;
       }
       final rear = cameras.firstWhere(
@@ -124,10 +148,13 @@ class _IdentifyScreenState extends State<IdentifyScreen>
         _camInitFailed = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _camInitFailed = true;
         _camInitError = '$e';
       });
+    } finally {
+      _camInitInFlight = false;
     }
   }
 
@@ -205,11 +232,13 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     });
     try {
       final r = await ApiClient(widget.settings).predict(f);
+      if (!mounted) return;
       setState(() => _result = r);
     } catch (e) {
-      setState(() => _error = '$e');
+      if (!mounted) return;
+      setState(() => _error = _friendlyError(e));
     } finally {
-      setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -225,11 +254,13 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     try {
       final r = await ApiClient(widget.settings)
           .predictBytes(bytes, filename: filename);
+      if (!mounted) return;
       setState(() => _result = r);
     } catch (e) {
-      setState(() => _error = '$e');
+      if (!mounted) return;
+      setState(() => _error = _friendlyError(e));
     } finally {
-      setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -244,11 +275,13 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     });
     try {
       final r = await ApiClient(widget.settings).predictVideo(f);
+      if (!mounted) return;
       setState(() => _result = r);
     } catch (e) {
-      setState(() => _error = '$e');
+      if (!mounted) return;
+      setState(() => _error = _friendlyError(e));
     } finally {
-      setState(() => _busy = false);
+      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -284,12 +317,47 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       } else {
         await api.uploadTrainingPhotoBytes(bytes!, cls);
       }
+      if (!mounted) return;
       setState(() => _contributionStatus = '✓ Added to training as $cls');
     } catch (e) {
-      setState(() => _contributionStatus = 'Upload failed: $e');
+      if (!mounted) return;
+      setState(() => _contributionStatus = 'Upload failed: ${_friendlyError(e)}');
     } finally {
-      setState(() => _contributing = false);
+      if (mounted) setState(() => _contributing = false);
     }
+  }
+
+  /// Map raw exception/_ApiError chatter to short user-readable messages.
+  String _friendlyError(Object e) {
+    final s = e.toString();
+    if (s.contains('SocketException') || s.contains('Failed host lookup')) {
+      return 'No connection — check Wi-Fi and the relay URL in Settings.';
+    }
+    if (s.contains('TimeoutException') || s.contains('timed out')) {
+      return 'Server took too long — try again or pick a smaller image.';
+    }
+    if (s.contains('HandshakeException') || s.contains('CERTIFICATE')) {
+      return 'TLS handshake failed — relay URL may be wrong.';
+    }
+    if (s.contains('ApiError 401')) {
+      return 'Auth failed — check device token in Settings.';
+    }
+    if (s.contains('ApiError 403')) {
+      return 'Forbidden — token may have been rotated.';
+    }
+    if (s.contains('ApiError 413')) {
+      return 'Image too large for the server.';
+    }
+    if (s.contains('ApiError 422')) {
+      return 'Server rejected the image format.';
+    }
+    if (s.contains('ApiError 503')) {
+      return 'Classifier not loaded yet on the server — wait and retry.';
+    }
+    if (s.contains('ApiError')) {
+      return 'Server error — try again.';
+    }
+    return s.length > 200 ? '${s.substring(0, 200)}…' : s;
   }
 
   Future<void> _pickCorrectClass(String suggested) async {

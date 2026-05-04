@@ -41,12 +41,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ..labelerUser = _userCtl.text.trim()
       ..labelerPass = _passCtl.text.trim();
     await widget.settings.save();
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Saved')),
-      );
-      Navigator.pop(context);
-    }
+    if (!mounted) return;
+    // No Navigator.pop — Settings is a tab inside MainShell, not a
+    // pushed route. Popping would exit the app.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Saved')),
+    );
   }
 
   @override

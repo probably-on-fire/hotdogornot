@@ -155,10 +155,16 @@ def create_app(config: dict | None = None) -> FastAPI:
             return True, 1.0, 1.0
         try:
             from rembg import remove   # type: ignore
-            rgba = remove(crop_bgr, session=rembg_session)
+            # rembg treats raw ndarrays as RGB; we have BGR from cv2.
+            crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+            rgba = remove(crop_rgb, session=rembg_session)
         except Exception:
             return True, 1.0, 1.0   # fail open on rembg errors
         if rgba.ndim != 3 or rgba.shape[2] != 4:
+            # Rembg config drift can return RGB-without-alpha; fail open
+            # but log once so we notice the filter silently degraded.
+            print(f"[predict_service] WARNING: rembg returned non-RGBA "
+                  f"({rgba.shape}); fg filter inactive on this crop")
             return True, 1.0, 1.0
         alpha = rgba[:, :, 3]
         h, w = alpha.shape
