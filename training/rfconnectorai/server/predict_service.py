@@ -199,6 +199,14 @@ def create_app(config: dict | None = None) -> FastAPI:
             "status": "ok",
             "classifier_loaded": classifier is not None,
             "max_detections": max_detections,
+            "fg_filter": {
+                "enabled": fg_filter_enabled,
+                "available": rembg_session is not None,
+                "min_fg": min_fg_fraction,
+                "min_uniform_fg": min_uniform_fg,
+                "low_center_ratio": low_center_ratio,
+                "high_center_ratio": high_center_ratio,
+            },
         }
 
     def _classify_frame(bgr: np.ndarray) -> list[dict]:
