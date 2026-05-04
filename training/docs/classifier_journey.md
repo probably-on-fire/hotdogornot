@@ -94,6 +94,43 @@ labels. After the 2026-05-02 swap they're effectively inverted (75% →
 | DINOv2 linear probe + gender v2 | 100% | 25% | 38% | 62% |
 | DINOv2 + linear probe (3-class, no SMA) | 100% | 25% | 38% | 62% |
 
+## 2026-05-04 retrain trials (v5 → v7, after pipeline-bug fixes)
+
+Three back-to-back single-seed retrains on the box's full data
+(3544 images across 6 populated classes; SMA-M/SMA-F still at 0
+samples and dropped per the new auto_retrain logic). All val_acc
+98.2-98.3% with the new dHash-grouped split.
+
+| Model | aug   | WRS cap | Full | Family | Gender |
+|-------|-------|---------|------|--------|--------|
+| v5    | mild  | 5 (no-op bug) | 25% | 25% | 62.5% |
+| v6    | heavy | 2.0 (real cap)| 25% | 25% | **87.5%** |
+| v7    | heavy | 10  (effectively off) | 12.5% | 12.5% | 62.5% |
+
+**Held-out is 8 images — single-correct = 12.5 percentage points,
+so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
+and v7 with the same augmentation hints that the WRS cap=2 in v6
+may have helped by acting as a regularizer (reduces minority-class
+oversampling, model learns more general gender features). But
+single-trial variance makes this hard to confirm without a 5-seed
+ensemble re-run.
+
+**Decision: v6 promoted as production model** (best trial result),
+revert performed via `cp weights.0006.{pt,onnx} weights.{pt,onnx}` +
+patched version.json. The source code in master keeps `cap=10` as
+the principled default for general data — re-training will produce
+v7-recipe results unless the cap is explicitly tuned. Old weights
+(v4 = pre-fixes, v5/v7 = trial alternatives) preserved on disk.
+
+**3.5mm bias is data-bound, not pipeline-bound.** All three trials
+predicted 3.5mm 4-6 of 8 times. The training set has 1032 unique
+3.5mm-M images vs 261 for 2.92mm-F (4× imbalance), and the model
+learns the variety of 3.5mm features better. WRS rebalancing helps
+per-batch class distribution but can't synthesize new 3.5mm-distinct
+features from a small minority set. Real fix: more phone shots in
+varied conditions for the minority families, contributed via the
+Flutter app's contribute screen over time.
+
 ## ⚠ The "data ceiling" claim is suspect — likely measurement bugs
 
 A 2026-05-03 code review surfaced three training-pipeline bugs that
