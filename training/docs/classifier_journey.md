@@ -287,6 +287,7 @@ results conservatively.
 |---|---|---|---|---|
 | **v18 ResNet-18 (production)** | **75%** | **75%** | 87.5% | baseline |
 | Two-head shared backbone | 25% | 75% | 37.5% | gender collapsed under multi-task |
+| MLP head (512 -> 256 -> 64 -> 6 with Dropout 0.4/0.3) | 12.5% | 37.5% | 25% | added head capacity overfit hard |
 
 **Two-head trial** (`scripts/exp_two_head_train.py`): one ResNet-18
 backbone with separate family + gender heads, trained jointly on
@@ -313,6 +314,17 @@ The pattern is striking: the gender head learned a strong "F" bias.
 Suggests the gender label has more class imbalance than expected
 after balance-to-smallest (which only balances 6-way, not the
 projected 2-way).
+
+**MLP-head trial** (`scripts/exp_arch_variants.py --variant mlp-head`):
+ResNet-18 backbone with deeper head (512→256→64→6 with ReLU+Dropout
+0.4/0.3 between layers). Hypothesis: a non-linear projection helps
+separate adjacent families that v18's single linear layer struggles
+with. Result: **12.5% Full / 37.5% Family / 25% Gender — by far the
+worst variant**. The added head capacity overfits hard despite
+dropout. Confirms the small-data principle: with ~30-300 unique
+bases per class, more parameters in the classifier means more chance
+to memorize spurious patterns. The single linear FC head on v18 isn't
+the bottleneck — the data is.
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
