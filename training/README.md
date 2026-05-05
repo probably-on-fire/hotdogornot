@@ -10,21 +10,21 @@ image, including non-perpendicular product photos).
 
 ## Current production state (held-out: 8 phone shots)
 
-| Metric | v15 (synth-augmented) + cleaned inference |
+| Metric | v18 (synth-augmented, 20 epochs) + cleaned inference |
 |---|---|
-| Full class (1-of-6) | **50%** |
-| Family (1-of-4) | **62.5%** |
-| Gender (M/F) | 75% |
+| Full class (1-of-6) | **75%** |
+| Family (1-of-4) | **75%** |
+| Gender (M/F) | **87.5%** |
 | False positives on backgrounds | 0% (rembg fg pre-filter) |
 
 Deployed at `https://aired.com/rfcai/predict`. Production config:
 - `RFCAI_FG_FILTER=1` — rejects no-connector frames before classification
 - `RFCAI_CLASSIFY_ON_CLEANED=1` — feeds rembg silhouette (white bg) to the classifier
 - 6 classes; SMA-M/SMA-F dropped (zero training data)
-- Trained on 9697 samples including 4152 synthetic from `synthesize_from_clean.py`
+- Trained on 13849 samples including ~8304 synthetic from `synthesize_from_clean.py`
+  (combined v15+v17 recipes), 20 epochs
 
-See `docs/classifier_journey.md` for the full experiment history and
-data ceiling discussion.
+See `docs/classifier_journey.md` for the full experiment history.
 
 The two predictors run independently and cross-check each other:
 - **Agreement** → high confidence

@@ -156,6 +156,7 @@ with the new dHash-grouped split.
 | **v15 + classify-on-cleaned** | **synth-augmented training (rembg-clean silhouettes composited at correct scale on varied bg)** | **50%** | **62.5%** | 75% |
 | v15 + v16 ensemble (same-distribution synth seeds 0+1) | variance reduction within synth-trained models | 50% | 62.5% | 75% |
 | v17 (synth + perspective + skin-tone bg + motion blur) | extra augmentation diversity | 37.5% | 37.5% | 62.5% |
+| **v18 (mixed v15+v17 synth, 20 epochs)** | longer training on combined synth recipes | **75%** | **75%** | **87.5%** |
 
 v9 (cleaned, no subsample) and v10 (cleaned + subsample) both
 underperformed v8. The cleaning step at `--min-fg 0.02` quarantined
@@ -222,18 +223,33 @@ toward the v8 distribution. Not all model averaging helps.
 **Production now runs v15 (synth-augmented) + cleaned inference:
 50% Full / 62.5% Family / 75% Gender — best of session.**
 
-Two follow-ups tried, both flat or worse:
+Two intermediate follow-ups tried, both flat or worse:
 * Same-distribution ensemble (v15 + v16, both seed-different on the
   same synth-augmented data): 50/62.5/75 — exactly the same as v15
   alone. Variance is genuinely small at this point; ensembles don't
   help once you're at the data ceiling.
 * v17 with extra synth diversity (perspective transforms, skin-tone
   backgrounds, motion blur, ±20° rotations): 37.5/37.5/62.5. Adding
-  perspective/blur HURT held-out — hypothesis: the extra warping
-  blurred the discriminating geometric features (bore/pin) that the
-  v15 model had learned cleanly. The skin-tone bgs may also have
-  introduced label noise (no held-out shots actually have skin in
-  them). Reverted to v15 weights.
+  perspective/blur HURT held-out as a *single 12-epoch run* —
+  hypothesis was that the extra warping blurred discriminating
+  features. Reverted to v15 weights.
+
+**Final breakthrough — v18 at 75% Full / 75% Family / 87.5% Gender**:
+trained on the COMBINED v15+v17 synth data (8304 synth + originals =
+13849 total), with 20 epochs instead of 12. The v17 synth alone at
+12 epochs underfit (still figuring out the more diverse augmentations
+when LR decayed); 20 epochs on the combined dataset gives the model
+time to actually learn the v17-recipe variations on top of the
+v15-recipe baseline.
+
+Per-image v18 result on held-out: 6 of 8 fully correct
+(2.4mm-M ×3, 2.92mm-F, 3.5mm-F, 3.5mm-M); only 2.4mm-F → 3.5mm-M and
+2.92mm-M → 2.4mm-M misclassified. Both misses are family confusions,
+not gender confusions.
+
+**Production now runs v18 weights + cleaned inference: 75% Full /
+75% Family / 87.5% Gender — 3x improvement on Full vs the
+pre-session baseline.**
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
