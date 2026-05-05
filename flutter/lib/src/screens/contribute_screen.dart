@@ -28,6 +28,8 @@ class _ContributeScreenState extends State<ContributeScreen> {
   String _photoClass = '2.4mm-M';
   String _videoFamily = '2.4mm';
   bool _busy = false;
+  bool _asTestHoldout = false;   // when true, photo upload routes to
+                                 // /upload-test instead of /upload-train
   String? _status;
 
   Future<void> _uploadPhoto() async {
@@ -58,13 +60,23 @@ class _ContributeScreenState extends State<ContributeScreen> {
       // avoid loading the full image into memory.
       if (kIsWeb) {
         final bytes = await pf.readAsBytes();
-        await api.uploadTrainingPhotoBytes(bytes, _photoClass,
-            filename: pf.name);
+        if (_asTestHoldout) {
+          await api.uploadTestHoldoutPhotoBytes(bytes, _photoClass,
+              filename: pf.name);
+        } else {
+          await api.uploadTrainingPhotoBytes(bytes, _photoClass,
+              filename: pf.name);
+        }
       } else {
-        await api.uploadTrainingPhoto(File(pf.path), _photoClass);
+        if (_asTestHoldout) {
+          await api.uploadTestHoldoutPhoto(File(pf.path), _photoClass);
+        } else {
+          await api.uploadTrainingPhoto(File(pf.path), _photoClass);
+        }
       }
       if (!mounted) return;
-      setState(() => _status = '✓ Uploaded as $_photoClass');
+      final dest = _asTestHoldout ? 'TEST HOLDOUT' : 'training';
+      setState(() => _status = '✓ Uploaded as $_photoClass ($dest)');
     } catch (e) {
       if (!mounted) return;
       setState(() => _status = 'Upload failed: $e');
@@ -131,6 +143,9 @@ class _ContributeScreenState extends State<ContributeScreen> {
                 onClassChanged: (c) => setState(() => _photoClass = c),
                 onTakePhoto: _busy ? null : _uploadPhoto,
                 onPickPhoto: _busy ? null : _pickPhoto,
+                asTestHoldout: _asTestHoldout,
+                onAsTestHoldoutChanged: (v) =>
+                    setState(() => _asTestHoldout = v),
               ),
               const SizedBox(height: 16),
               _VideoSection(
@@ -174,11 +189,15 @@ class _PhotoSection extends StatelessWidget {
     required this.onClassChanged,
     required this.onTakePhoto,
     required this.onPickPhoto,
+    required this.asTestHoldout,
+    required this.onAsTestHoldoutChanged,
   });
   final String selectedClass;
   final ValueChanged<String> onClassChanged;
   final VoidCallback? onTakePhoto;
   final VoidCallback? onPickPhoto;
+  final bool asTestHoldout;
+  final ValueChanged<bool> onAsTestHoldoutChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -199,7 +218,24 @@ class _PhotoSection extends StatelessWidget {
                   .toList(),
               onChanged: (v) { if (v != null) onClassChanged(v); },
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 4),
+            // "Hold out" toggle: when on, the photo lands in
+            // data/test_holdout/<class>/ instead of the training set.
+            // Used to grow the held-out evaluation set; the held-out
+            // samples are NEVER seen during training.
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Save as test holdout',
+                  style: TextStyle(fontSize: 14)),
+              subtitle: const Text(
+                'Skip training set, add to held-out evaluation only.',
+                style: TextStyle(fontSize: 11),
+              ),
+              value: asTestHoldout,
+              onChanged: (v) => onAsTestHoldoutChanged(v),
+            ),
+            const SizedBox(height: 8),
             Row(
               children: [
                 Expanded(

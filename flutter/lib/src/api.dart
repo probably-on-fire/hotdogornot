@@ -156,6 +156,35 @@ class ApiClient {
     );
   }
 
+  /// POST a held-out test photo to the labeler. cls is the canonical
+  /// class. Held-out photos are not used in training — they live in
+  /// data/test_holdout/<cls>/ and are scored against during retrain
+  /// benchmarks. Use this when growing the test set with new phone
+  /// shots whose label is known.
+  Future<String> uploadTestHoldoutPhoto(File imageFile, String cls) async {
+    return _uploadMultipart(
+      url: settings.labelerUploadTestUrl(),
+      fields: {'cls': cls},
+      fileField: 'images',
+      file: imageFile,
+    );
+  }
+
+  /// Bytes variant of uploadTestHoldoutPhoto for web/no-path-access.
+  Future<String> uploadTestHoldoutPhotoBytes(
+    Uint8List bytes,
+    String cls, {
+    String filename = 'photo.jpg',
+  }) async {
+    return _uploadMultipartBytes(
+      url: settings.labelerUploadTestUrl(),
+      fields: {'cls': cls},
+      fileField: 'images',
+      bytes: bytes,
+      filename: filename,
+    );
+  }
+
   /// POST a training video to the labeler. family is "2.4mm" / "2.92mm" /
   /// "3.5mm" / "SMA".
   Future<String> uploadTrainingVideo(File videoFile, String family) async {

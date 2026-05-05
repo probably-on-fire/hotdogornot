@@ -51,5 +51,7 @@ class Settings {
 
   String labelerUploadTrainUrl() => '$relayBaseUrl/labeler/upload-train';
 
+  String labelerUploadTestUrl() => '$relayBaseUrl/labeler/upload-test';
+
   String labelerUploadVideoUrl() => '$relayBaseUrl/labeler/upload-video';
 }
