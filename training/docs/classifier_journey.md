@@ -154,6 +154,8 @@ with the new dHash-grouped split.
 | v8 + classify-on-cleaned | (inference-time rembg compositing on white) | 37.5% | 37.5% | **87.5%** |
 | 3-model ensemble (v8 seeds 0/1/2 + cleaned) | training-data variance reduction | 37.5% | 37.5% | 87.5% |
 | **v15 + classify-on-cleaned** | **synth-augmented training (rembg-clean silhouettes composited at correct scale on varied bg)** | **50%** | **62.5%** | 75% |
+| v15 + v16 ensemble (same-distribution synth seeds 0+1) | variance reduction within synth-trained models | 50% | 62.5% | 75% |
+| v17 (synth + perspective + skin-tone bg + motion blur) | extra augmentation diversity | 37.5% | 37.5% | 62.5% |
 
 v9 (cleaned, no subsample) and v10 (cleaned + subsample) both
 underperformed v8. The cleaning step at `--min-fg 0.02` quarantined
@@ -219,6 +221,19 @@ toward the v8 distribution. Not all model averaging helps.
 
 **Production now runs v15 (synth-augmented) + cleaned inference:
 50% Full / 62.5% Family / 75% Gender — best of session.**
+
+Two follow-ups tried, both flat or worse:
+* Same-distribution ensemble (v15 + v16, both seed-different on the
+  same synth-augmented data): 50/62.5/75 — exactly the same as v15
+  alone. Variance is genuinely small at this point; ensembles don't
+  help once you're at the data ceiling.
+* v17 with extra synth diversity (perspective transforms, skin-tone
+  backgrounds, motion blur, ±20° rotations): 37.5/37.5/62.5. Adding
+  perspective/blur HURT held-out — hypothesis: the extra warping
+  blurred the discriminating geometric features (bore/pin) that the
+  v15 model had learned cleanly. The skin-tone bgs may also have
+  introduced label noise (no held-out shots actually have skin in
+  them). Reverted to v15 weights.
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
