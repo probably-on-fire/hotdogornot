@@ -158,6 +158,7 @@ with the new dHash-grouped split.
 | v17 (synth + perspective + skin-tone bg + motion blur) | extra augmentation diversity | 37.5% | 37.5% | 62.5% |
 | **v18 (mixed v15+v17 synth, 20 epochs)** | longer training on combined synth recipes | **75%** | **75%** | **87.5%** |
 | v19 (mixed synth, 28 epochs) | even longer training | 62.5% | 62.5% | 87.5% |
+| v18 + v20 ensemble (same recipe, seeds 0+1, 20 epochs each) | same-recipe variance reduction | 62.5% | 62.5% | 87.5% |
 
 v9 (cleaned, no subsample) and v10 (cleaned + subsample) both
 underperformed v8. The cleaning step at `--min-fg 0.02` quarantined
@@ -260,6 +261,18 @@ hit a sweet spot; 20 → 28 starts overfitting. Reverted.
 **Sweet spot for this dataset+recipe is 20 epochs** with cosine LR
 decay. Training longer with the same data doesn't help; we're
 data-bound, not optimization-bound.
+
+v20 follow-up tested whether a same-recipe ensemble helps (v18 +
+v20, both 20 epochs on the same mixed synth, just different seeds).
+Result: 62.5/62.5/87.5 — *worse* than v18 solo because v20 disagreed
+with v18 on a 2.4mm-M case that v18 had right; ensemble averaging
+flipped it to a wrong prediction. Concrete demonstration that
+ensembling doesn't always help — when one model is meaningfully
+better than another on a specific case, averaging their softmaxes
+can dilute the right answer.
+
+**Final result: v18 solo at 20 epochs is the production model.**
+Confirmed across multiple ensemble + epoch variations.
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
