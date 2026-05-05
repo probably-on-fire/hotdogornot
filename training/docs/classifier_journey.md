@@ -274,6 +274,46 @@ can dilute the right answer.
 **Final result: v18 solo at 20 epochs is the production model.**
 Confirmed across multiple ensemble + epoch variations.
 
+## Architecture variants explored after v18
+
+Once we hit v18's 75/75/87.5 ceiling, we ran a series of architecture
+experiments to see if a different model shape could squeeze out more
+held-out signal. All trained on the same v18 data setup
+(13849 mixed-synth samples, balance-to-smallest, 20 epochs, seed=0)
+unless noted. Each one is a single-trial benchmark on N=8 — read
+results conservatively.
+
+| Variant | Full | Family | Gender | Note |
+|---|---|---|---|---|
+| **v18 ResNet-18 (production)** | **75%** | **75%** | 87.5% | baseline |
+| Two-head shared backbone | 25% | 75% | 37.5% | gender collapsed under multi-task |
+
+**Two-head trial** (`scripts/exp_two_head_train.py`): one ResNet-18
+backbone with separate family + gender heads, trained jointly on
+`CE(family) + CE(gender)`. Hypothesis: factorizing decisions should
+yield cleaner family discrimination.
+
+Result: family accuracy held at 75% (matching v18) but **gender
+collapsed from 87.5% to 37.5%**. The shared backbone optimized for
+family at the expense of gender during the multi-task loss. Could
+likely be fixed with loss weighting or per-head learning rates, but
+the simpler v18 already wins.
+
+Full per-class held-out for two-head:
+- 2.4mm-F → 2.4mm-M (gender wrong)
+- 2.4mm-M → 2.4mm-F (gender wrong)
+- 2.4mm-M → 2.4mm-F (gender wrong)
+- 2.4mm-M → 2.4mm-F (gender wrong)
+- 2.92mm-F → 2.92mm-F ✓
+- 2.92mm-M → 2.92mm-F (gender wrong)
+- 3.5mm-F → 3.5mm-F ✓
+- 3.5mm-M → 3.5mm-M ✓
+
+The pattern is striking: the gender head learned a strong "F" bias.
+Suggests the gender label has more class imbalance than expected
+after balance-to-smallest (which only balances 6-way, not the
+projected 2-way).
+
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
 and v7 with the same augmentation hints that the WRS cap=2 in v6
