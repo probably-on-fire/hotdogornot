@@ -157,6 +157,7 @@ with the new dHash-grouped split.
 | v15 + v16 ensemble (same-distribution synth seeds 0+1) | variance reduction within synth-trained models | 50% | 62.5% | 75% |
 | v17 (synth + perspective + skin-tone bg + motion blur) | extra augmentation diversity | 37.5% | 37.5% | 62.5% |
 | **v18 (mixed v15+v17 synth, 20 epochs)** | longer training on combined synth recipes | **75%** | **75%** | **87.5%** |
+| v19 (mixed synth, 28 epochs) | even longer training | 62.5% | 62.5% | 87.5% |
 
 v9 (cleaned, no subsample) and v10 (cleaned + subsample) both
 underperformed v8. The cleaning step at `--min-fg 0.02` quarantined
@@ -250,6 +251,15 @@ not gender confusions.
 **Production now runs v18 weights + cleaned inference: 75% Full /
 75% Family / 87.5% Gender — 3x improvement on Full vs the
 pre-session baseline.**
+
+v19 follow-up tested whether *even more* epochs helps: ran the same
+config at 28 epochs instead of 20. Result: 62.5/62.5/87.5 — Full
+and Family both regressed by 12.5pp. So the 12 → 20 epoch jump
+hit a sweet spot; 20 → 28 starts overfitting. Reverted.
+
+**Sweet spot for this dataset+recipe is 20 epochs** with cosine LR
+decay. Training longer with the same data doesn't help; we're
+data-bound, not optimization-bound.
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
