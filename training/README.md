@@ -24,7 +24,18 @@ Deployed at `https://aired.com/rfcai/predict`. Production config:
 - Trained on 13849 samples including ~8304 synthetic from `synthesize_from_clean.py`
   (combined v15+v17 recipes), 20 epochs
 
-See `docs/classifier_journey.md` for the full experiment history.
+See `docs/classifier_journey.md` for the full experiment history,
+and `docs/runbook.md` for deploy/retrain operational details.
+
+### Growing the held-out test set
+
+The Flutter contribute screen now has a "Save as test holdout"
+toggle. Photos uploaded with that on land in `data/test_holdout/<class>/`
+and are NOT used for training — only for the post-retrain held-out
+benchmark. Use this to grow the held-out from its current 8 images.
+With ~30+ varied phone shots, single-trial accuracy variance drops
+below the typical experiment delta, making it possible to actually
+distinguish architecture wins from noise.
 
 The two predictors run independently and cross-check each other:
 - **Agreement** → high confidence
