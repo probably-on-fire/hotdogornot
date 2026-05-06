@@ -12,12 +12,8 @@ import '../api.dart';
 import '../settings.dart';
 import '../theme.dart';
 
-const _kCanonicalClasses = [
-  'SMA-M', 'SMA-F',
-  '3.5mm-M', '3.5mm-F',
-  '2.92mm-M', '2.92mm-F',
-  '2.4mm-M', '2.4mm-F',
-];
+const _kFamilies = ['SMA', '3.5mm', '2.92mm', '2.4mm'];
+const _kGenders = ['M', 'F'];
 
 // Below this top-class confidence we treat the prediction as "no real
 // connector found" rather than a verdict — the classifier always emits
@@ -58,6 +54,10 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   Uint8List? _capturedBytes;// bytes path used on web (no usable file path)
   String? _contributionStatus;
   bool _contributing = false;
+  // Inline correction selection — mirrors the top prediction by default,
+  // user taps chips to override family/gender axes independently.
+  String? _selFamily;
+  String? _selGender;
 
   @override
   void initState() {
@@ -237,7 +237,11 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       final r = await ApiClient(widget.settings).predict(f);
       if (!mounted) return;
       _hapticOnResult(r);
-      setState(() => _result = r);
+      setState(() {
+        _result = r;
+        final top = _topAcceptedPrediction(r);
+        if (top != null) _seedSelectionFromTop(top);
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = _friendlyError(e));
@@ -260,7 +264,11 @@ class _IdentifyScreenState extends State<IdentifyScreen>
           .predictBytes(bytes, filename: filename);
       if (!mounted) return;
       _hapticOnResult(r);
-      setState(() => _result = r);
+      setState(() {
+        _result = r;
+        final top = _topAcceptedPrediction(r);
+        if (top != null) _seedSelectionFromTop(top);
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = _friendlyError(e));
@@ -282,7 +290,11 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       final r = await ApiClient(widget.settings).predictVideo(f);
       if (!mounted) return;
       _hapticOnResult(r);
-      setState(() => _result = r);
+      setState(() {
+        _result = r;
+        final top = _topAcceptedPrediction(r);
+        if (top != null) _seedSelectionFromTop(top);
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = _friendlyError(e));
@@ -298,7 +310,14 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       _capturedFile = null;
       _capturedBytes = null;
       _contributionStatus = null;
+      _selFamily = null;
+      _selGender = null;
     });
+  }
+
+  void _seedSelectionFromTop(Prediction p) {
+    _selFamily = p.family;
+    _selGender = p.gender;
   }
 
   Future<void> _contribute(String cls) async {
@@ -383,31 +402,34 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     return s.length > 200 ? '${s.substring(0, 200)}…' : s;
   }
 
-  Future<void> _pickCorrectClass(String suggested) async {
-    final picked = await showDialog<String>(
-      context: context,
-      builder: (_) => SimpleDialog(
-        title: const Text('Add to training as…'),
-        children: _kCanonicalClasses
-            .map((c) => SimpleDialogOption(
-                  onPressed: () => Navigator.pop(context, c),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Text(
-                      c,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: c == suggested
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                ))
-            .toList(),
-      ),
-    );
-    if (picked != null) await _contribute(picked);
+  Prediction? _topAcceptedPrediction(PredictResponse r) {
+    final imageArea = r.imageWidth * r.imageHeight;
+    final sorted = [...r.predictions]
+      ..sort((a, b) => b.confidence.compareTo(a.confidence));
+    for (final p in sorted) {
+      if (imageArea > 0) {
+        final area = p.bbox['w']! * p.bbox['h']!;
+        if (area / imageArea < _kMinBboxFractionOfImage) continue;
+      }
+      if (p.confidence < _kMinAcceptedConfidence) continue;
+      return p;
+    }
+    return null;
+  }
+
+  Future<void> _saveSelected(String predictedClass) async {
+    final fam = _selFamily;
+    final gen = _selGender;
+    if (fam == null || gen == null) return;
+    final cls = '$fam-$gen';
+    await _contribute(cls);
+    if (!mounted) return;
+    // Brief pause so the user sees the success line, then back to live.
+    await Future.delayed(const Duration(milliseconds: 900));
+    if (!mounted) return;
+    if (_contributionStatus != null && _contributionStatus!.startsWith('✓')) {
+      _resetToLive();
+    }
   }
 
   @override
@@ -595,6 +617,71 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     );
   }
 
+  Widget _buildCorrectionStrip(Prediction p) {
+    final fam = _selFamily ?? p.family;
+    final gen = _selGender ?? p.gender;
+    final selectedClass = '$fam-$gen';
+    final matchesPrediction = selectedClass == p.className;
+    final btnColor = matchesPrediction
+        ? const Color(0xFF4ADE80)   // green = "yes, accept the prediction"
+        : const Color(0xFFFFB347);  // amber = "saving as a different class"
+    final btnLabel = matchesPrediction
+        ? 'Confirm $selectedClass'
+        : 'Save as $selectedClass';
+
+    Widget chipRow(List<String> options, String? selected,
+        ValueChanged<String> onPick) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        alignment: WrapAlignment.center,
+        children: options.map((o) {
+          final isSel = o == selected;
+          return ChoiceChip(
+            label: Text(o,
+                style: TextStyle(
+                  color: isSel ? Colors.black : Colors.white,
+                  fontWeight: isSel ? FontWeight.w700 : FontWeight.w500,
+                )),
+            selected: isSel,
+            onSelected: _contributing ? null : (_) => onPick(o),
+            selectedColor: Colors.white,
+            backgroundColor: Colors.white12,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(
+                color: isSel ? Colors.white : Colors.white24,
+              ),
+            ),
+            visualDensity: VisualDensity.compact,
+          );
+        }).toList(),
+      );
+    }
+
+    return Column(
+      children: [
+        chipRow(_kFamilies, fam, (v) => setState(() => _selFamily = v)),
+        const SizedBox(height: 6),
+        chipRow(_kGenders, gen, (v) => setState(() => _selGender = v)),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _contributing ? null : () => _saveSelected(p.className),
+            icon: Icon(matchesPrediction ? Icons.check : Icons.save, size: 18),
+            label: Text(btnLabel),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: btnColor,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildResultPanel() {
     if (_error != null) {
       return _ResultCard(
@@ -708,31 +795,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
             ),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _contributing ? null : () => _contribute(p.className),
-                  icon: const Icon(Icons.check, size: 18),
-                  label: Text('Confirm ${p.className}'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4ADE80),
-                    foregroundColor: Colors.black,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _contributing
-                      ? null
-                      : () => _pickCorrectClass(p.className),
-                  icon: const Icon(Icons.edit, size: 18),
-                  label: const Text('Correct…'),
-                ),
-              ),
-            ],
-          ),
+          _buildCorrectionStrip(p),
           if (_contributing)
             const Padding(
               padding: EdgeInsets.only(top: 10),
