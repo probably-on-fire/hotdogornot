@@ -19,6 +19,27 @@ the pipeline is shaped the way it is.
 The repo lives under user `rfcai`, so commands that touch repo files
 need `sudo -u rfcai`. The systemd service runs as `rfcai` too.
 
+### GPU (training only — predict service is CPU)
+
+- **Hardware**: 2× Tesla P40, 24 GB each, sm_61 Pascal.
+- **Driver**: NVIDIA 535.230.02 kernel module / 535.288.01 userspace —
+  nvidia-smi will fail with "Driver/library version mismatch" until
+  the box reboots, but CUDA runtime works fine because it talks to
+  the kernel module directly. Don't reboot to fix `nvidia-smi`
+  cosmetically — the box hosts production processes (chris's
+  go_live_only.py, ollama, others) that have GPU handles open and
+  would die.
+- **PyTorch in rfcai venv**: `torch==2.5.1+cu121` /
+  `torchvision==0.20.1+cu121` (2026-05-06). The training scripts auto
+  `.cuda()` if available, so kicking any `train.py` /
+  `exp_*_train.py` job runs on GPU automatically — no flags needed.
+- **Smoke-test the install** after any pip churn:
+  `sudo -u rfcai /opt/rfcai/repo/training/.venv/bin/python scripts/gpu_smoke.py`
+- **If you need CUDA 13 / newer torch in future**: a kernel-module
+  reload (`rmmod nvidia_uvm nvidia_drm nvidia_modeset nvidia` then
+  `modprobe nvidia`) requires killing every GPU user first — don't
+  attempt without coordinating with chris.
+
 ## Deployed services
 
 | Path on aired.com | Backed by | systemd service |
