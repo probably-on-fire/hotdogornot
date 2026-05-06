@@ -289,6 +289,7 @@ results conservatively.
 | Two-head shared backbone | 25% | 75% | 37.5% | gender collapsed under multi-task |
 | MLP head (512 -> 256 -> 64 -> 6 with Dropout 0.4/0.3) | 12.5% | 37.5% | 25% | added head capacity overfit hard |
 | ResNet-50 backbone | 0% | 50% | 12.5% | val 0.84, holdout collapsed to 3.5mm |
+| Prototypical Networks (128-d, episodic, cosine) | 12.5% | 50% | 37.5% | overconfident prototypes (sim 0.99+), M-biased |
 
 **Two-head trial** (`scripts/exp_two_head_train.py`): one ResNet-18
 backbone with separate family + gender heads, trained jointly on
@@ -338,11 +339,32 @@ backbone has ~25M params vs ResNet-18's ~11M; with ~2-3× more
 capacity to memorize, it locked onto the dominant 3.5mm features
 and lost any generalization to 2.4mm/2.92mm at phone resolution.
 
-This is the cleanest evidence yet that **the bottleneck isn't model
-capacity — it's data**. Each architecture variant we've tried
-(deeper head, two heads, deeper backbone) has hurt held-out
-accuracy. The minimal v18 ResNet-18 + single FC + 20 epochs +
-balance-to-smallest is at the right complexity for our data scale.
+**Prototypical Networks trial** (`scripts/exp_proto_train.py`,
+2026-05-06). Hypothesis: metric learning with class prototypes is
+the textbook small-data architecture — episodic N-way K-shot training
+forces the embedding space to separate classes by nearest centroid
+rather than memorizing decision boundaries. ResNet-18 backbone →
+128-d L2-normalized embedding, 30 epochs episodic training, inference
+via cosine similarity to per-class production prototypes. Train acc
+climbed to 0.97 by epoch 30, val_acc 0.847. **Held-out: 12.5% Full,
+50% Family, 37.5% Gender**. Better than ResNet-50 / MLP-head, still
+far below v18. Cosine similarities to the picked prototype were
+0.85–0.995 (overconfident — the embedding is collapsed too tight),
+and 6/8 predictions landed on M regardless of truth, so the gender
+bias flipped relative to the two-head trial (which had F-bias) — same
+data, different architecture, different failure mode. The metric
+learning didn't transfer across the train→phone-shot resolution gap.
+
+**Cross-architecture conclusion (after 4 variant trials):** every
+architectural change has *hurt* held-out accuracy despite val_acc
+staying ~0.83-0.85 for all variants. ResNet-18 + linear FC (v18) is
+the right complexity for this data scale; capacity, depth, multi-head
+factorization, and metric learning all fail the same way — they
+overfit the wood-bench training distribution and don't generalize
+to phone-resolution photos in varied environments. **The bottleneck
+is data, not the model.** Path D (grow the held-out set + collect
+more varied real-world phone shots via the contribute screen) is now
+the only remaining lever.
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
