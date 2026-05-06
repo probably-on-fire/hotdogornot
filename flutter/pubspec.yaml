@@ -50,6 +50,12 @@ dependencies:
   # Pick video files from the gallery for the training-video upload.
   file_picker: ^8.1.4
 
+  # Read app version + build number for the About screen.
+  package_info_plus: ^8.0.0
+
+  # Open https://aired.com from the About screen.
+  url_launcher: ^6.3.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

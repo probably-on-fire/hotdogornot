@@ -9,17 +9,23 @@ class Settings {
     required this.deviceToken,
     required this.labelerUser,
     required this.labelerPass,
+    required this.devMode,
   });
 
   String relayBaseUrl;
   String deviceToken;
   String labelerUser;
   String labelerPass;
+  // When true, the Contribute tab and the Advanced (relay/token/labeler)
+  // panel are visible. Toggled by 7-tap on the version string in About.
+  // Default off so end users see only Identify + About.
+  bool devMode;
 
   static const _kRelay = 'relay_base_url';
   static const _kToken = 'device_token';
   static const _kUser = 'labeler_user';
   static const _kPass = 'labeler_pass';
+  static const _kDevMode = 'dev_mode';
 
   static const _defaultRelay = 'https://aired.com/rfcai';
   static const _defaultToken =
@@ -34,6 +40,7 @@ class Settings {
       deviceToken: prefs.getString(_kToken) ?? _defaultToken,
       labelerUser: prefs.getString(_kUser) ?? _defaultUser,
       labelerPass: prefs.getString(_kPass) ?? _defaultPass,
+      devMode: prefs.getBool(_kDevMode) ?? false,
     );
   }
 
@@ -43,6 +50,7 @@ class Settings {
     await prefs.setString(_kToken, deviceToken);
     await prefs.setString(_kUser, labelerUser);
     await prefs.setString(_kPass, labelerPass);
+    await prefs.setBool(_kDevMode, devMode);
   }
 
   String get predictUrl => '$relayBaseUrl/predict';
