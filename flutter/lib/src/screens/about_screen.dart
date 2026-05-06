@@ -371,7 +371,12 @@ class _AboutScreenState extends State<AboutScreen> {
                 ),
               ),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 20),
+
+              // ── Privacy disclosure ──
+              const _PrivacySection(),
+
+              const SizedBox(height: 24),
 
               // ── Small "Powered by aired.com" footer ──
               GestureDetector(
@@ -448,6 +453,126 @@ class _AboutScreenState extends State<AboutScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _PrivacySection extends StatefulWidget {
+  const _PrivacySection();
+
+  @override
+  State<_PrivacySection> createState() => _PrivacySectionState();
+}
+
+class _PrivacySectionState extends State<_PrivacySection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurface.withOpacity(0.7);
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      alignment: Alignment.topCenter,
+      child: GestureDetector(
+        onTap: () => setState(() => _expanded = !_expanded),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFF2A313E)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.lock_outline,
+                      size: 14,
+                      color: theme.colorScheme.onSurface.withOpacity(0.6)),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Privacy',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: theme.colorScheme.onSurface.withOpacity(0.85),
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 16,
+                    color: theme.colorScheme.onSurface.withOpacity(0.5),
+                  ),
+                ],
+              ),
+              if (_expanded) ...[
+                const SizedBox(height: 10),
+                _bullet(
+                  'Photos you take in Identify are sent to aired.com over '
+                  'HTTPS for classification, processed in memory, and '
+                  'discarded after the response. No image is stored on '
+                  'our servers.',
+                  muted,
+                ),
+                const SizedBox(height: 8),
+                _bullet(
+                  'Connector requests open your phone\'s email app — your '
+                  'message is sent through your normal email account to '
+                  'chris@aired.com. The app does not relay or intercept it.',
+                  muted,
+                ),
+                const SizedBox(height: 8),
+                _bullet(
+                  'No accounts, no analytics, no advertising IDs. Local '
+                  'preferences (server URL, device token) are stored '
+                  'on-device only.',
+                  muted,
+                ),
+                const SizedBox(height: 8),
+                _bullet(
+                  'Questions or removal requests: email '
+                  'chris@aired.com.',
+                  muted,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  static Widget _bullet(String text, Color muted) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 6, right: 8),
+          child: Container(
+            width: 4,
+            height: 4,
+            decoration: BoxDecoration(
+              color: muted,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.45,
+              color: muted,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
