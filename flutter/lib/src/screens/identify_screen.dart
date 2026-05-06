@@ -31,8 +31,15 @@ const _kMinBboxFractionOfImage = 0.02;
 enum _Mode { photo, video }
 
 class IdentifyScreen extends StatefulWidget {
-  const IdentifyScreen({super.key, required this.settings});
+  const IdentifyScreen({
+    super.key,
+    required this.settings,
+    this.isActive = true,
+  });
   final Settings settings;
+  // Set false when this screen is in an IndexedStack but on a non-selected
+  // tab — we tear down the camera so the sibling Contribute tab can have it.
+  final bool isActive;
 
   @override
   State<IdentifyScreen> createState() => _IdentifyScreenState();
@@ -63,7 +70,26 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initCamera();
+    if (widget.isActive) _initCamera();
+  }
+
+  @override
+  void didUpdateWidget(covariant IdentifyScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive && !widget.isActive) {
+      // Tab was deselected — release the camera so the sibling tab can
+      // claim it. Drop any in-progress result/error UI too so we come
+      // back to a clean live-preview state next time.
+      final cam = _cam;
+      if (cam != null) {
+        cam.dispose();
+        _cam = null;
+        _recording = false;
+      }
+      _resetToLive();
+    } else if (!oldWidget.isActive && widget.isActive) {
+      if (_cam == null && !_camInitInFlight) _initCamera();
+    }
   }
 
   @override

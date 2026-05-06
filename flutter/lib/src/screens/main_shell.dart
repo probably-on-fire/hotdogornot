@@ -34,9 +34,12 @@ class _MainShellState extends State<MainShell> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
+    // Pass isActive so each screen's camera (Identify, Contribute) can
+    // tear itself down when the user is on another tab — Android allows
+    // only one CameraController on the hardware at a time.
     final pages = [
-      IdentifyScreen(settings: settings),
-      ContributeScreen(settings: settings),
+      IdentifyScreen(settings: settings, isActive: _index == 0),
+      ContributeScreen(settings: settings, isActive: _index == 1),
       SettingsScreen(settings: settings),
     ];
     return Scaffold(

@@ -1,309 +1,592 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:camera/camera.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
 import '../settings.dart';
 
-const _kCanonicalClasses = [
-  'SMA-M', 'SMA-F',
-  '3.5mm-M', '3.5mm-F',
-  '2.92mm-M', '2.92mm-F',
-  '2.4mm-M', '2.4mm-F',
-];
 const _kFamilies = ['SMA', '3.5mm', '2.92mm', '2.4mm'];
+const _kGenders = ['M', 'F'];
 
+/// Camera-first capture screen. Set the class via chips, tap shutter,
+/// upload happens in the background while the camera stays live so the
+/// next shot is one tap away. No predict round-trip.
 class ContributeScreen extends StatefulWidget {
-  const ContributeScreen({super.key, required this.settings});
+  const ContributeScreen({
+    super.key,
+    required this.settings,
+    this.isActive = true,
+  });
   final Settings settings;
+  // False when sitting in an IndexedStack but on a non-selected tab.
+  // We tear the camera down so Identify can have it.
+  final bool isActive;
 
   @override
   State<ContributeScreen> createState() => _ContributeScreenState();
 }
 
-class _ContributeScreenState extends State<ContributeScreen> {
-  String _photoClass = '2.4mm-M';
-  String _videoFamily = '2.4mm';
-  bool _busy = false;
-  bool _asTestHoldout = false;   // when true, photo upload routes to
-                                 // /upload-test instead of /upload-train
-  String? _status;
+class _ContributeScreenState extends State<ContributeScreen>
+    with WidgetsBindingObserver {
+  CameraController? _cam;
+  bool _camInitFailed = false;
+  bool _camInitInFlight = false;
+  String? _camInitError;
 
-  Future<void> _uploadPhoto() async {
-    await _pickAndUpload(ImageSource.camera);
+  // Sticky class selection — set once, keep shooting.
+  String _family = '2.4mm';
+  String _gender = 'M';
+
+  // When true, next captures land in data/test_holdout/<class>/ instead
+  // of the training set. Default off because most contributions grow
+  // training; toggling on is the explicit "this is for evaluation" act.
+  bool _holdout = false;
+
+  bool _shutterBusy = false;     // single-flight guard on capture
+  int _uploadInFlight = 0;       // count of background uploads posting now
+  int _uploadedCount = 0;        // session total successful uploads
+  String? _toast;                // transient status pill above the chips
+  bool _toastIsError = false;
+  Timer? _toastTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (widget.isActive) _initCamera();
   }
 
-  Future<void> _pickPhoto() async {
-    await _pickAndUpload(ImageSource.gallery);
+  @override
+  void didUpdateWidget(covariant ContributeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive && !widget.isActive) {
+      final cam = _cam;
+      if (cam != null) {
+        cam.dispose();
+        _cam = null;
+      }
+    } else if (!oldWidget.isActive && widget.isActive) {
+      if (_cam == null && !_camInitInFlight) _initCamera();
+    }
   }
 
-  Future<void> _pickAndUpload(ImageSource source) async {
-    final picker = ImagePicker();
-    final pf = await picker.pickImage(
-      source: source,
+  @override
+  void dispose() {
+    _toastTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    _cam?.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final cam = _cam;
+    if (state == AppLifecycleState.inactive
+        || state == AppLifecycleState.paused) {
+      if (cam != null) {
+        cam.dispose();
+        if (mounted) {
+          setState(() => _cam = null);
+        } else {
+          _cam = null;
+        }
+      }
+    } else if (state == AppLifecycleState.resumed && widget.isActive) {
+      if (_cam == null && !_camInitInFlight) _initCamera();
+    }
+  }
+
+  Future<void> _initCamera() async {
+    if (_camInitInFlight) return;
+    _camInitInFlight = true;
+    if (kIsWeb) {
+      _camInitInFlight = false;
+      if (mounted) setState(() => _camInitFailed = true);
+      return;
+    }
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _camInitFailed = true;
+            _camInitError = 'No cameras found.';
+          });
+        }
+        return;
+      }
+      final rear = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+      final controller = CameraController(
+        rear,
+        ResolutionPreset.max,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+      await controller.initialize();
+      try { await controller.setFocusMode(FocusMode.auto); } catch (_) {}
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _cam = controller;
+        _camInitFailed = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _camInitFailed = true;
+        _camInitError = '$e';
+      });
+    } finally {
+      _camInitInFlight = false;
+    }
+  }
+
+  String get _classLabel => '$_family-$_gender';
+
+  Future<void> _onShutter() async {
+    if (_shutterBusy) return;
+    setState(() => _shutterBusy = true);
+    HapticFeedback.lightImpact();
+    final cam = _cam;
+    try {
+      if (cam != null && cam.value.isInitialized) {
+        final shot = await cam.takePicture();
+        // Fire-and-forget upload so the camera is ready for the next shot.
+        unawaited(_uploadFile(File(shot.path)));
+      } else {
+        // Web / no-camera fallback — OS camera dialog.
+        final pf = await ImagePicker().pickImage(
+          source: ImageSource.camera,
+          imageQuality: 92,
+          maxWidth: 4032,
+        );
+        if (pf == null) return;
+        if (kIsWeb) {
+          final bytes = await pf.readAsBytes();
+          unawaited(_uploadBytes(bytes, pf.name));
+        } else {
+          unawaited(_uploadFile(File(pf.path)));
+        }
+      }
+    } catch (e) {
+      _showToast('Capture failed: ${_friendlyError(e)}', error: true);
+    } finally {
+      if (mounted) setState(() => _shutterBusy = false);
+    }
+  }
+
+  Future<void> _pickFromGallery() async {
+    if (_shutterBusy) return;
+    final pf = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
       imageQuality: 92,
       maxWidth: 4032,
     );
     if (pf == null) return;
-    if (!mounted) return;
-    setState(() {
-      _busy = true;
-      _status = null;
-    });
-    try {
-      final api = ApiClient(widget.settings);
-      // On web, XFile.path is a blob URL we can't open as a File; route
-      // through the bytes variant. Native: use the file path directly to
-      // avoid loading the full image into memory.
-      if (kIsWeb) {
-        final bytes = await pf.readAsBytes();
-        if (_asTestHoldout) {
-          await api.uploadTestHoldoutPhotoBytes(bytes, _photoClass,
-              filename: pf.name);
-        } else {
-          await api.uploadTrainingPhotoBytes(bytes, _photoClass,
-              filename: pf.name);
-        }
-      } else {
-        if (_asTestHoldout) {
-          await api.uploadTestHoldoutPhoto(File(pf.path), _photoClass);
-        } else {
-          await api.uploadTrainingPhoto(File(pf.path), _photoClass);
-        }
-      }
-      if (!mounted) return;
-      final dest = _asTestHoldout ? 'TEST HOLDOUT' : 'training';
-      setState(() => _status = '✓ Uploaded as $_photoClass ($dest)');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _status = 'Upload failed: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+    if (kIsWeb) {
+      final bytes = await pf.readAsBytes();
+      unawaited(_uploadBytes(bytes, pf.name));
+    } else {
+      unawaited(_uploadFile(File(pf.path)));
     }
   }
 
-  Future<void> _pickVideo() async {
+  Future<void> _pickAndUploadVideo() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
       allowMultiple: false,
-      withData: kIsWeb,   // need bytes on web (no usable file path)
+      withData: kIsWeb,
     );
     if (result == null) return;
     final picked = result.files.single;
-    if (!kIsWeb && picked.path == null) return;
-    if (!mounted) return;
-    setState(() {
-      _busy = true;
-      _status = 'Uploading video — server will extract crops…';
-    });
+    if (kIsWeb) {
+      _showToast('Video upload only on mobile.', error: true);
+      return;
+    }
+    if (picked.path == null) return;
+    if (mounted) setState(() => _uploadInFlight++);
     try {
       final api = ApiClient(widget.settings);
-      // /labeler/upload-video doesn't have a bytes-based wrapper today;
-      // on web we'd need a new ApiClient method. Native users keep the
-      // File path (avoids loading 100MB+ into RAM).
-      if (kIsWeb) {
-        if (picked.bytes == null) {
-          throw Exception('Video bytes unavailable (web file_picker).');
-        }
-        // Inline minimal multipart so we don't have to add a fourth
-        // bytes-method to ApiClient just for this rare path.
-        throw Exception(
-          'Video upload is not supported in the browser build yet — '
-          'use the mobile app.',
-        );
-      }
-      final body = await api.uploadTrainingVideo(
-          File(picked.path!), _videoFamily);
+      await api.uploadTrainingVideo(File(picked.path!), _family);
       if (!mounted) return;
-      setState(() =>
-          _status = '✓ ${body.replaceAll(RegExp(r'<[^>]+>'), '').trim()}');
+      _showToast('✓ Video sent — server is extracting crops');
     } catch (e) {
-      if (!mounted) return;
-      setState(() => _status = 'Upload failed: $e');
+      _showToast('Video upload failed: ${_friendlyError(e)}', error: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _uploadInFlight--);
     }
   }
 
+  // Uploads happen async; we capture the class + holdout intent at the
+  // moment of capture so the user can flip chips for the next shot
+  // without retroactively re-routing pending uploads.
+  Future<void> _uploadFile(File f) async {
+    final cls = _classLabel;
+    final isHoldout = _holdout;
+    if (mounted) setState(() => _uploadInFlight++);
+    try {
+      final api = ApiClient(widget.settings);
+      if (isHoldout) {
+        await api.uploadTestHoldoutPhoto(f, cls);
+      } else {
+        await api.uploadTrainingPhoto(f, cls);
+      }
+      if (!mounted) return;
+      setState(() => _uploadedCount++);
+      _showToast('✓ #$_uploadedCount $cls${isHoldout ? " · holdout" : ""}');
+      HapticFeedback.selectionClick();
+    } catch (e) {
+      _showToast('Upload failed: ${_friendlyError(e)}', error: true);
+    } finally {
+      if (mounted) setState(() => _uploadInFlight--);
+    }
+  }
+
+  Future<void> _uploadBytes(Uint8List bytes, String filename) async {
+    final cls = _classLabel;
+    final isHoldout = _holdout;
+    if (mounted) setState(() => _uploadInFlight++);
+    try {
+      final api = ApiClient(widget.settings);
+      if (isHoldout) {
+        await api.uploadTestHoldoutPhotoBytes(bytes, cls, filename: filename);
+      } else {
+        await api.uploadTrainingPhotoBytes(bytes, cls, filename: filename);
+      }
+      if (!mounted) return;
+      setState(() => _uploadedCount++);
+      _showToast('✓ #$_uploadedCount $cls${isHoldout ? " · holdout" : ""}');
+    } catch (e) {
+      _showToast('Upload failed: ${_friendlyError(e)}', error: true);
+    } finally {
+      if (mounted) setState(() => _uploadInFlight--);
+    }
+  }
+
+  void _showToast(String msg, {bool error = false}) {
+    if (!mounted) return;
+    _toastTimer?.cancel();
+    setState(() {
+      _toast = msg;
+      _toastIsError = error;
+    });
+    _toastTimer = Timer(Duration(seconds: error ? 4 : 2), () {
+      if (!mounted) return;
+      setState(() => _toast = null);
+    });
+  }
+
+  String _friendlyError(Object e) {
+    final s = e.toString();
+    if (s.contains('SocketException') || s.contains('Failed host lookup')) {
+      return 'No connection — check Wi-Fi.';
+    }
+    if (s.contains('TimeoutException') || s.contains('timed out')) {
+      return 'Server slow — try again.';
+    }
+    if (s.contains('ApiError 401') || s.contains('ApiError 403')) {
+      return 'Auth failed — check token in Settings.';
+    }
+    if (s.contains('ApiError 413')) {
+      return 'Image too large.';
+    }
+    return s.length > 100 ? '${s.substring(0, 100)}…' : s;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).padding.bottom;
     return Scaffold(
-      appBar: AppBar(title: const Text('Contribute training data')),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _PhotoSection(
-                selectedClass: _photoClass,
-                onClassChanged: (c) => setState(() => _photoClass = c),
-                onTakePhoto: _busy ? null : _uploadPhoto,
-                onPickPhoto: _busy ? null : _pickPhoto,
-                asTestHoldout: _asTestHoldout,
-                onAsTestHoldoutChanged: (v) =>
-                    setState(() => _asTestHoldout = v),
-              ),
-              const SizedBox(height: 16),
-              _VideoSection(
-                selectedFamily: _videoFamily,
-                onFamilyChanged: (f) => setState(() => _videoFamily = f),
-                onPickVideo: _busy ? null : _pickVideo,
-              ),
-              const SizedBox(height: 16),
-              if (_busy) const _Busy(),
-              if (_status != null) _StatusCard(status: _status!),
-              const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF2A313E)),
-                ),
-                child: Text(
-                  'Photos give the best resolution for the central pin/socket cue. '
-                  'Videos let the server auto-extract many candidate crops via '
-                  'Hough detection — you then clean them up in the labeler.',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
+      backgroundColor: Colors.black,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          _buildPreview(),
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 12,
+            left: 12,
+            right: 12,
+            child: _buildTopBar(),
           ),
-        ),
+          // Toast appears between the chips and the camera so it doesn't
+          // get clipped by the bottom nav bar.
+          if (_toast != null)
+            Positioned(
+              left: 32,
+              right: 32,
+              // Sits ~10px above the chip strip block.
+              bottom: bottomInset + 296,
+              child: _StatusPill(text: _toast!, error: _toastIsError),
+            ),
+          Positioned(
+            left: 0,
+            right: 0,
+            // Clear the bottom NavigationBar (~80px on Material 3).
+            bottom: bottomInset + 90,
+            child: _buildControls(),
+          ),
+        ],
       ),
     );
   }
-}
 
-class _PhotoSection extends StatelessWidget {
-  const _PhotoSection({
-    required this.selectedClass,
-    required this.onClassChanged,
-    required this.onTakePhoto,
-    required this.onPickPhoto,
-    required this.asTestHoldout,
-    required this.onAsTestHoldoutChanged,
-  });
-  final String selectedClass;
-  final ValueChanged<String> onClassChanged;
-  final VoidCallback? onTakePhoto;
-  final VoidCallback? onPickPhoto;
-  final bool asTestHoldout;
-  final ValueChanged<bool> onAsTestHoldoutChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text('Photo (recommended)',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: selectedClass,
-              decoration: const InputDecoration(labelText: 'Class'),
-              items: _kCanonicalClasses
-                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                  .toList(),
-              onChanged: (v) { if (v != null) onClassChanged(v); },
+  Widget _buildPreview() {
+    final cam = _cam;
+    if (cam != null && cam.value.isInitialized) {
+      // Sensor returns landscape dimensions; swap for portrait UI then
+      // FittedBox.cover lets the preview fill without squishing. Same
+      // pattern Identify uses.
+      final preview = cam.value.previewSize;
+      final pw = preview?.height ?? 1;
+      final ph = preview?.width ?? 1;
+      return ClipRect(
+        child: SizedBox.expand(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: pw,
+              height: ph,
+              child: CameraPreview(cam),
             ),
-            const SizedBox(height: 4),
-            // "Hold out" toggle: when on, the photo lands in
-            // data/test_holdout/<class>/ instead of the training set.
-            // Used to grow the held-out evaluation set; the held-out
-            // samples are NEVER seen during training.
-            SwitchListTile(
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Save as test holdout',
-                  style: TextStyle(fontSize: 14)),
-              subtitle: const Text(
-                'Skip training set, add to held-out evaluation only.',
-                style: TextStyle(fontSize: 11),
-              ),
-              value: asTestHoldout,
-              onChanged: (v) => onAsTestHoldoutChanged(v),
-            ),
-            const SizedBox(height: 8),
-            Row(
+          ),
+        ),
+      );
+    }
+    if (_camInitFailed) {
+      return Container(
+        color: Colors.black,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: onTakePhoto,
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('Take'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onPickPhoto,
-                    icon: const Icon(Icons.photo_library),
-                    label: const Text('Pick'),
-                  ),
+                const Icon(Icons.photo_camera_outlined,
+                    size: 72, color: Colors.white38),
+                const SizedBox(height: 16),
+                Text(
+                  kIsWeb
+                      ? 'Live preview not available in browser.\nTap shutter to pick a photo.'
+                      : (_camInitError ?? 'Camera unavailable.'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 14),
                 ),
               ],
             ),
+          ),
+        ),
+      );
+    }
+    return const Center(
+      child: CircularProgressIndicator(color: Colors.white),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Row(
+      children: [
+        _CounterPill(
+          count: _uploadedCount,
+          inFlight: _uploadInFlight,
+        ),
+        const Spacer(),
+        _HoldoutToggle(
+          on: _holdout,
+          onTap: () => setState(() => _holdout = !_holdout),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildControls() {
+    Widget chip(String label, bool selected, VoidCallback onTap) {
+      return GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 100),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.black.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? Colors.white : Colors.white24,
+            ),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: selected ? Colors.black : Colors.white,
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Wrap(
+          spacing: 6,
+          alignment: WrapAlignment.center,
+          children: _kFamilies
+              .map((f) => chip(f, _family == f,
+                  () => setState(() => _family = f)))
+              .toList(),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          alignment: WrapAlignment.center,
+          children: _kGenders
+              .map((g) => chip(g, _gender == g,
+                  () => setState(() => _gender = g)))
+              .toList(),
+        ),
+        const SizedBox(height: 12),
+        // Class-preview pill — confirms what the next shot will be saved as.
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.6),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: _holdout
+                  ? const Color(0xFFFFB347)
+                  : Colors.white24,
+            ),
+          ),
+          child: Text(
+            _holdout
+                ? 'next: $_classLabel  →  HOLDOUT'
+                : 'next: $_classLabel',
+            style: TextStyle(
+              color: _holdout ? const Color(0xFFFFB347) : Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _ShutterButton(busy: _shutterBusy, onTap: _onShutter),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _SmallAction(
+              icon: Icons.photo_library,
+              label: 'Gallery',
+              onTap: _pickFromGallery,
+            ),
+            const SizedBox(width: 24),
+            _SmallAction(
+              icon: Icons.videocam,
+              label: 'Video',
+              onTap: _pickAndUploadVideo,
+            ),
           ],
         ),
+      ],
+    );
+  }
+}
+
+class _CounterPill extends StatelessWidget {
+  const _CounterPill({required this.count, required this.inFlight});
+  final int count;
+  final int inFlight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (inFlight > 0)
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          else
+            const Icon(Icons.cloud_upload_outlined,
+                size: 14, color: Colors.white70),
+          const SizedBox(width: 6),
+          Text(
+            inFlight > 0
+                ? '$count uploaded · $inFlight…'
+                : '$count uploaded',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _VideoSection extends StatelessWidget {
-  const _VideoSection({
-    required this.selectedFamily,
-    required this.onFamilyChanged,
-    required this.onPickVideo,
-  });
-  final String selectedFamily;
-  final ValueChanged<String> onFamilyChanged;
-  final VoidCallback? onPickVideo;
+class _HoldoutToggle extends StatelessWidget {
+  const _HoldoutToggle({required this.on, required this.onTap});
+  final bool on;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: on
+              ? const Color(0xFFFFB347)
+              : Colors.black.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: on ? const Color(0xFFFFB347) : Colors.white24,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Video — auto-extract crops',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: selectedFamily,
-              decoration: const InputDecoration(labelText: 'Family'),
-              items: _kFamilies
-                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                  .toList(),
-              onChanged: (v) { if (v != null) onFamilyChanged(v); },
+            Icon(
+              on ? Icons.science : Icons.school_outlined,
+              size: 14,
+              color: on ? Colors.black : Colors.white70,
             ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: onPickVideo,
-              icon: const Icon(Icons.videocam),
-              label: const Text('Pick video'),
-            ),
-            const SizedBox(height: 8),
+            const SizedBox(width: 6),
             Text(
-              'Server runs Hough detection at fps=5 and dumps every detected '
-              'crop into <family>-M for you to flip M↔F in the labeler.',
+              on ? 'HOLDOUT' : 'training',
               style: TextStyle(
-                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
-                fontSize: 11,
+                color: on ? Colors.black : Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
               ),
             ),
           ],
@@ -313,37 +596,111 @@ class _VideoSection extends StatelessWidget {
   }
 }
 
-class _Busy extends StatelessWidget {
-  const _Busy();
+class _ShutterButton extends StatelessWidget {
+  const _ShutterButton({required this.busy, required this.onTap});
+  final bool busy;
+  final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 16),
-      child: Center(child: CircularProgressIndicator()),
+    return GestureDetector(
+      onTap: busy ? null : onTap,
+      child: Container(
+        width: 78,
+        height: 78,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withOpacity(0.9), width: 4),
+        ),
+        child: Center(
+          child: busy
+              ? const SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 3,
+                    color: Colors.white,
+                  ),
+                )
+              : Container(
+                  width: 60,
+                  height: 60,
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+        ),
+      ),
     );
   }
 }
 
-class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.status});
-  final String status;
+class _SmallAction extends StatelessWidget {
+  const _SmallAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
   @override
   Widget build(BuildContext context) {
-    final ok = status.startsWith('✓');
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.55),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white24),
+        ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(ok ? Icons.check_circle : Icons.error_outline,
-                color: ok ? const Color(0xFF4ADE80) : Colors.redAccent),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(status,
-                  style: const TextStyle(fontSize: 13, height: 1.3)),
+            Icon(icon, size: 14, color: Colors.white70),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.text, required this.error});
+  final String text;
+  final bool error;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: error
+              ? Colors.redAccent.withOpacity(0.95)
+              : const Color(0xFF4ADE80).withOpacity(0.95),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: error ? Colors.white : Colors.black,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
