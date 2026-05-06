@@ -288,6 +288,7 @@ results conservatively.
 | **v18 ResNet-18 (production)** | **75%** | **75%** | 87.5% | baseline |
 | Two-head shared backbone | 25% | 75% | 37.5% | gender collapsed under multi-task |
 | MLP head (512 -> 256 -> 64 -> 6 with Dropout 0.4/0.3) | 12.5% | 37.5% | 25% | added head capacity overfit hard |
+| ResNet-50 backbone | 0% | 50% | 12.5% | val 0.84, holdout collapsed to 3.5mm |
 
 **Two-head trial** (`scripts/exp_two_head_train.py`): one ResNet-18
 backbone with separate family + gender heads, trained jointly on
@@ -325,6 +326,23 @@ dropout. Confirms the small-data principle: with ~30-300 unique
 bases per class, more parameters in the classifier means more chance
 to memorize spurious patterns. The single linear FC head on v18 isn't
 the bottleneck — the data is.
+
+**ResNet-50 trial** (`scripts/exp_arch_variants.py --variant resnet50`,
+2026-05-05). Hypothesis: a deeper backbone with a richer ImageNet
+prior could pick up finer threading/dielectric texture that ResNet-18
+misses. Trained 20 epochs on the same v18 data setup, val_acc settled
+at 0.838 (epoch 20) — comparable to v18's val curve. **Held-out:
+0/8 Full, 4/8 Family, 1/8 Gender — the worst overall result of any
+trial**. 7 of 8 predictions collapsed onto 3.5mm-M or 3.5mm-F. The
+backbone has ~25M params vs ResNet-18's ~11M; with ~2-3× more
+capacity to memorize, it locked onto the dominant 3.5mm features
+and lost any generalization to 2.4mm/2.92mm at phone resolution.
+
+This is the cleanest evidence yet that **the bottleneck isn't model
+capacity — it's data**. Each architecture variant we've tried
+(deeper head, two heads, deeper backbone) has hurt held-out
+accuracy. The minimal v18 ResNet-18 + single FC + 20 epochs +
+balance-to-smallest is at the right complexity for our data scale.
 
 **Held-out is 8 images — single-correct = 12.5 percentage points,
 so Full/Family deltas are within noise.** Gender 7/8 → 5/8 across v6
