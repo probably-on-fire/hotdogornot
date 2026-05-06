@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:package_info_plus/package_info_plus.dart';
@@ -7,10 +8,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../settings.dart';
 
-/// "About" tab — visible to every user. Doubles as the dev-mode toggle:
-/// tap the version string 7 times in quick succession to flip dev mode,
-/// which reveals the Contribute tab + the Advanced (relay / token /
-/// labeler) panel further down this screen.
+/// "About" tab — visible to every user. The main interaction here is
+/// **Request a new connector type** (a mailto form). Branding shrinks
+/// to a small "Powered by aired.com" footer beneath. The version
+/// string also doubles as the dev-mode unlock: 7 taps in quick
+/// succession flips dev mode, which reveals the Contribute tab and
+/// the Advanced (relay/token/labeler) panel.
 class AboutScreen extends StatefulWidget {
   const AboutScreen({
     super.key,
@@ -24,15 +27,24 @@ class AboutScreen extends StatefulWidget {
   State<AboutScreen> createState() => _AboutScreenState();
 }
 
+// Where new-connector requests land. Editable via the Advanced section
+// later if we want a separate inbox.
+const _kRequestEmail = 'chris@aired.com';
+
 class _AboutScreenState extends State<AboutScreen> {
   String _version = '';
   String _build = '';
 
-  // Hidden dev-mode unlock — Android-style "tap version 7 times" gesture.
+  // Dev-mode unlock — Android-style "tap version 7 times" gesture.
   int _devTapCount = 0;
   Timer? _devTapTimer;
 
-  // Advanced panel controllers (only relevant when dev mode is on).
+  // Request-a-connector form.
+  final _requestNameCtl = TextEditingController();
+  final _requestNotesCtl = TextEditingController();
+  bool _requestSending = false;
+
+  // Advanced (dev-mode-gated) panel.
   late TextEditingController _relayCtl;
   late TextEditingController _tokenCtl;
   late TextEditingController _userCtl;
@@ -52,6 +64,8 @@ class _AboutScreenState extends State<AboutScreen> {
   @override
   void dispose() {
     _devTapTimer?.cancel();
+    _requestNameCtl.dispose();
+    _requestNotesCtl.dispose();
     _relayCtl.dispose();
     _tokenCtl.dispose();
     _userCtl.dispose();
@@ -74,12 +88,10 @@ class _AboutScreenState extends State<AboutScreen> {
     HapticFeedback.selectionClick();
     _devTapCount++;
     _devTapTimer?.cancel();
-    // Reset the counter if the user pauses for >2 seconds.
     _devTapTimer = Timer(const Duration(seconds: 2), () {
       _devTapCount = 0;
     });
 
-    // Mid-progress hint — match Android's "X taps to enable developer mode".
     final remaining = 7 - _devTapCount;
     if (remaining > 0 && remaining <= 4) {
       ScaffoldMessenger.of(context)
@@ -121,6 +133,79 @@ class _AboutScreenState extends State<AboutScreen> {
     }
   }
 
+  Future<void> _sendConnectorRequest() async {
+    final name = _requestNameCtl.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(const SnackBar(
+          content: Text('Tell us which connector you want — name is required.'),
+        ));
+      return;
+    }
+    setState(() => _requestSending = true);
+    try {
+      final notes = _requestNotesCtl.text.trim();
+      final platform =
+          '${defaultTargetPlatform.name}  ($_version+$_build)';
+      final body = StringBuffer()
+        ..writeln('Hi,')
+        ..writeln()
+        ..writeln('I would like Connector ID to support: $name')
+        ..writeln();
+      if (notes.isNotEmpty) {
+        body
+          ..writeln('Notes:')
+          ..writeln(notes)
+          ..writeln();
+      }
+      body
+        ..writeln('—')
+        ..writeln('Sent from Connector ID v$_version ($_build) on $platform');
+
+      final uri = Uri(
+        scheme: 'mailto',
+        path: _kRequestEmail,
+        queryParameters: {
+          'subject': 'Connector request: $name',
+          'body': body.toString(),
+        },
+      );
+
+      // Some platforms refuse to canLaunchUrl mailto unless an email app
+      // is registered; just try launchUrl and surface the failure.
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!mounted) return;
+      if (launched) {
+        _requestNameCtl.clear();
+        _requestNotesCtl.clear();
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(const SnackBar(
+            content: Text('Opened your email app — review and send.'),
+          ));
+      } else {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(const SnackBar(
+            content: Text(
+              'No email app available — copy the request and email '
+              '$_kRequestEmail.',
+            ),
+          ));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+          content: Text('Could not open email: $e'),
+        ));
+    } finally {
+      if (mounted) setState(() => _requestSending = false);
+    }
+  }
+
   Future<void> _saveAdvanced() async {
     widget.settings
       ..relayBaseUrl = _relayCtl.text.trim()
@@ -141,157 +226,215 @@ class _AboutScreenState extends State<AboutScreen> {
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
+          padding: const EdgeInsets.fromLTRB(20, 28, 20, 32),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Hero brand block.
-              Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE63946),  // aired.com red
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Center(
-                  child: Text(
-                    'ai',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 40,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -1,
+              // Compact hero — small mark, app name, tap-to-unlock version.
+              Center(
+                child: Column(
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE63946),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'ai',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -1,
+                          ),
+                        ),
+                      ),
                     ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Connector ID',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    GestureDetector(
+                      onTap: _onVersionTap,
+                      behavior: HitTestBehavior.opaque,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        child: Text(
+                          _version.isEmpty
+                              ? 'version —'
+                              : 'v$_version  ($_build)',
+                          style: TextStyle(
+                            color: theme.colorScheme.onSurface
+                                .withOpacity(0.5),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // One-line description, intentionally short.
+              Center(
+                child: Text(
+                  'Identify RF coaxial connectors with your phone.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: theme.colorScheme.onSurface.withOpacity(0.7),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              const Text(
-                'Connector ID',
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 4),
-              GestureDetector(
-                onTap: _onVersionTap,
-                behavior: HitTestBehavior.opaque,
+
+              const SizedBox(height: 28),
+
+              // ── Main feature: request a new connector type ──
+              Card(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
-                  child: Text(
-                    _version.isEmpty
-                        ? 'version —'
-                        : 'v$_version  ($_build)',
-                    style: TextStyle(
-                      color: theme.colorScheme.onSurface.withOpacity(0.55),
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 28),
-
-              // Description
-              Text(
-                'Identify RF coaxial connectors from your phone camera. '
-                'Supports SMA, 3.5mm, 2.92mm, and 2.4mm in male and female '
-                'variants. Point, snap, get a class.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 14,
-                  height: 1.5,
-                  color: theme.colorScheme.onSurface.withOpacity(0.85),
-                ),
-              ),
-
-              const SizedBox(height: 28),
-
-              // aired.com promo card.
-              GestureDetector(
-                onTap: _openAired,
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Color(0xFFE63946),
-                        Color(0xFFB8232F),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                  padding: const EdgeInsets.all(18),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'Powered by aired.com',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'AI-driven RF tooling',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                          height: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Built and operated by aired.com — '
-                        'tap to learn more.',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.92),
-                          fontSize: 13,
-                          height: 1.4,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
                       Row(
                         children: const [
+                          Icon(Icons.add_circle_outline,
+                              size: 18, color: Color(0xFFE63946)),
+                          SizedBox(width: 8),
                           Text(
-                            'Visit aired.com',
+                            'Request a new connector type',
                             style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
+                              fontSize: 15,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          SizedBox(width: 4),
-                          Icon(Icons.arrow_forward,
-                              color: Colors.white, size: 16),
                         ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Don\'t see the connector you need? Tell us '
+                        'which one to add next.',
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface.withOpacity(0.6),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _requestNameCtl,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Connector name',
+                          hintText: 'e.g. BNC, N-type, TNC, MMCX',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _requestNotesCtl,
+                        minLines: 2,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.newline,
+                        decoration: const InputDecoration(
+                          labelText: 'Notes (optional)',
+                          hintText: 'Use case, frequency range, vendor…',
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      ElevatedButton.icon(
+                        onPressed:
+                            _requestSending ? null : _sendConnectorRequest,
+                        icon: _requestSending
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.send, size: 16),
+                        label: const Text('Send request'),
                       ),
                     ],
                   ),
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 28),
 
-              // App credits / fine print.
-              Text(
-                '© aired.com',
-                style: TextStyle(
-                  color: theme.colorScheme.onSurface.withOpacity(0.45),
-                  fontSize: 11,
+              // ── Small "Powered by aired.com" footer ──
+              GestureDetector(
+                onTap: _openAired,
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE63946),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Center(
+                          child: Text(
+                            'ai',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Powered by aired.com',
+                        style: TextStyle(
+                          color: theme.colorScheme.onSurface.withOpacity(0.65),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.open_in_new,
+                        size: 12,
+                        color: theme.colorScheme.onSurface.withOpacity(0.45),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 6),
+              Center(
+                child: Text(
+                  '© aired.com',
+                  style: TextStyle(
+                    color: theme.colorScheme.onSurface.withOpacity(0.4),
+                    fontSize: 11,
+                  ),
                 ),
               ),
 
               // Advanced section — only visible in dev mode.
               if (widget.settings.devMode) ...[
-                const SizedBox(height: 32),
+                const SizedBox(height: 28),
                 _AdvancedSection(
                   relayCtl: _relayCtl,
                   tokenCtl: _tokenCtl,
