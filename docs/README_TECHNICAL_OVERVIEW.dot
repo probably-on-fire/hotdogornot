@@ -6,12 +6,13 @@ digraph ReadmeTechnicalOverview {
     fontname="Arial Bold";
     bgcolor="#111827";
     pad=0.35;
-    rankdir=LR;
-    ranksep=0.65;
-    nodesep=0.45;
+    rankdir=TB;
+    ranksep=0.80;
+    nodesep=0.72;
     splines=spline;
     outputorder=edgesfirst;
     dpi=220;
+    ratio=compress;
   ];
 
   node [
@@ -19,7 +20,7 @@ digraph ReadmeTechnicalOverview {
     style="rounded,filled";
     fontname="Arial";
     fontsize=14;
-    margin="0.14,0.09";
+    margin="0.18,0.12";
     color="#dbeafe";
     fontcolor="#f8fafc";
     penwidth=2.0;
@@ -80,11 +81,31 @@ digraph ReadmeTechnicalOverview {
     gradientangle=90;
   ];
 
+  training_data [
+    label="Learn\nverified crops\nsynthetic renders";
+    shape=folder;
+    fillcolor="#475569:#334155";
+    gradientangle=90;
+  ];
+
+  export [
+    label="Deploy\nserver fallback\nmobile export";
+    shape=component;
+    fillcolor="#1d4ed8:#1e3a8a";
+    gradientangle=90;
+  ];
+
+  { rank=same; detect; training_data; }
+  { rank=same; classify; feedback; }
+  { rank=same; verify; export; }
+
   capture -> detect [label="frame"];
   detect -> classify [label="crop"];
   classify -> verify [label="attributes"];
   verify -> decide [label="evidence"];
   decide -> result [label="answer"];
   result -> feedback [label="corrections", style=dashed, color="#86efac"];
-  feedback -> detect [label="better models", style=dashed, color="#86efac"];
+  feedback -> training_data [label="label + audit", style=dashed, color="#86efac"];
+  training_data -> export [label="cloud bake-off", style=dashed, color="#86efac"];
+  export -> detect [label="better models", style=dashed, color="#86efac"];
 }
