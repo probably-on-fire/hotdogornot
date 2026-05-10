@@ -202,7 +202,11 @@ def build_dataset(
     """
     instances = read_manifest(manifest)
     if not instances:
-        raise ValueError(f"no instances loaded from {manifest}")
+        raise ValueError(
+            f"no instances loaded from {manifest}. "
+            "Re-run rfconnectorai.data.crop_instances and confirm it reports "
+            "a non-zero row count before invoking build_yolo_dataset."
+        )
 
     family_to_idx = family_index(instances)
     plan = plan_splits(

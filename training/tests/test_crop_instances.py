@@ -203,3 +203,31 @@ def test_main_cli_whole_image(tmp_path: Path, labeled_root: Path):
     assert rc == 0
     assert manifest.exists()
     assert manifest.read_text(encoding="utf-8").strip()
+
+
+def test_main_cli_returns_nonzero_on_empty_input(tmp_path: Path, capsys):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    rc = main([
+        "--input", str(empty),
+        "--manifest", str(tmp_path / "instances.jsonl"),
+        "--out", str(tmp_path / "crops"),
+        "--mode", "whole-image",
+        "--dry-run",
+    ])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "0 instances" in captured.err
+
+
+def test_main_cli_returns_nonzero_on_missing_input(tmp_path: Path, capsys):
+    rc = main([
+        "--input", str(tmp_path / "does_not_exist"),
+        "--manifest", str(tmp_path / "instances.jsonl"),
+        "--out", str(tmp_path / "crops"),
+        "--mode", "whole-image",
+        "--dry-run",
+    ])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "exists: False" in captured.err

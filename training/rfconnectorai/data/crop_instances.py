@@ -136,9 +136,13 @@ def build_whole_image_instances(
     """One instance per source image using the full frame as the placeholder bbox."""
     base = base_dir or input_root
     records: list[CropRecord] = []
+    skipped_unreadable = 0
+    scanned = 0
     for image_path in iter_images(input_root):
+        scanned += 1
         size = _read_image_size(image_path)
         if size is None:
+            skipped_unreadable += 1
             continue
         w, h = size
         bbox = (0, 0, w, h)
@@ -161,6 +165,11 @@ def build_whole_image_instances(
         )
         validate_instance(instance)
         records.append(CropRecord(instance=instance, write_crop_from=None, crop_bbox=None))
+    print(
+        f"whole-image: scanned {scanned} images under {input_root}, "
+        f"skipped {skipped_unreadable} unreadable, kept {len(records)}",
+        file=sys.stderr,
+    )
     return records
 
 
@@ -326,6 +335,35 @@ def main(argv: list[str] | None = None) -> int:
         print("crops: dry-run, nothing written")
     else:
         print(f"crops: {args.out} ({cropped} files written)")
+
+    if n == 0:
+        print(
+            f"\nERROR: 0 instances were emitted from input {args.input}.",
+            file=sys.stderr,
+        )
+        print(f"  --input resolved to: {args.input.resolve()}", file=sys.stderr)
+        print(f"  exists: {args.input.exists()}", file=sys.stderr)
+        if args.input.exists() and args.input.is_dir():
+            all_files = list(args.input.rglob("*"))
+            n_files = sum(1 for p in all_files if p.is_file())
+            n_images = sum(
+                1 for p in all_files
+                if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+            )
+            print(
+                f"  total files: {n_files}, image-extension files: {n_images}",
+                file=sys.stderr,
+            )
+            top_level = sorted(
+                p.name for p in args.input.iterdir() if p.is_dir()
+            )[:10]
+            print(f"  top-level subdirs (first 10): {top_level}", file=sys.stderr)
+        print(
+            "  Common causes: wrong cwd, --input path typo, dataset not "
+            "checked out, or images with unsupported extensions.",
+            file=sys.stderr,
+        )
+        return 2
     return 0
 
 
