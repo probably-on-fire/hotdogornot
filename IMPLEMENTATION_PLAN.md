@@ -88,6 +88,20 @@ Target API/app result:
       "polarity": {"label": "standard", "confidence": 0.92},
       "side_a_gender": {"label": "male_pin", "confidence": 0.94},
       "side_b_gender": {"label": "female_socket", "confidence": 0.86},
+      "side_a": {
+        "family": "SMA",
+        "precision_family": "standard_sma",
+        "gender": "male_pin",
+        "polarity": "standard",
+        "threaded": true
+      },
+      "side_b": {
+        "family": "BNC",
+        "precision_family": "not_applicable",
+        "gender": "female_socket",
+        "polarity": "not_applicable",
+        "coupling": "bayonet"
+      },
       "mount_style": {"label": "adapter", "confidence": 0.90},
       "orientation": {"label": "right_angle", "confidence": 0.88},
       "termination": {"label": "not_applicable", "confidence": 0.83},
@@ -127,6 +141,17 @@ Compatibility rule:
 Existing Flutter clients must keep working.
 Add richer fields beside old `/predict` fields, not instead of them.
 ```
+
+Side-aware schema rule:
+
+- The flat `side_a_gender` and `side_b_gender` fields remain for backward
+  compatibility with simple consumers.
+- Two-sided adapters must additionally populate the nested `side_a` and
+  `side_b` blocks with `family`, `precision_family`, `gender`, `polarity`,
+  and (when relevant) `threaded` / `coupling` fields.
+- For one-sided connectors `side_b` may be `null`. For adapters it must be
+  populated; if a side cannot be determined from the available view, label
+  it `insufficient_view` rather than guessing.
 
 ## 4. Taxonomy
 
@@ -294,6 +319,20 @@ Each row represents one connector instance:
   "mount_style": "adapter",
   "orientation": "straight",
   "termination": "not_applicable",
+  "side_a": {
+    "family": "SMA",
+    "precision_family": "standard_sma",
+    "gender": "male_pin",
+    "polarity": "standard",
+    "threaded": true
+  },
+  "side_b": {
+    "family": "BNC",
+    "precision_family": "not_applicable",
+    "gender": "female_socket",
+    "polarity": "not_applicable",
+    "coupling": "bayonet"
+  },
   "geometry": {
     "thread_diameter_mm": null,
     "thread_pitch_or_count": null,
@@ -304,6 +343,18 @@ Each row represents one connector instance:
   }
 }
 ```
+
+Schema rules for instance manifest:
+
+- Rows validate against `training/rfconnectorai/schemas/instance.py`
+  (`ConnectorInstance`, `ConnectorSide`, `GeometryLabel`, `LabelConfidence`,
+  `SourceType`).
+- The flat `side_a_gender` / `side_b_gender` fields are kept for simple
+  consumers; adapters must populate the nested `side_a` and `side_b` blocks.
+- Geometry fields share the same schema as the API `/predict` response so
+  that crops, manifests, and predictions remain consistent.
+- Synthetic-vs-real provenance lives in `source_type` and `label_confidence`;
+  weak labels stay marked weak.
 
 ### 6.3 Dataset Format
 
@@ -496,7 +547,50 @@ reports/experiments/<timestamp>/
   latency_report.md
   model_card.md
   config.yaml
+  model_record.json
 ```
+
+### 8.5 Model and Dataset Versioning
+
+Every detector, classifier, or embedder run must produce a `ModelRecord`
+written via `training/rfconnectorai/models/registry.py`:
+
+```json
+{
+  "model_id": "detector_yolo11n_2026-05-10_001",
+  "model_type": "detector",
+  "architecture": "yolo11n",
+  "trained_on": "datasets/rfconnectors@<sha256>",
+  "taxonomy_version": "<connectors_yaml_sha256>",
+  "metrics_path": "reports/experiments/<timestamp>/metrics.json",
+  "artifact_path": "models/detector/best.pt",
+  "created_at": "<iso8601>"
+}
+```
+
+Every dataset build must emit a lock file so a training run can identify
+exactly the data it consumed:
+
+```text
+datasets/rfconnectors/dataset.lock.json
+```
+
+```json
+{
+  "dataset_id": "rfconnectors_2026_05_10_001",
+  "taxonomy_sha256": "...",
+  "instances_sha256": "...",
+  "split_seed": 1337,
+  "train_count": 0,
+  "val_count": 0,
+  "test_count": 0,
+  "holdout_excluded": true,
+  "created_at": "<iso8601>"
+}
+```
+
+Without these two files, experiments stop being comparable once architecture
+bake-offs and dataset revisions overlap.
 
 ## 9. Accuracy Strategy
 
@@ -623,6 +717,9 @@ Desktop path:
 
 ```text
 docs/
+  ANNOTATION_PROTOCOL.md
+  ACCEPTANCE_GATES.md
+  DIAGRAM_RENDERING.md
   DATASET_AUDIT.md
   DETECTOR_TRAINING.md
   MULTIHEAD_CLASSIFIER.md
@@ -654,7 +751,10 @@ training/rfconnectorai/
     model_catalog.py
   export/
     export_mobile.py
+  models/
+    registry.py
   schemas/
+    instance.py
     prediction.py
 
 datasets/

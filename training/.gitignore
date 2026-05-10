@@ -32,7 +32,9 @@ data/distill_pool/
 data/measure_crops/
 # Audit / scrape quarantine folders stay local-only.
 data/labeled/_quarantine_*/
-models/
+# Model weight artifacts directory at training root; do not match the
+# `training/rfconnectorai/models/` Python package.
+/models/
 runs/
 *.pt
 *.onnx

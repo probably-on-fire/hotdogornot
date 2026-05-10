@@ -1,0 +1,7 @@
+# Local-only editor / harness state. Per-developer.
+.claude/
+.vscode/
+
+# OS noise
+.DS_Store
+Thumbs.db

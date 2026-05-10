@@ -78,6 +78,11 @@ Status values:
 ### P1 Tasks
 
 - [ ] Add side-A/side-B adapter fields explicitly to taxonomy docs and schemas.
+- [ ] Define nested `side_a` / `side_b` blocks (family, precision_family,
+      gender, polarity, threaded, coupling) alongside the flat
+      `side_a_gender` / `side_b_gender` fields used by simple consumers.
+- [ ] Document the annotation protocol in `docs/ANNOTATION_PROTOCOL.md`,
+      including adapter labeling rules and unknown/insufficient_view rules.
 - [ ] Add examples for SMA-to-SMA, RP-SMA-to-SMA, SMA-to-BNC, SMA-to-MCX,
       right-angle, tee, and bulkhead adapters.
 - [ ] Add a stable ID/name normalization helper for taxonomy labels.
@@ -143,6 +148,17 @@ Status values:
 
 ### P0 Tasks
 
+- [x] Author `docs/ANNOTATION_PROTOCOL.md` before any human labeling begins
+      so weak/strong labels are tagged consistently from day one.
+- [x] Create shared geometry schema before writing instance manifest rows
+      (`GeometryLabel` in `training/rfconnectorai/schemas/instance.py`).
+- [ ] Reuse the same geometry schema in instance labels and `/predict`
+      response payloads so crops, manifests, and predictions stay in sync.
+- [x] Create `training/rfconnectorai/schemas/instance.py` with
+      `ConnectorSide`, `GeometryLabel`, `ConnectorInstance`,
+      `LabelConfidence`, and `SourceType` models/enums.
+- [ ] Validate every row of `datasets/rfconnectors/instances.jsonl` through
+      the instance schema before training.
 - [ ] Create `training/rfconnectorai/data/crop_instances.py`.
 - [ ] Define `datasets/rfconnectors/instances.jsonl`.
 - [ ] Define one row per connector instance.
@@ -158,6 +174,8 @@ Status values:
   - [ ] `precision_family`
   - [ ] `side_a_gender`
   - [ ] `side_b_gender`
+  - [ ] `side_a` (nested: family, precision_family, gender, polarity, threaded, coupling)
+  - [ ] `side_b` (nested: family, precision_family, gender, polarity, threaded, coupling)
   - [ ] `polarity`
   - [ ] `mount_style`
   - [ ] `orientation`
@@ -254,8 +272,13 @@ Status values:
 - [ ] Save run metadata under `reports/experiments/<timestamp>/`.
 - [ ] Save mAP metrics.
 - [ ] Save detector model card.
+- [ ] Write a `ModelRecord` via
+      `training/rfconnectorai/models/registry.py` to
+      `reports/experiments/<timestamp>/model_record.json`.
 - [ ] Add config validation tests.
 - [ ] Do not run expensive training in tests.
+- [ ] Unit tests must validate model construction and config parsing only;
+      tests must not train real models or require GPU.
 
 ### P1 Tasks
 
@@ -305,7 +328,13 @@ Status values:
 - [ ] Add top-k output.
 - [ ] Add confidence calibration output.
 - [ ] Save metrics and model card.
+- [ ] Write a `ModelRecord` via
+      `training/rfconnectorai/models/registry.py` for every classifier
+      run so dataset hash and taxonomy hash stay matched to artifacts.
 - [ ] Add tests for label encoding and forward pass.
+- [ ] Unit tests must validate model construction, label encoding, loss
+      masking, and one tiny forward pass only.
+- [ ] Tests must not train real models or require GPU.
 
 ### P1 Tasks
 
@@ -438,6 +467,11 @@ Status values:
   - [ ] latency report
   - [ ] model card
   - [ ] config snapshot
+  - [ ] `model_record.json` from
+        `training/rfconnectorai/models/registry.py`
+  - [ ] dataset lock reference to
+        `datasets/rfconnectors/dataset.lock.json` so every report ties back
+        to a specific dataset revision
 
 ### P1 Tasks
 
@@ -459,9 +493,25 @@ Status values:
 
 ### P0 Tasks
 
+API schema and tests must land before any FastAPI handler change. Order:
+
+1. Add `training/rfconnectorai/schemas/prediction.py`.
+2. Add response fixture tests for:
+   - old-compatible response,
+   - no-connector response,
+   - ambiguous response,
+   - multi-detection adapter (with nested `side_a` / `side_b` blocks),
+   - `need_second_angle` response,
+   - `need_scale_reference` response.
+3. Only after the schema and fixture tests pass, wire the schema into the
+   FastAPI predict handler.
+
 - [ ] Preserve existing `/predict` endpoint path.
 - [ ] Preserve old response fields.
 - [ ] Add `training/rfconnectorai/schemas/prediction.py`.
+- [ ] Reuse `GeometryLabel` (and side-aware blocks) from
+      `training/rfconnectorai/schemas/instance.py` so labels and predictions
+      share one geometry/side-aware schema.
 - [ ] Add structured fields:
   - [ ] request ID
   - [ ] detected
@@ -469,7 +519,8 @@ Status values:
   - [ ] bbox
   - [ ] family
   - [ ] precision family
-  - [ ] side A/B gender/contact
+  - [ ] side A/B gender/contact (flat fields, kept for legacy clients)
+  - [ ] nested `side_a` / `side_b` blocks (family, precision_family, gender, polarity, threaded, coupling)
   - [ ] polarity
   - [ ] mount style
   - [ ] orientation
@@ -560,6 +611,9 @@ Status values:
 - [ ] Test Core ML where supported.
 - [ ] Document export compatibility.
 - [ ] Add `exports/mobile/README.md`.
+- [ ] Each exported artifact must reference a `ModelRecord` from
+      `training/rfconnectorai/models/registry.py` so mobile/server clients
+      can identify exactly which trained model produced the export.
 
 ### P1 Tasks
 
@@ -582,6 +636,8 @@ Status values:
 
 ### P0 Tasks
 
+- [x] Create `docs/ACCEPTANCE_GATES.md` so each batch and each demo step
+      maps to a concrete gate.
 - [ ] Create `docs/CLIENT_DEMO_README.md`.
 - [ ] Create `docs/DEMO_SCRIPT.md`.
 - [ ] Create `docs/LIMITATIONS_AND_NEXT_STEPS.md`.
@@ -622,6 +678,10 @@ Status values:
   - [ ] exports
   - [ ] local envs
 - [ ] Add artifact naming convention.
+- [ ] Reference `docs/ACCEPTANCE_GATES.md` in CI so each batch's PR
+      description can be validated against a concrete gate.
+- [ ] Track `datasets/rfconnectors/dataset.lock.json` even when the bulk
+      dataset itself is gitignored, so runs remain reproducible.
 - [ ] Ensure CI does not require GPU.
 
 ### Acceptance Criteria
@@ -668,9 +728,54 @@ Completed deliverables:
 
 ---
 
-## Execution Batch 2 - Dataset Audit
+## Execution Batch 2 - Dataset Audit and Schema Foundations
 
-Implement Epic 2.
+Implement Epic 2 plus the schema foundations needed before crops are
+generated. Targets gate `G1 - Dataset Readiness` plus partial `G2`.
+
+Scope:
+
+1. `docs/ANNOTATION_PROTOCOL.md` (already authored - confirm and link).
+2. `docs/ACCEPTANCE_GATES.md` (already authored - confirm and link).
+3. `training/rfconnectorai/schemas/instance.py` (already authored - add
+   tests for schema validation, including adapter rules).
+4. `training/rfconnectorai/data/audit.py` plus CLI:
+
+   ```bash
+   python -m rfconnectorai.data.audit --data-dir data --out docs/DATASET_AUDIT.md
+   ```
+
+5. The audit must support:
+   - `training/Images`
+   - `training/data/labeled`
+   - `training/data/test_holdout`
+   - `training/data/reference`
+   - `training/data/videos`
+6. The audit must report:
+   - image counts by folder/class,
+   - file type and dimensions,
+   - unreadable/corrupt files,
+   - duplicates by hash,
+   - likely synthetic vs real from path/name metadata,
+   - likely multi-connector images (lightweight heuristics only),
+   - missing taxonomy classes,
+   - classes below target sample count,
+   - train/val/test/holdout leakage risks.
+7. Add JSON output beside markdown if practical:
+   `docs/DATASET_AUDIT.json`.
+8. Add tests for:
+   - instance schema validation,
+   - audit utility functions using tiny temp fixtures,
+   - audit CLI dry run or fixture run.
+
+Constraints:
+
+- Do not modify or move original images.
+- Do not train models.
+- Do not change existing `/predict` behavior.
+- Do not rewrite the Flutter app.
+- Do not add GPU-only dependencies.
+- Preserve all current tests.
 
 Return:
 

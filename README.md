@@ -51,6 +51,22 @@ foundation:
 
 ---
 
+## Current Implementation Status
+
+- Batch 1 complete: repo audit, taxonomy/spec foundation, annotation
+  protocol, acceptance gates, and instance schema scaffolding.
+- Next batch: dataset audit plus schema-validated instance manifest
+  (Execution Batch 2 in [`TASKS.md`](TASKS.md)).
+- Heavy training runs in Kaggle/Colab/cloud, not on the local PC.
+- Existing `/predict` compatibility is a hard constraint.
+
+Execution gates:
+[`docs/ACCEPTANCE_GATES.md`](docs/ACCEPTANCE_GATES.md).
+Labeling rulebook:
+[`docs/ANNOTATION_PROTOCOL.md`](docs/ANNOTATION_PROTOCOL.md).
+
+---
+
 ## Current Baseline
 
 Current production behavior is preserved.
@@ -134,20 +150,8 @@ ResNet-to-multi-architecture transition diagram:
 - [`docs/MULTI_ARCHITECTURE_TRANSITION.svg`](docs/MULTI_ARCHITECTURE_TRANSITION.svg)
 - [`docs/MULTI_ARCHITECTURE_TRANSITION.png`](docs/MULTI_ARCHITECTURE_TRANSITION.png)
 
-Render diagrams with:
-
-```bash
-dot -Tsvg docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.svg
-dot -Tpng docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.png
-dot -Tsvg docs/README_TECHNICAL_OVERVIEW.dot -o docs/README_TECHNICAL_OVERVIEW.svg
-dot -Tpng docs/README_TECHNICAL_OVERVIEW.dot -o docs/README_TECHNICAL_OVERVIEW.png
-dot -Tsvg docs/SYSTEM_ARCHITECTURE_POSTER.dot -o docs/SYSTEM_ARCHITECTURE_POSTER.svg
-dot -Gdpi=600 -Tpng docs/SYSTEM_ARCHITECTURE_POSTER.dot -o docs/SYSTEM_ARCHITECTURE_POSTER_600dpi.png
-dot -Tpng docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.png
-dot -Tsvg docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.svg
-dot -Tsvg docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.svg
-dot -Tpng docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.png
-```
+See [`docs/DIAGRAM_RENDERING.md`](docs/DIAGRAM_RENDERING.md) to regenerate
+Graphviz `.svg` / `.png` assets from the committed `.dot` sources.
 
 The full architecture notes remain in:
 
@@ -267,20 +271,9 @@ The app currently provides:
 
 ### Diagram Rendering
 
-Graphviz sources are committed so diagrams can be regenerated:
-
-```bash
-dot -Tsvg docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.svg
-dot -Tpng docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.png
-dot -Tsvg docs/README_TECHNICAL_OVERVIEW.dot -o docs/README_TECHNICAL_OVERVIEW.svg
-dot -Tpng docs/README_TECHNICAL_OVERVIEW.dot -o docs/README_TECHNICAL_OVERVIEW.png
-dot -Tsvg docs/SYSTEM_ARCHITECTURE_POSTER.dot -o docs/SYSTEM_ARCHITECTURE_POSTER.svg
-dot -Gdpi=600 -Tpng docs/SYSTEM_ARCHITECTURE_POSTER.dot -o docs/SYSTEM_ARCHITECTURE_POSTER_600dpi.png
-dot -Tsvg docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.svg
-dot -Tpng docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.png
-dot -Tsvg docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.svg
-dot -Tpng docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.png
-```
+Graphviz sources are committed so diagrams can be regenerated. See
+[`docs/DIAGRAM_RENDERING.md`](docs/DIAGRAM_RENDERING.md) for the full set
+of `dot` commands.
 
 ---
 
@@ -307,8 +300,13 @@ dot -Tpng docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRAN
 | [`TASKS.md`](TASKS.md) | Epic-by-epic backlog and execution batches |
 | [`docs/REPO_AUDIT.md`](docs/REPO_AUDIT.md) | Current repository audit and safety baseline |
 | [`docs/CONNECTOR_TAXONOMY.md`](docs/CONNECTOR_TAXONOMY.md) | Connector family taxonomy and attribute labels |
+| [`docs/ANNOTATION_PROTOCOL.md`](docs/ANNOTATION_PROTOCOL.md) | Human-labeling rulebook for instance manifest entries |
+| [`docs/ACCEPTANCE_GATES.md`](docs/ACCEPTANCE_GATES.md) | Per-batch acceptance gates (G0-G5) for execution checkpoints |
+| [`docs/DIAGRAM_RENDERING.md`](docs/DIAGRAM_RENDERING.md) | Commands to regenerate Graphviz diagrams from `.dot` sources |
 | [`docs/MODEL_TRAINING_PIPELINE_SPEC.md`](docs/MODEL_TRAINING_PIPELINE_SPEC.md) | Detailed training pipeline spec for crops, labels, 3D models, synthetic renders, and verification |
 | [`docs/MULTI_ARCHITECTURE_TRANSITION.md`](docs/MULTI_ARCHITECTURE_TRANSITION.md) | Plan for evolving from ResNet-only classification to detector plus multi-head model architecture |
+| [`training/rfconnectorai/schemas/instance.py`](training/rfconnectorai/schemas/instance.py) | Instance manifest schema (`ConnectorInstance`, `ConnectorSide`, `GeometryLabel`, `LabelConfidence`, `SourceType`) |
+| [`training/rfconnectorai/models/registry.py`](training/rfconnectorai/models/registry.py) | Model record/version registry (`ModelRecord`) for trained artifacts |
 | [`docs/README_TECHNICAL_OVERVIEW.dot`](docs/README_TECHNICAL_OVERVIEW.dot) | High-level technical marketing Graphviz source embedded at the top of this README |
 | [`docs/SYSTEM_ARCHITECTURE_POSTER.dot`](docs/SYSTEM_ARCHITECTURE_POSTER.dot) | Poster-style full system architecture Graphviz source |
 | [`docs/README_ARCHITECTURE.dot`](docs/README_ARCHITECTURE.dot) | Compact Graphviz source for the README architecture diagram |
