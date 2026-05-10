@@ -1,0 +1,334 @@
+digraph SystemArchitecturePoster {
+  graph [
+    label="Connector ID - Full RF Connector AI System Architecture";
+    labelloc=t;
+    fontsize=38;
+    fontname="Arial Bold";
+    bgcolor="#f6f8fb";
+    pad=0.55;
+    rankdir=TB;
+    ranksep=0.88;
+    nodesep=0.52;
+    splines=spline;
+    compound=true;
+    outputorder=edgesfirst;
+    dpi=600;
+    size="11,17!";
+    ratio=fill;
+  ];
+
+  node [
+    shape=box;
+    style="rounded,filled";
+    fontname="Arial";
+    fontsize=17;
+    margin="0.16,0.10";
+    color="#223047";
+    penwidth=2.4;
+    fillcolor="#ffffff";
+  ];
+
+  edge [
+    fontname="Arial";
+    fontsize=13;
+    color="#405268";
+    arrowsize=1.0;
+    penwidth=2.2;
+  ];
+
+  subgraph cluster_inputs {
+    label="1. Capture and Client Inputs";
+    fontname="Arial Bold";
+    fontsize=24;
+    color="#5379ad";
+    penwidth=3.0;
+    style="rounded,filled";
+    fillcolor="#e9f3ff";
+
+    camera [
+      label="Camera / Gallery / Video\nphone, tablet, desktop file\nJPEG / PNG / WebP / MP4 / MOV";
+      shape=folder;
+      fillcolor="#efe7ff:#fbf9ff";
+      gradientangle=90;
+    ];
+    flutter [
+      label="Flutter App\nIdentify, Contribute, About\nmobile now / desktop planned";
+      shape=component;
+      fillcolor="#cfe6ff:#f8fbff";
+      gradientangle=90;
+    ];
+    streamlit [
+      label="Streamlit Labeling UI\nreview, correct, upload,\ntrain-data management";
+      shape=component;
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+
+    camera -> flutter -> streamlit [style=invis, weight=20];
+  }
+
+  subgraph cluster_api {
+    label="2. API and Compatibility Boundary";
+    fontname="Arial Bold";
+    fontsize=24;
+    color="#3f8175";
+    penwidth=3.0;
+    style="rounded,filled";
+    fillcolor="#e8f7f3";
+
+    predict [
+      label="/predict\ncurrent compatible endpoint\nold fields preserved";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    video [
+      label="/predict-video\nframe sampling\nbest-frame result";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    labeler [
+      label="/labeler/*\ntraining, holdout,\nvideo upload routes";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    relay [
+      label="Relay / Model Endpoints\nuploads, model version,\nweights, labels";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+
+    predict -> video -> labeler -> relay [style=invis, weight=20];
+  }
+
+  subgraph cluster_inference {
+    label="3. Inference Engine - Current Baseline and Target Pipeline";
+    fontname="Arial Bold";
+    fontsize=24;
+    color="#b88500";
+    penwidth=3.0;
+    style="rounded,filled";
+    fillcolor="#fff6dc";
+
+    decode [
+      label="Decode and Normalize\nOpenCV frame decode\nimage/video frame prep";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    baseline [
+      label="Current Baseline\nHough crop + rembg gate\nResNet-18 flat classifier";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    detector [
+      label="Object Detection Track\nYOLO11n/s, RT-DETR small\nmulti-connector separation";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    classifier [
+      label="Fine-Grained Attribute Track\nEfficientNetV2, MobileNetV3,\nMobileViT, ConvNeXt-Tiny,\nResNet baseline comparison";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    attributes [
+      label="Multi-Head Outputs\nfamily, polarity, gender/contact,\nmount, orientation, termination,\nfinish/material cue";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    geometry [
+      label="Geometry and Measurement\nArUco scale, aperture, hex,\nthread pitch/count, body length";
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    gate [
+      label="Confidence and Abstention\nhigh confidence / ambiguous /\nneed angle / need scale /\nunsupported / no connector";
+      shape=diamond;
+      fillcolor="#fce3e3:#fff7f7";
+      gradientangle=90;
+    ];
+
+    decode -> baseline -> detector -> classifier -> attributes -> geometry -> gate [
+      style=invis;
+      weight=20;
+    ];
+  }
+
+  subgraph cluster_specs {
+    label="4. Taxonomy, Specs, and 3D Verification";
+    fontname="Arial Bold";
+    fontsize=24;
+    color="#5a9b62";
+    penwidth=3.0;
+    style="rounded,filled";
+    fillcolor="#ecfaed";
+
+    taxonomy [
+      label="Connector Taxonomy\nSMA, RP-SMA, 3.5mm,\n2.92mm/K/SMK, 2.4mm,\n1.85mm, 1.0mm, SSMA,\nSMB, SMC, QMA, TNC,\nBNC, MCX, 7/16 DIN, unknown";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    specs [
+      label="Spec Lookup\nimpedance, frequency range,\ncompatibility, visual notes";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    models3d [
+      label="Parametric 3D Connector Suite\nstraight, right-angle, tee,\nbulkhead, cable mount, adapters,\nprecision lookalikes";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    verifier [
+      label="Optional 3D Verification\nrender candidate pose,\ncompare silhouette, edges,\nthread/body proportions";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+
+    taxonomy -> specs -> models3d -> verifier [style=invis, weight=20];
+  }
+
+  subgraph cluster_data {
+    label="5. Data, Training, and Evaluation Factory";
+    fontname="Arial Bold";
+    fontsize=24;
+    color="#8a68a9";
+    penwidth=3.0;
+    style="rounded,filled";
+    fillcolor="#f3ecfb";
+
+    audit [
+      label="Dataset Audit\nfile inventory, dimensions,\nduplicates, corrupt images,\nmissing classes";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    instances [
+      label="Connector Instance Catalog\none crop per connector\nsource lineage + bbox + attributes";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    yolo_dataset [
+      label="Standard Dataset\nimages, labels, attributes.csv,\ninstances.jsonl, data.yaml";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    synthetic [
+      label="Synthetic Render Generation\n3D model poses, lighting,\nbackgrounds, occlusion,\nperfect labels";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    training [
+      label="Cloud Training Runs\nKaggle / Colab bake-offs\nno heavy local PC training";
+      shape=component;
+      fillcolor="#efe7ff:#fbf9ff";
+      gradientangle=90;
+    ];
+    reports [
+      label="Experiment Reports\nmAP, accuracy, macro F1,\ncalibration, latency,\nfailure gallery, model card";
+      shape=folder;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+
+    audit -> instances -> yolo_dataset -> synthetic -> training -> reports [
+      style=invis;
+      weight=20;
+    ];
+  }
+
+  subgraph cluster_outputs {
+    label="6. Deployment and End-User Output";
+    fontname="Arial Bold";
+    fontsize=24;
+    color="#666aa8";
+    penwidth=3.0;
+    style="rounded,filled";
+    fillcolor="#f0efff";
+
+    server [
+      label="Server Fallback\nFastAPI + PyTorch/ONNX\nhighest-accuracy path";
+      shape=component;
+      fillcolor="#efe7ff:#fbf9ff";
+      gradientangle=90;
+    ];
+    mobile [
+      label="Mobile/Edge Export\nONNX Runtime Mobile,\nTFLite/LiteRT, Core ML";
+      shape=component;
+      fillcolor="#efe7ff:#fbf9ff";
+      gradientangle=90;
+    ];
+    response [
+      label="Structured Prediction\nold /predict fields preserved\nrich detections + specs + warnings";
+      shape=note;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    result [
+      label="User Result Card\nconnector type, polarity,\ngender/contact, size cues,\nconfidence, alternatives,\nspec summary, next action";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+
+    server -> mobile -> response -> result [style=invis, weight=20];
+  }
+
+  subgraph cluster_legend {
+    label="Legend";
+    fontname="Arial Bold";
+    fontsize=22;
+    color="#9aa8ba";
+    penwidth=2.2;
+    style="rounded,filled";
+    fillcolor="#eef3f8";
+
+    l_current [label="Blue: current preserved behavior", fillcolor="#d9ecff:#f7fbff", gradientangle=90];
+    l_planned [label="Gold: planned model/training module", fillcolor="#fff1cc:#fffaf0", gradientangle=90];
+    l_data [label="Green: data, taxonomy, specs", shape=folder, fillcolor="#e5f7e7:#f8fff8", gradientangle=90];
+    l_boundary [label="Purple: cloud/deployment boundary", shape=component, fillcolor="#efe7ff:#fbf9ff", gradientangle=90];
+    l_gate [label="Red diamond: confidence/decision gate", shape=diamond, fillcolor="#fce3e3:#fff7f7", gradientangle=90];
+
+    l_current -> l_planned -> l_data -> l_boundary -> l_gate [
+      style=invis;
+      weight=20;
+    ];
+  }
+
+  camera -> flutter [label="capture"];
+  camera -> streamlit [label="upload/reference data", style=dashed, color="#5a9b62"];
+  flutter -> predict [label="image"];
+  flutter -> video [label="video"];
+  streamlit -> labeler [label="label/review"];
+  labeler -> instances [label="verified crops", color="#5a9b62"];
+  relay -> audit [label="incoming/model artifacts", style=dashed, color="#5a9b62"];
+
+  predict -> decode;
+  video -> decode [label="sampled frames"];
+  decode -> baseline [label="current path", color="#527aa3"];
+  decode -> detector [label="target path", style=dashed, color="#b88500"];
+  detector -> classifier [label="connector crops"];
+  classifier -> attributes;
+  attributes -> geometry [label="candidate class"];
+  attributes -> gate;
+  geometry -> gate [label="measurements"];
+  taxonomy -> specs;
+  specs -> gate [label="constraints"];
+  models3d -> synthetic [label="rendered training data", color="#b88500"];
+  models3d -> verifier [label="candidate poses", style=dashed, color="#b88500"];
+  attributes -> verifier [label="top candidates", style=dashed, color="#b88500"];
+  verifier -> gate [label="second-pass check", style=dashed, color="#b88500"];
+  baseline -> response [label="compatible fields", color="#527aa3"];
+  gate -> response [label="rich result"];
+
+  audit -> instances;
+  instances -> yolo_dataset;
+  synthetic -> yolo_dataset;
+  yolo_dataset -> training;
+  training -> reports;
+  reports -> server [label="best server model"];
+  reports -> mobile [label="best edge export"];
+  server -> predict [label="serve"];
+  mobile -> flutter [label="future local inference", style=dashed, color="#666aa8"];
+  response -> result;
+  result -> flutter [label="display + corrections"];
+}

@@ -13,6 +13,8 @@ Powered by [aired.com](https://aired.com)
 
 </div>
 
+![Connector ID technical overview](docs/README_TECHNICAL_OVERVIEW.svg)
+
 ---
 
 ## What This Is
@@ -118,6 +120,9 @@ README diagram source:
 
 Detailed software architecture diagram:
 
+- [`docs/SYSTEM_ARCHITECTURE_POSTER.dot`](docs/SYSTEM_ARCHITECTURE_POSTER.dot)
+- [`docs/SYSTEM_ARCHITECTURE_POSTER.svg`](docs/SYSTEM_ARCHITECTURE_POSTER.svg)
+- [`docs/SYSTEM_ARCHITECTURE_POSTER_600dpi.png`](docs/SYSTEM_ARCHITECTURE_POSTER_600dpi.png)
 - [`docs/SOFTWARE_ARCHITECTURE.dot`](docs/SOFTWARE_ARCHITECTURE.dot)
 - [`docs/SOFTWARE_ARCHITECTURE.svg`](docs/SOFTWARE_ARCHITECTURE.svg)
 - [`docs/SOFTWARE_ARCHITECTURE.png`](docs/SOFTWARE_ARCHITECTURE.png)
@@ -134,6 +139,10 @@ Render diagrams with:
 ```bash
 dot -Tsvg docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.svg
 dot -Tpng docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.png
+dot -Tsvg docs/README_TECHNICAL_OVERVIEW.dot -o docs/README_TECHNICAL_OVERVIEW.svg
+dot -Tpng docs/README_TECHNICAL_OVERVIEW.dot -o docs/README_TECHNICAL_OVERVIEW.png
+dot -Tsvg docs/SYSTEM_ARCHITECTURE_POSTER.dot -o docs/SYSTEM_ARCHITECTURE_POSTER.svg
+dot -Gdpi=600 -Tpng docs/SYSTEM_ARCHITECTURE_POSTER.dot -o docs/SYSTEM_ARCHITECTURE_POSTER_600dpi.png
 dot -Tpng docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.png
 dot -Tsvg docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.svg
 dot -Tsvg docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.svg
@@ -265,6 +274,8 @@ The app currently provides:
 | [`docs/CONNECTOR_TAXONOMY.md`](docs/CONNECTOR_TAXONOMY.md) | Connector family taxonomy and attribute labels |
 | [`docs/MODEL_TRAINING_PIPELINE_SPEC.md`](docs/MODEL_TRAINING_PIPELINE_SPEC.md) | Detailed training pipeline spec for crops, labels, 3D models, synthetic renders, and verification |
 | [`docs/MULTI_ARCHITECTURE_TRANSITION.md`](docs/MULTI_ARCHITECTURE_TRANSITION.md) | Plan for evolving from ResNet-only classification to detector plus multi-head model architecture |
+| [`docs/README_TECHNICAL_OVERVIEW.dot`](docs/README_TECHNICAL_OVERVIEW.dot) | High-level technical marketing Graphviz source embedded at the top of this README |
+| [`docs/SYSTEM_ARCHITECTURE_POSTER.dot`](docs/SYSTEM_ARCHITECTURE_POSTER.dot) | Poster-style full system architecture Graphviz source |
 | [`docs/README_ARCHITECTURE.dot`](docs/README_ARCHITECTURE.dot) | Compact Graphviz source for the README architecture diagram |
 | [`docs/SOFTWARE_ARCHITECTURE.dot`](docs/SOFTWARE_ARCHITECTURE.dot) | Graphviz source for the full I/O architecture diagram |
 | [`training/docs/architecture.md`](training/docs/architecture.md) | Current v18 architecture plus roadmap architecture |
