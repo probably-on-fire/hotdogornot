@@ -159,35 +159,48 @@ The full architecture notes remain in:
 
 ```text
 .
-|-- IMPLEMENTATION_PLAN.md       authoritative product/architecture roadmap
-|-- TASKS.md                     implementation backlog by epic
-|-- README.md                    repo overview
+|-- IMPLEMENTATION_PLAN.md          authoritative product/architecture roadmap
+|-- TASKS.md                        implementation backlog by epic
+|-- README.md                       repo overview
 |-- docs/
-|   |-- REPO_AUDIT.md            current repo and safety baseline
-|   |-- CONNECTOR_TAXONOMY.md    connector families and attribute heads
-|   |-- SOFTWARE_ARCHITECTURE.dot detailed Graphviz architecture script
-|   |-- printables/              ArUco marker assets
-|   `-- superpowers/             historical plans/specs
+|   |-- REPO_AUDIT.md               current repo and safety baseline
+|   |-- CONNECTOR_TAXONOMY.md       connector families and attribute heads
+|   |-- MODEL_TRAINING_PIPELINE_SPEC.md
+|   |-- MULTI_ARCHITECTURE_TRANSITION.md
+|   |-- *_ARCHITECTURE*.dot/svg/png Graphviz sources and rendered diagrams
+|   |-- printables/                 ArUco marker assets
+|   |-- procurement/                sourcing notes
+|   `-- superpowers/                historical plans/specs
 |-- flutter/
-|   |-- lib/src/api.dart         current /predict client parser
-|   |-- lib/src/screens/         Identify, Contribute, About
-|   `-- README.md                Flutter app guide
+|   |-- lib/src/api.dart            current /predict client parser
+|   |-- lib/src/screens/            Identify, Contribute, About
+|   |-- test/                       Flutter tests
+|   `-- README.md                   Flutter app guide
 |-- training/
 |   |-- rfconnectorai/
-|   |   |-- classifier/          current ResNet classifier path
-|   |   |-- measurement/         geometry/ArUco/hex/aperture tools
-|   |   |-- server/              FastAPI predict and relay services
-|   |   |-- schemas/             taxonomy and future response schemas
-|   |   |-- specs/               connector spec YAML
-|   |   |-- synthetic/           synthetic data generation
-|   |   `-- data_fetch/          image/video data collection helpers
-|   |-- tests/                   pytest suite
-|   |-- docs/                    training architecture/runbook/history
-|   `-- README.md                training-side guide
-`-- unity/                       historical Unity AR app
+|   |   |-- classifier/             current ResNet baseline path; future multi-head classifier
+|   |   |-- data/                   dataset helpers
+|   |   |-- data_fetch/             image/video data collection helpers
+|   |   |-- export/                 model export helpers
+|   |   |-- inference/              evaluation/reference helpers
+|   |   |-- ingest/                 upload ingestion helpers
+|   |   |-- measurement/            geometry/ArUco/hex/aperture tools
+|   |   |-- models/                 model definitions
+|   |   |-- schemas/                taxonomy and future prediction schemas
+|   |   |-- server/                 FastAPI predict and relay services
+|   |   |-- specs/                  connector spec YAML
+|   |   |-- synthetic/              procedural/3D/synthetic data generation
+|   |   `-- training/               training utilities/losses
+|   |-- configs/                    legacy/current class and dimension configs
+|   |-- data/                       current local/reference/holdout data roots
+|   |-- docs/                       training architecture/runbook/history
+|   |-- scripts/                    training, ingestion, label, and ops scripts
+|   |-- tests/                      pytest suite
+|   `-- README.md                   training-side guide
+`-- unity/                          historical Unity AR app
 ```
 
-Planned additions from later task batches:
+Planned/generated paths from later task batches:
 
 ```text
 training/rfconnectorai/data/audit.py
@@ -206,7 +219,7 @@ exports/mobile/
 
 ## Quick Start
 
-### Training Package
+### Training Package Setup
 
 Use Python 3.11 or newer.
 
@@ -215,7 +228,6 @@ cd training
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"      # Windows
 .venv/bin/pip install -e ".[dev]"          # macOS/Linux
-python -m pytest tests/ -q
 ```
 
 Run the current FastAPI predict service:
@@ -225,7 +237,7 @@ cd training
 uvicorn rfconnectorai.server.predict_service:app --port 8503
 ```
 
-Train the current ResNet baseline:
+Train the current ResNet baseline only when reproducing the current model:
 
 ```bash
 cd training
@@ -234,6 +246,10 @@ python -m rfconnectorai.classifier.train \
   --out-dir models/connector_classifier \
   --epochs 20
 ```
+
+Future detector and multi-head training should be run in Kaggle, Colab, or
+another cloud runtime after scripts are pushed to GitHub. This local PC is
+not the target for heavy model bake-offs.
 
 ### Flutter App
 
@@ -249,6 +265,23 @@ The app currently provides:
 - About: product info, privacy, request form, dev-mode unlock.
 - Contribute: dev-only training and holdout capture flow.
 
+### Diagram Rendering
+
+Graphviz sources are committed so diagrams can be regenerated:
+
+```bash
+dot -Tsvg docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.svg
+dot -Tpng docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.png
+dot -Tsvg docs/README_TECHNICAL_OVERVIEW.dot -o docs/README_TECHNICAL_OVERVIEW.svg
+dot -Tpng docs/README_TECHNICAL_OVERVIEW.dot -o docs/README_TECHNICAL_OVERVIEW.png
+dot -Tsvg docs/SYSTEM_ARCHITECTURE_POSTER.dot -o docs/SYSTEM_ARCHITECTURE_POSTER.svg
+dot -Gdpi=600 -Tpng docs/SYSTEM_ARCHITECTURE_POSTER.dot -o docs/SYSTEM_ARCHITECTURE_POSTER_600dpi.png
+dot -Tsvg docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.svg
+dot -Tpng docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.png
+dot -Tsvg docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.svg
+dot -Tpng docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.png
+```
+
 ---
 
 ## Development Rules
@@ -258,6 +291,8 @@ The app currently provides:
 - Add new structured output beside old fields, not instead of them.
 - Keep spec lookup separate from model inference.
 - Treat `unknown`, `unsupported`, and `need another angle` as valid outcomes.
+- Treat ResNet-18 as the baseline/fallback, not the final architecture.
+- Compare detector/classifier candidates in cloud runs before promoting them.
 - Do not claim 99.99% accuracy without statistically meaningful validation.
 - Every model improvement must include test data discipline, metrics, and
   visible failure cases.
@@ -278,6 +313,7 @@ The app currently provides:
 | [`docs/SYSTEM_ARCHITECTURE_POSTER.dot`](docs/SYSTEM_ARCHITECTURE_POSTER.dot) | Poster-style full system architecture Graphviz source |
 | [`docs/README_ARCHITECTURE.dot`](docs/README_ARCHITECTURE.dot) | Compact Graphviz source for the README architecture diagram |
 | [`docs/SOFTWARE_ARCHITECTURE.dot`](docs/SOFTWARE_ARCHITECTURE.dot) | Graphviz source for the full I/O architecture diagram |
+| [`docs/Readme_System_Architecture.png`](docs/Readme_System_Architecture.png) | Current top-of-README system architecture image |
 | [`training/docs/architecture.md`](training/docs/architecture.md) | Current v18 architecture plus roadmap architecture |
 | [`training/docs/classifier_journey.md`](training/docs/classifier_journey.md) | Experiment history and lessons learned |
 | [`training/docs/runbook.md`](training/docs/runbook.md) | Deploy/retrain operations |
