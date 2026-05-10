@@ -1,101 +1,189 @@
 # Connector ID — Flutter App
 
-Cross-platform (iOS + Android) take-a-photo identifier for RF connectors.
-Replaces the Unity AR app (which is sidelined for now). Talks to the
-existing `aired.com/rfcai/predict` and `/rfcai/labeler/upload-*` services.
+Cross-platform (iOS + Android) take-a-photo identifier for RF coaxial
+connectors. Talks to the FastAPI predict + labeler service at
+`aired.com/rfcai/*`. Replaces the sidelined Unity AR app under `unity/`.
 
-## Two screens
+## Tabs the user sees
 
-1. **Identify** — Take or pick a photo of an RF connector. App POSTs to
-   `/rfcai/predict` and shows:
-   - **HOT DOG** (orange, big) for male connectors (pin)
-   - **NOT HOT DOG** (teal, big) for female connectors (socket)
-   - Connector family below (`SMA` / `3.5mm` / `2.92mm` / `2.4mm`)
-   - Confidence percentage and full class name
+End users see a deliberately small two-tab shell. Most config lives
+behind a hidden dev-mode gesture so customers don't have to wrangle
+URLs and tokens.
 
-2. **Contribute** — Add training data:
-   - Photo: drop a phone photo straight into a class folder. *Recommended* —
-     12 MP gives enough resolution for the central pin/socket cue.
-   - Video: upload a video, server runs Hough detection at fps=5 and dumps
-     candidate crops into `<family>-M` for cleanup in the labeler.
+### 1. Identify (default tab)
 
-Plus a **Settings** screen (gear icon, top right) to edit:
-- Relay base URL (default: `https://aired.com/rfcai`)
-- Device token (X-Device-Token header for `/predict`)
-- Labeler HTTP Basic credentials (for upload endpoints)
+Camera fills the screen. Tap shutter → photo POSTs to
+`/rfcai/predict` → result panel slides up over the frozen frame:
 
-Defaults are baked in for the project's deployed services so the app
-works out of the box for the project owner.
+- Big colored label (the demo joke — orange "HOT DOG" for male, teal
+  "NOT HOT DOG" for female; will be relabeled before public release)
+- Connector family below (`SMA` / `3.5mm` / `2.92mm` / `2.4mm`)
+- Confidence + full class name in a small pill
+- **Chip-correction strip**: family chips (`SMA · 3.5mm · 2.92mm · 2.4mm`)
+  and gender chips (`M · F`) pre-selected from the prediction. Tap a
+  different chip to flip just that axis. Single button below switches
+  between green "Confirm X-Y" (matches prediction) and amber
+  "Save as X-Y" (you've changed something). Save → photo lands in
+  the training folder, brief success toast, auto-return to live preview.
+
+There's also a Photo / Video toggle pill at the top — Video mode
+records a short clip and uploads to `/rfcai/predict-video`, which
+samples ~30 frames and returns the highest-confidence prediction.
+
+### 2. About (default tab)
+
+Compact hero (small aired.com brain mark + "Connector ID" + version),
+one-line description, then the **main feature: a "Request a new
+connector type" form** — name + optional notes + Send button. Submission
+opens the user's email app with subject `Connector request: <name>`
+and a body containing their notes plus app version + platform; the
+recipient is `chris@aired.com`. The app doesn't intercept or relay.
+
+Below the form: a collapsible **Privacy** section (what happens to
+photos taken in Identify, what happens to connector requests, what's
+stored locally, removal contact), then a small "Powered by aired.com"
+footer that opens the website.
+
+The app version line on the hero is the **dev-mode unlock**: tap it
+seven times in quick succession (Android-style "developer options"
+gesture) to flip dev mode on. Snackbars hint at the remaining tap
+count after tap 4. Dev-mode state persists in SharedPreferences.
+
+### 3. Contribute (dev mode only — admin tab)
+
+Reappears between Identify and About when dev mode is on. Camera-first
+capture screen for owners building the training set:
+
+- Live camera fills the screen.
+- Top-left counter pill ("12 uploaded" + spinner during in-flight
+  uploads).
+- Top-right `training` / `HOLDOUT` toggle (amber when on; HOLDOUT
+  routes the next captures to `data/test_holdout/<class>/` instead
+  of `data/labeled/embedder/<class>/`).
+- Bottom: family chips, gender chips, "next: 2.4mm-M" preview pill,
+  shutter, small Gallery / Video buttons.
+- Tap shutter → camera takes photo → fire-and-forget upload while
+  the camera stays live for the next shot. Class chips persist; one
+  tap per shot.
+- Holdout intent is captured at shutter time, so flipping the toggle
+  for the next shot doesn't retroactively re-route pending uploads.
+
+When dev mode is on, the About screen also reveals an **Advanced**
+card with the relay URL, device token, and labeler creds — the
+content of the old Settings screen, inlined.
+
+## Camera lifecycle
+
+Both Identify and Contribute hold a `CameraController`, but Android
+allows only one on the hardware at a time. `main_shell.dart` passes
+each screen an `isActive` prop based on the selected tab; the
+inactive tab disposes its controller in `didUpdateWidget` so the
+active tab can claim it.
+
+## Code layout
+
+```
+lib/
+  main.dart                       — entry point, portrait lock
+  src/
+    app.dart                      — MaterialApp + theme wiring
+    theme.dart                    — dark theme + HOT DOG / NOT HOT DOG colors
+    settings.dart                 — persisted Settings (relay, token,
+                                    labeler creds, devMode)
+    api.dart                      — multipart POST to /predict and
+                                    /labeler/upload-{train,test,video}
+    screens/
+      main_shell.dart             — bottom-nav shell, conditional tabs
+      identify_screen.dart        — camera + predict + chip-correction
+      contribute_screen.dart      — camera-first capture (dev mode)
+      about_screen.dart           — hero + request form + privacy +
+                                    Advanced (dev mode)
+tool/
+  generate_icon.py                — PIL script that crops the aired.com
+                                    brain mark out of the full logo +
+                                    emits icon.png and icon_foreground.png
+                                    consumed by flutter_launcher_icons
+assets/
+  icon/
+    icon.png                      — full app icon (white bg + brain)
+    icon_foreground.png           — Android adaptive foreground
+    source/aired_logo_full.png    — committed source; re-crop with
+                                    tool/generate_icon.py
+```
+
+## Backend coupling
+
+This app is a thin client over the FastAPI service in
+`E:\anduril\training\rfconnectorai\server\`:
+
+- **POST** `/rfcai/predict` (multipart `image=<jpeg>`, header
+  `X-Device-Token`) — returns `{predictions: [{class_name, confidence,
+  probabilities, bbox}, ...], image_width, image_height}`. Server
+  pre-filters with rembg, re-composites the silhouette on white,
+  Hough-detects crops, runs ResNet-18 with 5× test-time augmentation.
+- **POST** `/rfcai/predict-video` (multipart `video=<mp4|mov|...>`,
+  header `X-Device-Token`) — server samples the clip at 1 fps (capped
+  at 30 frames), runs detect+classify on every frame, returns the
+  single highest-confidence prediction.
+- **POST** `/rfcai/labeler/upload-train` (multipart `cls`,
+  `images=[...]`, HTTP Basic) — saves to
+  `data/labeled/embedder/<class>/`. Used by Contribute when HOLDOUT
+  is off.
+- **POST** `/rfcai/labeler/upload-test` (multipart `cls`,
+  `images=[...]`, HTTP Basic) — saves to `data/test_holdout/<class>/`.
+  Used by Contribute when HOLDOUT is on.
+- **POST** `/rfcai/labeler/upload-video` (multipart `family`, `fps`,
+  `sensitivity`, `max_crops`, `file=<video>`, HTTP Basic) — server
+  extracts crops via Hough and dumps them to `<family>-M` for cleanup.
+- **GET** `/rfcai/healthz` (no auth) — server health snapshot
+  including which classifier is loaded and whether the rembg fg
+  filter is available.
+
+If the predict service moves or auth rotates, edit the Advanced
+section (dev mode → About) inside the app rather than touching code.
+
+See `training/docs/architecture.md` for the end-to-end inference and
+training flow. See `training/docs/runbook.md` for deploy/retrain
+operational details.
 
 ## Running
 
-```
+```bash
 cd E:\anduril\flutter
 "C:\flutter\bin\flutter.bat" pub get
-"C:\flutter\bin\flutter.bat" run            # picks up an attached device or emulator
+"C:\flutter\bin\flutter.bat" run         # picks up an attached device or emulator
 ```
 
 To build a release APK for Android:
 
-```
+```bash
 "C:\flutter\bin\flutter.bat" build apk --release
 # output: build\app\outputs\flutter-apk\app-release.apk
 ```
 
 For iOS you need Xcode on a Mac:
 
-```
+```bash
 flutter build ipa --release
 ```
 
 ## Permissions
 
-- iOS: camera + photo library + microphone (the last is required by the
+- iOS: camera + photo library + microphone (last is required by the
   video picker plugin even though the app doesn't record audio).
-- Android: INTERNET + CAMERA. Photo / video gallery access is handled
-  by the system pickers without an explicit permission entry.
+- Android: `INTERNET` + `CAMERA`. Photo / video gallery access is
+  handled by the system pickers without an explicit permission entry.
 
-## Code layout
+## Regenerating the app icon
 
-```
-lib/
-  main.dart                 — entry point
-  src/
-    app.dart                — MaterialApp + theme wiring
-    theme.dart              — dark theme + hot-dog/not-hot-dog colors
-    settings.dart           — persisted Settings (shared_preferences)
-    api.dart                — POST to /predict, /labeler/upload-train, /upload-video
-    screens/
-      home_screen.dart      — landing page
-      identify_screen.dart  — camera + result display
-      contribute_screen.dart — upload photo / video
-      settings_screen.dart  — edit relay URL / token / labeler creds
+After replacing `assets/icon/source/aired_logo_full.png`:
+
+```bash
+python tool/generate_icon.py
+"C:\flutter\bin\dart.bat" run flutter_launcher_icons
 ```
 
-## Backend coupling
-
-This app is a thin client over the FastAPI service in
-`E:\anduril\training\rfconnectorai\server\`. Specifically:
-
-- **POST** `/rfcai/predict` (multipart `image=<jpeg>`, header
-  `X-Device-Token`) — returns `{predictions: [{class_name, confidence,
-  probabilities, bbox}, ...], image_width, image_height}`. Each crop is
-  pre-filtered by rembg to drop background-only Hough hits before
-  classification.
-- **POST** `/rfcai/predict-video` (multipart `video=<mp4|mov|...>`,
-  header `X-Device-Token`) — server samples the clip at 1 fps (capped
-  at 30 frames), runs detect+classify on every frame, returns the single
-  highest-confidence prediction. Same response shape as `/predict` but
-  with extra fields `frames_scanned` and `best_frame_index`.
-- **POST** `/rfcai/labeler/upload-train` (multipart `cls`, `images=[...]`,
-  HTTP Basic) — saves to `data/labeled/embedder/<class>/photo_*`.
-- **POST** `/rfcai/labeler/upload-video` (multipart `family`, `fps`,
-  `sensitivity`, `max_crops`, `file=<video>`, HTTP Basic) — server
-  extracts crops via Hough and dumps them to `<family>-M`.
-- **GET** `/rfcai/healthz` (no auth) — `{"status": "ok",
-  "classifier_loaded": ..., "fg_filter": {...}}`. Use after a server
-  redeploy to confirm the foreground filter actually loaded
-  (`fg_filter.available` should be `true`).
-
-If the predict service moves or the auth changes, edit Settings inside
-the app rather than touching code.
+That regenerates `icon.png` + `icon_foreground.png` from the source,
+then writes the iOS `AppIcon.appiconset` + Android `mipmap-*` /
+`drawable-*` files via `flutter_launcher_icons`. Commit all of them
+together.

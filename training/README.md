@@ -24,18 +24,27 @@ Deployed at `https://aired.com/rfcai/predict`. Production config:
 - Trained on 13849 samples including ~8304 synthetic from `synthesize_from_clean.py`
   (combined v15+v17 recipes), 20 epochs
 
-See `docs/classifier_journey.md` for the full experiment history,
-and `docs/runbook.md` for deploy/retrain operational details.
+See:
+- `docs/architecture.md` — Mermaid diagrams of the v18 inference flow
+  + training recipe + side-by-side comparison of every architecture
+  variant we tried and lost to v18.
+- `docs/classifier_journey.md` — full trial-by-trial experiment
+  history, including the synth breakthrough and the five architecture
+  trials.
+- `docs/runbook.md` — deploy/retrain operational details, env knobs,
+  GPU state on the box.
 
 ### Growing the held-out test set
 
-The Flutter contribute screen now has a "Save as test holdout"
-toggle. Photos uploaded with that on land in `data/test_holdout/<class>/`
-and are NOT used for training — only for the post-retrain held-out
-benchmark. Use this to grow the held-out from its current 8 images.
-With ~30+ varied phone shots, single-trial accuracy variance drops
-below the typical experiment delta, making it possible to actually
-distinguish architecture wins from noise.
+The Flutter contribute screen has a `training` / `HOLDOUT` toggle.
+Photos uploaded with HOLDOUT on land in `data/test_holdout/<class>/`
+and are NEVER used for training — only for the post-retrain held-out
+benchmark. The toggle is in dev mode only (Contribute is admin
+tooling — see `flutter/README.md` for the dev-mode unlock gesture).
+Use it to grow the held-out from its current 8 images. With ~30+
+varied phone shots, single-trial accuracy variance drops below the
+typical experiment delta, making it possible to actually distinguish
+architecture wins from noise.
 
 The two predictors run independently and cross-check each other:
 - **Agreement** → high confidence
