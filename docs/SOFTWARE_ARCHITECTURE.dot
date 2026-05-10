@@ -1,0 +1,646 @@
+digraph RFConnectorAIArchitecture {
+  graph [
+    label="Connector ID - RF Connector AI Software Architecture and I/O Map";
+    labelloc=t;
+    fontsize=28;
+    fontname="Arial Bold";
+    bgcolor="#f7f9fc";
+    pad=0.35;
+    ranksep=1.0;
+    nodesep=0.65;
+    splines=spline;
+    overlap=false;
+    compound=true;
+    outputorder=edgesfirst;
+  ];
+
+  node [
+    shape=box;
+    style="rounded,filled";
+    fontname="Arial";
+    fontsize=11;
+    margin="0.10,0.08";
+    color="#2f3b52";
+    penwidth=1.6;
+    fillcolor="#ffffff";
+  ];
+
+  edge [
+    fontname="Arial";
+    fontsize=10;
+    color="#516070";
+    arrowsize=0.8;
+    penwidth=1.6;
+    constraint=false;
+  ];
+
+  // -----------------------------------------------------------------------
+  // Global legend styles.
+  // -----------------------------------------------------------------------
+  subgraph cluster_legend {
+    label="Legend";
+    fontsize=16;
+    fontname="Arial Bold";
+    color="#9aa8ba";
+    penwidth=1.4;
+    style="rounded,filled";
+    fillcolor="#eef3f8";
+
+    legend_current [
+      label="Current implemented behavior";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    legend_planned [
+      label="Planned roadmap module";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    legend_data [
+      label="Data/artifact store";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    legend_decision [
+      label="Decision / confidence gate";
+      shape=diamond;
+      fillcolor="#fce3e3:#fff7f7";
+      gradientangle=90;
+    ];
+    legend_io [
+      label="External I/O boundary";
+      shape=component;
+      fillcolor="#efe6ff:#fbf8ff";
+      gradientangle=90;
+    ];
+  }
+
+  // -----------------------------------------------------------------------
+  // Client surfaces.
+  // -----------------------------------------------------------------------
+  subgraph cluster_clients {
+    label="Client Surfaces";
+    fontsize=18;
+    fontname="Arial Bold";
+    color="#5d78a6";
+    penwidth=2;
+    style="rounded,filled";
+    fillcolor="#eaf4ff";
+
+    mobile_app [
+      label="Flutter Mobile App\nIdentify / Contribute / About\niOS + Android";
+      shape=component;
+      fillcolor="#cfe6ff:#f8fbff";
+      gradientangle=90;
+    ];
+    desktop_app [
+      label="Flutter Desktop Target\nWindows / Linux / macOS\n(planned)";
+      shape=component;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    streamlit_demo [
+      label="Streamlit Demo + Data UI\nUpload, label, review, train";
+      shape=component;
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    user_camera [
+      label="Camera / Gallery / Video\nJPEG, PNG, WebP, MP4, MOV";
+      shape=folder;
+      fillcolor="#efe6ff:#fbf8ff";
+      gradientangle=90;
+    ];
+    result_card [
+      label="Result Card\nfamily, gender, polarity,\nmount, orientation,\nconfidence, warnings, specs";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+  }
+
+  // -----------------------------------------------------------------------
+  // API layer.
+  // -----------------------------------------------------------------------
+  subgraph cluster_api {
+    label="FastAPI Services";
+    fontsize=18;
+    fontname="Arial Bold";
+    color="#40776c";
+    penwidth=2;
+    style="rounded,filled";
+    fillcolor="#e8f7f3";
+
+    predict_endpoint [
+      label="/predict\ncurrent compatible endpoint\nmultipart image + X-Device-Token";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    predict_video [
+      label="/predict-video\nsample frames, return best prediction";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    labeler_routes [
+      label="/labeler/*\ntraining/test/video upload routes";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    future_api [
+      label="Future Structured API Fields\nrequest_id, detections,\nattribute heads, warnings,\nspec lookup, latency";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    relay_app [
+      label="Relay App\n/uploads, /model/version,\n/model/latest, weights, labels";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+  }
+
+  // -----------------------------------------------------------------------
+  // Current inference path.
+  // -----------------------------------------------------------------------
+  subgraph cluster_current_inference {
+    label="Current Preserved Inference Path";
+    fontsize=18;
+    fontname="Arial Bold";
+    color="#7d89a3";
+    penwidth=2;
+    style="rounded,filled";
+    fillcolor="#f0f5fb";
+
+    decode_image [
+      label="OpenCV Decode\nimage bytes -> BGR frame";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    hough_crops [
+      label="Hough / Crop Detector\ndetect_connector_crops\n1..N candidate crops";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    rembg_gate [
+      label="rembg Foreground Gate\nreject background crops";
+      shape=diamond;
+      fillcolor="#fce3e3:#fff7f7";
+      gradientangle=90;
+    ];
+    cleaned_crop [
+      label="Optional Clean Crop\nalpha composite on white";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    resnet_classifier [
+      label="ResNet-18 Classifier\nLinear head + 5x TTA\nflat class output";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    old_response [
+      label="Compatible JSON\nimage_width, image_height,\npredictions[class_name,\nconfidence, probabilities, bbox]";
+      shape=note;
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+  }
+
+  // -----------------------------------------------------------------------
+  // Roadmap inference path.
+  // -----------------------------------------------------------------------
+  subgraph cluster_roadmap_inference {
+    label="Planned Production Vision Pipeline";
+    fontsize=18;
+    fontname="Arial Bold";
+    color="#be8b00";
+    penwidth=2;
+    style="rounded,filled";
+    fillcolor="#fff7df";
+
+    detector [
+      label="Object Detector\nYOLO / RT-DETR / Mobile SSD\nconnector bbox + no-connector";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    segmentation [
+      label="Optional Segmentation\nmask refinement / measurement support";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    multihead [
+      label="Multi-Head Classifier\nfamily, gender/contact,\npolarity, mount,\norientation, termination";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    measurement [
+      label="Measurement Assist\nArUco scale, hex, aperture,\nthread pitch, body geometry";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    confidence_logic [
+      label="Confidence + Abstention\nambiguous, need second angle,\nneed scale, unsupported";
+      shape=diamond;
+      fillcolor="#fce3e3:#fff7f7";
+      gradientangle=90;
+    ];
+    spec_lookup [
+      label="Spec Lookup\nconnectors.yaml\nimpedance, frequency,\ncompatibility, visual notes";
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    rich_response [
+      label="Rich Prediction JSON\nold fields preserved +\nstructured detections,\nspecs, warnings, latency";
+      shape=note;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    llm_assist [
+      label="Optional LLM/VLM Assistant\nexplain result, ask for angle,\nquery specs; not primary detector";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+  }
+
+  // -----------------------------------------------------------------------
+  // Taxonomy and data.
+  // -----------------------------------------------------------------------
+  subgraph cluster_data {
+    label="Taxonomy, Data, and Artifacts";
+    fontsize=18;
+    fontname="Arial Bold";
+    color="#5a9b62";
+    penwidth=2;
+    style="rounded,filled";
+    fillcolor="#ecfaed";
+
+    taxonomy_doc [
+      label="CONNECTOR_TAXONOMY.md\nfamilies + attribute heads";
+      shape=note;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    specs_yaml [
+      label="connectors.yaml\nSMA, RP-SMA, 3.5mm,\n2.92mm/K/SMK, 2.4mm,\n1.85mm, 1.0mm, SSMA,\nSMB, SMC, QMA, TNC,\nBNC, MCX, 7/16 DIN, unknown";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    taxonomy_loader [
+      label="taxonomy.py\nload + validate YAML\nserver-safe import";
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    raw_data [
+      label="Raw / Existing Data\ntraining/data/videos\ntraining/Images\nreference photos";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    labeled_data [
+      label="Labeled Data\ntraining/data/labeled/embedder\ncurrent classifier folders";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    holdout_data [
+      label="Holdout Data\ntraining/data/test_holdout\nnever train on this";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    yolo_dataset [
+      label="Standard Dataset\n datasets/rfconnectors/\nimages, labels, attributes.csv,\ndata.yaml";
+      shape=folder;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    reports [
+      label="Reports\nreports/experiments/*\nmetrics, confusion matrices,\nfailure gallery, model cards";
+      shape=folder;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    exports_mobile [
+      label="Mobile Exports\nONNX, TFLite/LiteRT,\nCore ML";
+      shape=folder;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+  }
+
+  // -----------------------------------------------------------------------
+  // Training and evaluation.
+  // -----------------------------------------------------------------------
+  subgraph cluster_training {
+    label="Training, Evaluation, and Deployment";
+    fontsize=18;
+    fontname="Arial Bold";
+    color="#8c67aa";
+    penwidth=2;
+    style="rounded,filled";
+    fillcolor="#f4ecfb";
+
+    repo_audit [
+      label="Repo Audit\nREPO_AUDIT.md\nsafety baseline";
+      shape=note;
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    dataset_audit [
+      label="Dataset Audit CLI\ncount classes, dimensions,\nduplicates, corrupt files,\nmissing taxonomy classes";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    yolo_builder [
+      label="YOLO Dataset Builder\nweak boxes when needed,\nsplit metadata, no leakage";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    detector_train [
+      label="Detector Training Track\nYOLO11n/s, RT-DETR small\nmAP + model card";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    classifier_train [
+      label="Multi-Head Training Track\nResNet baseline, EfficientNet,\nMobileNet/MobileViT options";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    eval_all [
+      label="Evaluation Harness\nmAP, family accuracy,\nattribute accuracy, macro F1,\ncalibration, latency";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    deploy_services [
+      label="Deployment\nsystemd + nginx + reverse SSH\nFastAPI server fallback";
+      shape=component;
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+  }
+
+  // -----------------------------------------------------------------------
+  // Client request flow.
+  // -----------------------------------------------------------------------
+  user_camera -> mobile_app [
+    label="photo/video capture";
+    color="#3f79b8";
+  ];
+  user_camera -> desktop_app [
+    label="future desktop camera/file";
+    color="#b98200";
+    style=dashed;
+  ];
+  mobile_app -> predict_endpoint [
+    label="POST image";
+    color="#3f79b8";
+  ];
+  mobile_app -> predict_video [
+    label="POST video";
+    color="#3f79b8";
+  ];
+  desktop_app -> predict_endpoint [
+    label="same API";
+    color="#b98200";
+    style=dashed;
+  ];
+  streamlit_demo -> labeler_routes [
+    label="upload/review labels";
+    color="#3f79b8";
+  ];
+
+  predict_endpoint -> decode_image [
+    label="bytes";
+    color="#3f79b8";
+  ];
+  predict_video -> decode_image [
+    label="sampled frames";
+    color="#3f79b8";
+  ];
+
+  // Current inference flow.
+  decode_image -> hough_crops [
+    label="current crop path";
+    color="#3f79b8";
+  ];
+  hough_crops -> rembg_gate [
+    label="candidate crops";
+    color="#3f79b8";
+  ];
+  rembg_gate -> old_response [
+    label="reject: predictions=[]";
+    color="#b84646";
+  ];
+  rembg_gate -> cleaned_crop [
+    label="keep";
+    color="#3f79b8";
+  ];
+  cleaned_crop -> resnet_classifier [
+    label="RGB crop";
+    color="#3f79b8";
+  ];
+  resnet_classifier -> old_response [
+    label="class_name + confidence";
+    color="#3f79b8";
+  ];
+  old_response -> mobile_app [
+    label="current Flutter parser";
+    color="#3f79b8";
+  ];
+
+  // Planned richer inference flow.
+  decode_image -> detector [
+    label="planned detector track";
+    color="#b98200";
+    style=dashed;
+  ];
+  detector -> segmentation [
+    label="bbox / mask";
+    color="#b98200";
+    style=dashed;
+  ];
+  detector -> multihead [
+    label="crop";
+    color="#b98200";
+    style=dashed;
+  ];
+  segmentation -> measurement [
+    label="mask + geometry";
+    color="#b98200";
+    style=dashed;
+  ];
+  measurement -> multihead [
+    label="scale/geometry hints";
+    color="#b98200";
+    style=dashed;
+  ];
+  multihead -> confidence_logic [
+    label="attributes + logits";
+    color="#b98200";
+    style=dashed;
+  ];
+  confidence_logic -> spec_lookup [
+    label="accepted family/attributes";
+    color="#b98200";
+    style=dashed;
+  ];
+  confidence_logic -> rich_response [
+    label="ambiguous/no connector";
+    color="#b84646";
+    style=dashed;
+  ];
+  spec_lookup -> rich_response [
+    label="engineering specs";
+    color="#5a9b62";
+    style=dashed;
+  ];
+  llm_assist -> rich_response [
+    label="human explanation";
+    color="#8c67aa";
+    style=dashed;
+  ];
+  rich_response -> future_api [
+    label="preserve old fields";
+    color="#b98200";
+    style=dashed;
+  ];
+  future_api -> result_card [
+    label="render state";
+    color="#b98200";
+    style=dashed;
+  ];
+  result_card -> mobile_app [
+    label="user correction / confirm";
+    color="#b98200";
+    style=dashed;
+  ];
+
+  // Taxonomy and specs.
+  taxonomy_doc -> specs_yaml [
+    label="defines";
+    color="#5a9b62";
+  ];
+  specs_yaml -> taxonomy_loader [
+    label="load/validate";
+    color="#5a9b62";
+  ];
+  taxonomy_loader -> spec_lookup [
+    label="spec map";
+    color="#5a9b62";
+  ];
+  taxonomy_loader -> dataset_audit [
+    label="missing classes";
+    color="#5a9b62";
+    style=dashed;
+  ];
+  taxonomy_loader -> yolo_builder [
+    label="validate labels";
+    color="#5a9b62";
+    style=dashed;
+  ];
+
+  // Data and training loops.
+  labeler_routes -> labeled_data [
+    label="training captures";
+    color="#5a9b62";
+  ];
+  labeler_routes -> holdout_data [
+    label="holdout captures";
+    color="#5a9b62";
+  ];
+  raw_data -> dataset_audit [
+    label="inventory";
+    color="#5a9b62";
+    style=dashed;
+  ];
+  labeled_data -> dataset_audit [
+    label="class counts";
+    color="#5a9b62";
+    style=dashed;
+  ];
+  holdout_data -> dataset_audit [
+    label="holdout counts";
+    color="#5a9b62";
+    style=dashed;
+  ];
+  dataset_audit -> reports [
+    label="DATASET_AUDIT.md / stats";
+    color="#5a9b62";
+    style=dashed;
+  ];
+  labeled_data -> yolo_builder [
+    label="classification folders";
+    color="#b98200";
+    style=dashed;
+  ];
+  yolo_builder -> yolo_dataset [
+    label="images + labels + attributes";
+    color="#b98200";
+    style=dashed;
+  ];
+  yolo_dataset -> detector_train [
+    label="detection data";
+    color="#b98200";
+    style=dashed;
+  ];
+  yolo_dataset -> classifier_train [
+    label="attribute labels";
+    color="#b98200";
+    style=dashed;
+  ];
+  detector_train -> eval_all [
+    label="detector artifact";
+    color="#b98200";
+    style=dashed;
+  ];
+  classifier_train -> eval_all [
+    label="classifier artifact";
+    color="#b98200";
+    style=dashed;
+  ];
+  holdout_data -> eval_all [
+    label="unseen validation";
+    color="#5a9b62";
+    style=dashed;
+  ];
+  eval_all -> reports [
+    label="metrics/failures/model card";
+    color="#8c67aa";
+    style=dashed;
+  ];
+  eval_all -> exports_mobile [
+    label="approved exports";
+    color="#8c67aa";
+    style=dashed;
+  ];
+  exports_mobile -> mobile_app [
+    label="future on-device inference";
+    color="#8c67aa";
+    style=dashed;
+  ];
+  detector_train -> deploy_services [
+    label="server model";
+    color="#8c67aa";
+    style=dashed;
+  ];
+  classifier_train -> deploy_services [
+    label="server model";
+    color="#8c67aa";
+    style=dashed;
+  ];
+  deploy_services -> predict_endpoint [
+    label="served by";
+    color="#8c67aa";
+  ];
+
+  // Repo planning docs.
+  repo_audit -> dataset_audit [
+    label="next batch";
+    color="#8c67aa";
+    style=dotted;
+  ];
+  repo_audit -> taxonomy_doc [
+    label="safety baseline";
+    color="#8c67aa";
+    style=dotted;
+  ];
+}

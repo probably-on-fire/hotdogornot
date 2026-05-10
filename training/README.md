@@ -9,6 +9,37 @@ sub-millimeter accuracy with an ArUco scale marker) with a
 **fine-tuned ResNet-18 classifier** (works on any image, including
 non-perpendicular product photos).
 
+The roadmap now expands this package from a flat class-label classifier
+into a staged connector-identification system:
+
+```text
+camera frame
+  -> connector/background detector
+  -> crop or mask
+  -> multi-head attribute classifier
+  -> optional measurement/calibration
+  -> confidence and ambiguity handling
+  -> connector spec lookup
+  -> app result card
+```
+
+Authoritative planning docs:
+
+- `../IMPLEMENTATION_PLAN.md`
+- `../TASKS.md`
+- `../docs/REPO_AUDIT.md`
+- `../docs/CONNECTOR_TAXONOMY.md`
+- `../docs/SOFTWARE_ARCHITECTURE.dot`
+
+The taxonomy/spec foundation added for Epic 1 lives at:
+
+- `rfconnectorai/specs/connectors.yaml`
+- `rfconnectorai/schemas/taxonomy.py`
+
+The current ResNet and `/predict` behavior remain the compatibility
+baseline while detector, multi-head classifier, standardized dataset,
+and richer prediction schema modules are added in later task batches.
+
 Note: 1.85mm is the newest family — added at the data/UI layer but
 not yet in the trained model head. Once `data/labeled/embedder/1.85mm-*/`
 folders contain ≥5 images each (contributable via the Flutter app),
@@ -118,6 +149,15 @@ Two complementary pipelines:
   - `ddg_images.py` — DuckDuckGo image search fetcher (no API key)
   - `google_cse.py` — Google Custom Search JSON API (needs key, see file)
   - `video_frames.py` — extract frames from a capture video at a target fps
+
+**Taxonomy and specs** (`rfconnectorai/specs/`, `rfconnectorai/schemas/`)
+
+  - `specs/connectors.yaml` - structured connector spec lookup for SMA,
+    RP-SMA, 3.5mm, 2.92mm/K/SMK, 2.4mm, 1.85mm, 1.0mm, SSMA, SMB, SMC,
+    QMA, TNC, BNC, MCX, 7/16 DIN, and unknown.
+  - `schemas/taxonomy.py` - lightweight YAML loader/validator that can be
+    imported by tests, future API endpoints, and future dataset tooling
+    without starting model training.
 
 ---
 
@@ -269,10 +309,35 @@ print(pred.class_name, pred.confidence, pred.probabilities)
 averager, the video extractor, the classifier (round-trip train+predict),
 the thread-pitch FFT, and the synthetic renderers.
 
+The taxonomy loader has focused tests in `tests/test_taxonomy.py`.
+
 Coverage gap to be aware of: there is no test for
 `predict_service._crop_passes_fg_filter` (the rembg-based foreground
 pre-filter that gates every prediction) — verified by hand against
 held-out + background scenarios; see `docs/classifier_journey.md`.
+
+## Next Roadmap Modules
+
+The next implementation batches from `../TASKS.md` will add:
+
+```text
+rfconnectorai/data/audit.py
+rfconnectorai/data/build_yolo_dataset.py
+rfconnectorai/detector/train_yolo.py
+rfconnectorai/classifier/model_multihead.py
+rfconnectorai/classifier/train_multihead.py
+rfconnectorai/eval/evaluate_all.py
+rfconnectorai/schemas/prediction.py
+```
+
+Acceptance rules for those additions:
+
+- keep the current ResNet classifier available for comparison,
+- preserve the existing `/predict` endpoint and old response fields,
+- validate dataset labels against the taxonomy,
+- write metrics and model cards for experiments,
+- use `unknown`, `ambiguous`, and `need_second_angle` states instead of
+  forcing low-confidence guesses.
 
 ---
 

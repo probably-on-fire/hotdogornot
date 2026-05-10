@@ -4,8 +4,10 @@
 
 # Connector ID
 
-**Identify RF coaxial connectors from your phone camera.**
-SMA · 3.5mm · 2.92mm · 2.4mm · 1.85mm · male & female.
+**RF connector identification from a phone or desktop camera.**
+
+SMA, RP-SMA, 3.5mm, 2.92mm/K/SMK, 2.4mm, 1.85mm, 1.0mm, SSMA, SMB,
+SMC, QMA, TNC, BNC, MCX, 7/16 DIN, and unknown/unsupported.
 
 Powered by [aired.com](https://aired.com)
 
@@ -13,184 +15,237 @@ Powered by [aired.com](https://aired.com)
 
 ---
 
-## What this is
+## What This Is
 
-A two-part system that turns a phone photo of an RF coaxial connector
-into a class label in ~250–500 ms:
+Connector ID is evolving from a proof-of-concept RF connector classifier
+into a production-grade identification system for RF coaxial connectors.
+The goal is simple for the end user: point a camera at a connector and get
+a correct, useful result.
 
-- **Flutter app** (`flutter/`) — cross-platform iOS + Android camera-first
-  identifier. Live preview, single-tap shutter, chip-correction strip
-  on the result panel. Deployed to [aired.com](https://aired.com).
-- **Training + serving stack** (`training/`) — FastAPI predict service
-  fronting a fine-tuned ResNet-18, plus the full training pipeline
-  (data ingestion, synthesis, retraining, deploy) on a P40-equipped
-  Linux box.
+The target result is not just one flat class label. The system should infer:
 
-Public live endpoint: `https://aired.com/rfcai/predict`.
+- connector family/type,
+- standard vs reverse polarity,
+- gender/contact configuration,
+- mount style,
+- orientation,
+- cable termination where visible,
+- size/geometry cues when a scale reference is available,
+- confidence, ambiguity, and top alternatives,
+- cross-referenced engineering specs.
+
+The authoritative roadmap is:
+
+- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
+- [`TASKS.md`](TASKS.md)
+
+The first implementation batch completed the repo audit and taxonomy/spec
+foundation:
+
+- [`docs/REPO_AUDIT.md`](docs/REPO_AUDIT.md)
+- [`docs/CONNECTOR_TAXONOMY.md`](docs/CONNECTOR_TAXONOMY.md)
+- [`training/rfconnectorai/specs/connectors.yaml`](training/rfconnectorai/specs/connectors.yaml)
+- [`training/rfconnectorai/schemas/taxonomy.py`](training/rfconnectorai/schemas/taxonomy.py)
 
 ---
 
-## Production status
+## Current Baseline
 
-| Metric | v18 (held-out: 8 phone shots) |
-|---|---|
-| Full class (1-of-6) | **75%** |
-| Family (1-of-4) | **75%** |
-| Gender (M/F) | **87.5%** |
-| False positives on backgrounds | **0%** (rembg fg pre-filter) |
+Current production behavior is preserved.
 
-Model: ImageNet-pretrained ResNet-18 + `Linear(512 → 6)` head, 20
-epochs on 13,849 samples (~60% synthesis-augmented from 3 source
-videos). Five alternative architectures (deeper head, two-head, MLP
-head, ResNet-50, Prototypical Networks) all *lost* to v18 on the
-held-out — see `training/docs/classifier_journey.md` for the trial
-log.
+- Flutter app in `flutter/`
+- FastAPI predict service in `training/rfconnectorai/server/predict_service.py`
+- Existing `/predict` endpoint shape remains:
 
----
-
-## How it works (high level)
-
-```mermaid
-flowchart LR
-    Phone([📱 Phone tap shutter]) --> Predict[POST /rfcai/predict]
-    Predict --> FG{rembg<br/>foreground filter}
-    FG -->|no connector| Empty([📱 'No connector detected'])
-    FG -->|yes| Clean[rembg silhouette<br/>composite on white]
-    Clean --> Crop[Hough crop]
-    Crop --> Net[ResNet-18 + 5× TTA]
-    Net --> JSON[Top class + confidence]
-    JSON --> Result([📱 Result panel<br/>chip-correction strip])
-
-    classDef phone fill:#1d222c,stroke:#4f8cff,color:#fff
-    classDef decision fill:#3a2f15,stroke:#ffb347,color:#fff
-    classDef terminal fill:#1a3320,stroke:#4ade80,color:#fff
-    classDef reject fill:#3a1a1a,stroke:#e63946,color:#fff
-    class Phone,Predict,JSON phone
-    class FG decision
-    class Result terminal
-    class Empty reject
+```json
+{
+  "image_width": 1920,
+  "image_height": 1080,
+  "predictions": [
+    {
+      "class_name": "2.4mm-M",
+      "confidence": 0.83,
+      "probabilities": {},
+      "bbox": {"x": 612, "y": 415, "w": 240, "h": 240}
+    }
+  ]
+}
 ```
 
-For the full inference + training flow, see
-**[`training/docs/architecture.md`](training/docs/architecture.md)**.
+Current documented model:
+
+| Metric | v18 Baseline |
+|---|---:|
+| Full class accuracy | 75% |
+| Family accuracy | 75% |
+| Gender accuracy | 87.5% |
+| Background false positives | 0% |
+| Held-out size | 8 phone shots |
+
+The current model is an ImageNet-pretrained ResNet-18 with a linear head.
+The 8-image holdout is too small to support strong accuracy claims; one
+miss changes accuracy by 12.5 percentage points.
 
 ---
 
-## Repository layout
+## Target Architecture
 
-```
-.
-├── flutter/                 — iOS + Android Flutter app
-│   ├── lib/src/screens/     — Identify · Contribute · About
-│   ├── tool/generate_icon.py
-│   └── README.md            — Flutter-side guide
-│
-├── training/                — FastAPI service + training pipeline
-│   ├── rfconnectorai/       — Python package (model, data, server)
-│   ├── scripts/             — training + ops scripts
-│   ├── docs/                — architecture, runbook, experiment log
-│   ├── tests/               — pytest suite
-│   └── README.md            — training-side guide
-│
-├── docs/                    — cross-cutting docs (handoffs, plans)
-│
-└── unity/                   — sidelined Unity AR app (kept for history)
+The planned production architecture is a staged computer vision pipeline:
+
+```text
+Camera frame
+  -> connector/background detector
+  -> connector crop or mask
+  -> multi-head attribute classifier
+  -> optional measurement/calibration module
+  -> confidence and ambiguity logic
+  -> connector spec lookup
+  -> mobile/desktop result card
 ```
 
----
+Graphviz source for the detailed architecture diagram:
 
-## Quick start
+- [`docs/SOFTWARE_ARCHITECTURE.dot`](docs/SOFTWARE_ARCHITECTURE.dot)
+- [`docs/SOFTWARE_ARCHITECTURE.svg`](docs/SOFTWARE_ARCHITECTURE.svg)
+- [`docs/SOFTWARE_ARCHITECTURE.png`](docs/SOFTWARE_ARCHITECTURE.png)
 
-### Run the Flutter app
+Render it with:
 
 ```bash
-cd flutter
-flutter pub get
-flutter run                  # picks up an attached device or simulator
+dot -Tpng docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.png
+dot -Tsvg docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.svg
 ```
 
-End users see two tabs: **Identify** (camera + predict) and **About**
-(version, request-a-connector form, privacy, aired.com link). Tap
-the version line on About 7 times to unlock dev mode — that reveals
-the **Contribute** tab and the Advanced settings (relay URL, device
-token, labeler creds) for owner-side data collection.
+The full architecture notes remain in:
 
-See [`flutter/README.md`](flutter/README.md) for build, signing,
-icon regeneration, and the deeper backend coupling.
+- [`training/docs/architecture.md`](training/docs/architecture.md)
 
-### Run the training pipeline
+---
+
+## Repository Layout
+
+```text
+.
+|-- IMPLEMENTATION_PLAN.md       authoritative product/architecture roadmap
+|-- TASKS.md                     implementation backlog by epic
+|-- README.md                    repo overview
+|-- docs/
+|   |-- REPO_AUDIT.md            current repo and safety baseline
+|   |-- CONNECTOR_TAXONOMY.md    connector families and attribute heads
+|   |-- SOFTWARE_ARCHITECTURE.dot detailed Graphviz architecture script
+|   |-- printables/              ArUco marker assets
+|   `-- superpowers/             historical plans/specs
+|-- flutter/
+|   |-- lib/src/api.dart         current /predict client parser
+|   |-- lib/src/screens/         Identify, Contribute, About
+|   `-- README.md                Flutter app guide
+|-- training/
+|   |-- rfconnectorai/
+|   |   |-- classifier/          current ResNet classifier path
+|   |   |-- measurement/         geometry/ArUco/hex/aperture tools
+|   |   |-- server/              FastAPI predict and relay services
+|   |   |-- schemas/             taxonomy and future response schemas
+|   |   |-- specs/               connector spec YAML
+|   |   |-- synthetic/           synthetic data generation
+|   |   `-- data_fetch/          image/video data collection helpers
+|   |-- tests/                   pytest suite
+|   |-- docs/                    training architecture/runbook/history
+|   `-- README.md                training-side guide
+`-- unity/                       historical Unity AR app
+```
+
+Planned additions from later task batches:
+
+```text
+training/rfconnectorai/data/audit.py
+training/rfconnectorai/data/build_yolo_dataset.py
+training/rfconnectorai/detector/train_yolo.py
+training/rfconnectorai/classifier/model_multihead.py
+training/rfconnectorai/classifier/train_multihead.py
+training/rfconnectorai/eval/evaluate_all.py
+training/rfconnectorai/schemas/prediction.py
+datasets/rfconnectors/
+reports/experiments/
+exports/mobile/
+```
+
+---
+
+## Quick Start
+
+### Training Package
+
+Use Python 3.11 or newer.
 
 ```bash
 cd training
 python -m venv .venv
 .venv/Scripts/pip install -e ".[dev]"      # Windows
-.venv/bin/pip install -e ".[dev]"          # macOS / Linux
+.venv/bin/pip install -e ".[dev]"          # macOS/Linux
+python -m pytest tests/ -q
 ```
 
-Then either spin up the FastAPI service locally:
+Run the current FastAPI predict service:
 
 ```bash
+cd training
 uvicorn rfconnectorai.server.predict_service:app --port 8503
 ```
 
-…or run a fine-tune on the labeled dataset:
+Train the current ResNet baseline:
 
 ```bash
+cd training
 python -m rfconnectorai.classifier.train \
-    --data-dir data/labeled/embedder \
-    --out-dir models/connector_classifier \
-    --epochs 20
+  --data-dir data/labeled/embedder \
+  --out-dir models/connector_classifier \
+  --epochs 20
 ```
 
-See [`training/README.md`](training/README.md) for the full pipeline,
-synth generation, the Streamlit demo + management UI, and the test
-suite.
+### Flutter App
+
+```bash
+cd flutter
+flutter pub get
+flutter run
+```
+
+The app currently provides:
+
+- Identify: camera/photo/video prediction flow.
+- About: product info, privacy, request form, dev-mode unlock.
+- Contribute: dev-only training and holdout capture flow.
 
 ---
 
-## Documentation
+## Development Rules
 
-| Doc | What's in it |
+- Do not rewrite the whole app.
+- Preserve existing `/predict` behavior and Flutter screens.
+- Add new structured output beside old fields, not instead of them.
+- Keep spec lookup separate from model inference.
+- Treat `unknown`, `unsupported`, and `need another angle` as valid outcomes.
+- Do not claim 99.99% accuracy without statistically meaningful validation.
+- Every model improvement must include test data discipline, metrics, and
+  visible failure cases.
+
+---
+
+## Documentation Index
+
+| Doc | Purpose |
 |---|---|
-| [`training/docs/architecture.md`](training/docs/architecture.md) | Mermaid diagrams of the v18 inference + training flows, hyperparam table, why every other architecture lost |
-| [`training/docs/classifier_journey.md`](training/docs/classifier_journey.md) | Full experiment log: data findings, every architecture trial, the synth breakthrough |
-| [`training/docs/runbook.md`](training/docs/runbook.md) | Deploy, retrain, env knobs, GPU state on the box, smoke-test |
-| [`training/docs/capture_protocol.md`](training/docs/capture_protocol.md) | Recommended capture setup for new training videos |
-| [`flutter/README.md`](flutter/README.md) | App architecture, dev-mode unlock, icon regeneration, backend coupling |
-| [`training/README.md`](training/README.md) | Training pipeline + serving stack overview |
-
----
-
-## How to grow the dataset
-
-The held-out test set is currently 8 phone shots — too few to
-distinguish a real architecture win from single-trial noise (one
-prediction = 12.5 percentage points). The next-biggest accuracy
-unlock is more diverse phone-shot data, not architecture changes.
-
-In the Flutter app's Contribute tab (dev mode), the top-right
-`training` / `HOLDOUT` toggle routes captures to either:
-
-- `data/labeled/embedder/<class>/` — used to train the model
-- `data/test_holdout/<class>/` — never used for training, only
-  for the post-retrain evaluation
-
-Aim for ~30+ varied holdout shots across all classes (different
-lighting, backgrounds, angles) to make experiment results
-meaningful.
-
----
-
-## Tech stack
-
-- **App**: Flutter / Dart 3.7+, `camera`, `image_picker`,
-  `shared_preferences`, `package_info_plus`, `url_launcher`
-- **Server**: FastAPI, PyTorch 2.5 + cu121, torchvision, OpenCV,
-  rembg (U²-Net via ONNX Runtime), pyrender, numpy, Pillow
-- **Hardware**: Production runs on a Linux box with 2× Tesla P40
-  (24 GB each) — see runbook for the GPU enablement story
-- **Deployment**: systemd services + nginx + reverse SSH tunnels
-  to expose the predict service publicly via `aired.com/rfcai/*`
+| [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) | Product mission, architecture, accuracy gates, dataset/training/app/API plan |
+| [`TASKS.md`](TASKS.md) | Epic-by-epic backlog and execution batches |
+| [`docs/REPO_AUDIT.md`](docs/REPO_AUDIT.md) | Current repository audit and safety baseline |
+| [`docs/CONNECTOR_TAXONOMY.md`](docs/CONNECTOR_TAXONOMY.md) | Connector family taxonomy and attribute labels |
+| [`docs/SOFTWARE_ARCHITECTURE.dot`](docs/SOFTWARE_ARCHITECTURE.dot) | Graphviz source for the full I/O architecture diagram |
+| [`training/docs/architecture.md`](training/docs/architecture.md) | Current v18 architecture plus roadmap architecture |
+| [`training/docs/classifier_journey.md`](training/docs/classifier_journey.md) | Experiment history and lessons learned |
+| [`training/docs/runbook.md`](training/docs/runbook.md) | Deploy/retrain operations |
+| [`training/docs/capture_protocol.md`](training/docs/capture_protocol.md) | Capture protocol for new connector data |
+| [`flutter/README.md`](flutter/README.md) | Flutter app behavior, backend coupling, and build notes |
+| [`training/README.md`](training/README.md) | Training and serving stack guide |
 
 ---
 

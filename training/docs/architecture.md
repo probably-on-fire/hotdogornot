@@ -8,6 +8,26 @@ smooths the output).
 This doc visualizes both pipelines. For *why* we ended up here see
 `classifier_journey.md`. For deploy/retrain ops see `runbook.md`.
 
+Roadmap note: `../../IMPLEMENTATION_PLAN.md` and `../../TASKS.md` now
+define the next architecture direction. The current v18 path remains the
+compatibility baseline, but the target system adds detector training,
+multi-head attribute classification, structured spec lookup, abstention
+states, and mobile/desktop deployment options.
+
+Detailed Graphviz source for the full proposed I/O architecture:
+
+```bash
+dot -Tpng ../../docs/SOFTWARE_ARCHITECTURE.dot -o ../../docs/SOFTWARE_ARCHITECTURE.png
+dot -Tsvg ../../docs/SOFTWARE_ARCHITECTURE.dot -o ../../docs/SOFTWARE_ARCHITECTURE.svg
+```
+
+Source: `../../docs/SOFTWARE_ARCHITECTURE.dot`
+
+Rendered copies:
+
+- `../../docs/SOFTWARE_ARCHITECTURE.svg`
+- `../../docs/SOFTWARE_ARCHITECTURE.png`
+
 ---
 
 ## Inference flow (live in production)

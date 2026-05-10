@@ -5,6 +5,22 @@ connectors (SMA, 3.5mm, 2.92mm, 2.4mm, 1.85mm — male and female).
 Talks to the FastAPI predict + labeler service at `aired.com/rfcai/*`.
 Replaces the sidelined Unity AR app under `unity/`.
 
+The app is being extended under the root roadmap in
+`../IMPLEMENTATION_PLAN.md` and `../TASKS.md`. Current camera flow and
+current `/predict` parsing must remain compatible while the backend grows
+from a flat ResNet class label into structured connector attributes:
+
+- family/type,
+- standard vs reverse polarity,
+- gender/contact configuration,
+- mount style,
+- orientation,
+- confidence state and warnings,
+- top alternatives,
+- spec summary from `training/rfconnectorai/specs/connectors.yaml`.
+
+The detailed system diagram source is `../docs/SOFTWARE_ARCHITECTURE.dot`.
+
 ## Tabs the user sees
 
 End users see a deliberately small two-tab shell. Most config lives
@@ -140,6 +156,11 @@ This app is a thin client over the FastAPI service in
 - **GET** `/rfcai/healthz` (no auth) — server health snapshot
   including which classifier is loaded and whether the rembg fg
   filter is available.
+
+Roadmap note: future `/predict` responses should add richer structured
+fields beside the existing `predictions` list, not instead of it. That
+lets this current Flutter parser keep working while new UI elements are
+added for connector attributes, warnings, and spec lookup.
 
 If the predict service moves or auth rotates, edit the Advanced
 section (dev mode → About) inside the app rather than touching code.
