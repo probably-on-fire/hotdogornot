@@ -40,6 +40,12 @@ The current ResNet and `/predict` behavior remain the compatibility
 baseline while detector, multi-head classifier, standardized dataset,
 and richer prediction schema modules are added in later task batches.
 
+ResNet-18 is not the final architecture target. The planned training track is
+multi-architecture: YOLO/RT-DETR-style detector, EfficientNet/MobileNet/
+MobileViT/ConvNeXt crop classifiers, custom multi-head attribute outputs,
+geometry/spec verification, and optional 3D render verification. See
+`../docs/MULTI_ARCHITECTURE_TRANSITION.md`.
+
 Note: 1.85mm is the newest family — added at the data/UI layer but
 not yet in the trained model head. Once `data/labeled/embedder/1.85mm-*/`
 folders contain ≥5 images each (contributable via the Flutter app),
@@ -333,11 +339,15 @@ rfconnectorai/schemas/prediction.py
 Acceptance rules for those additions:
 
 - keep the current ResNet classifier available for comparison,
+- compare candidate detector/classifier architectures in cloud runs,
 - preserve the existing `/predict` endpoint and old response fields,
 - validate dataset labels against the taxonomy,
 - write metrics and model cards for experiments,
 - use `unknown`, `ambiguous`, and `need_second_angle` states instead of
   forcing low-confidence guesses.
+
+Heavy training and model bake-offs should be run in Kaggle or Colab, not on
+the local development PC.
 
 ---
 

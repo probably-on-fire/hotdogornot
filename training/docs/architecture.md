@@ -28,6 +28,17 @@ Rendered copies:
 - `../../docs/SOFTWARE_ARCHITECTURE.svg`
 - `../../docs/SOFTWARE_ARCHITECTURE.png`
 
+The model architecture transition is documented separately:
+
+- `../../docs/MULTI_ARCHITECTURE_TRANSITION.md`
+- `../../docs/MULTI_ARCHITECTURE_TRANSITION.dot`
+- `../../docs/MULTI_ARCHITECTURE_TRANSITION.svg`
+- `../../docs/MULTI_ARCHITECTURE_TRANSITION.png`
+
+That transition keeps ResNet-18 as the baseline/fallback while adding
+detector, multi-head classifier, geometry/spec validation, optional 3D
+verification, and mobile/server export tracks.
+
 ---
 
 ## Inference flow (live in production)

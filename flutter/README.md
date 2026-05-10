@@ -20,6 +20,9 @@ from a flat ResNet class label into structured connector attributes:
 - spec summary from `training/rfconnectorai/specs/connectors.yaml`.
 
 The detailed system diagram source is `../docs/SOFTWARE_ARCHITECTURE.dot`.
+The model transition plan is `../docs/MULTI_ARCHITECTURE_TRANSITION.md`;
+the Flutter contract is still to preserve existing `/predict` parsing while
+new structured fields are added beside the old ones.
 
 ## Tabs the user sees
 

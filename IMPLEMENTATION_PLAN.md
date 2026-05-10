@@ -182,6 +182,12 @@ Run these tracks in parallel and let metrics decide:
 | Server fallback | Maximum accuracy path | FastAPI + PyTorch/ONNX Runtime |
 | LLM/VLM assist | Explanations, spec text, second-opinion reasoning | Gemma/Gemini-style language layer, **not** the primary detector |
 
+ResNet-18 is the current baseline and fallback, not the final architecture
+constraint. The model upgrade path is multi-architecture: object detector,
+multi-head crop classifier, geometry/spec verification, optional 3D render
+verification, and export-specific deployment candidates. See
+`docs/MULTI_ARCHITECTURE_TRANSITION.md`.
+
 ### 4.3 Recommendation on Gemma 3/4 or LLM/VLM use
 
 Use Gemma-style mobile AI as an assistant layer, not as the primary object detector.
@@ -687,3 +693,7 @@ The first sprint should not jump straight into architecture arguments. It should
 8. Compare against ResNet baseline.
 
 Only after that should the team decide whether ResNet stays, EfficientNet/YOLO wins, or an ensemble is justified.
+
+Heavy training and model bake-offs should be run in Kaggle or Colab after
+pushing scripts and docs to GitHub. Local development should focus on code,
+schemas, dataset tooling, and documentation unless explicitly approved.

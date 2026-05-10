@@ -86,6 +86,11 @@ The current model is an ImageNet-pretrained ResNet-18 with a linear head.
 The 8-image holdout is too small to support strong accuracy claims; one
 miss changes accuracy by 12.5 percentage points.
 
+ResNet-18 is now treated as the baseline and fallback, not the final
+architecture. The model strategy is moving to a multi-architecture pipeline:
+detector plus multi-head classifier plus geometry/spec verification. See
+[`docs/MULTI_ARCHITECTURE_TRANSITION.md`](docs/MULTI_ARCHITECTURE_TRANSITION.md).
+
 ---
 
 ## Target Architecture
@@ -117,6 +122,13 @@ Detailed software architecture diagram:
 - [`docs/SOFTWARE_ARCHITECTURE.svg`](docs/SOFTWARE_ARCHITECTURE.svg)
 - [`docs/SOFTWARE_ARCHITECTURE.png`](docs/SOFTWARE_ARCHITECTURE.png)
 
+ResNet-to-multi-architecture transition diagram:
+
+- [`docs/MULTI_ARCHITECTURE_TRANSITION.md`](docs/MULTI_ARCHITECTURE_TRANSITION.md)
+- [`docs/MULTI_ARCHITECTURE_TRANSITION.dot`](docs/MULTI_ARCHITECTURE_TRANSITION.dot)
+- [`docs/MULTI_ARCHITECTURE_TRANSITION.svg`](docs/MULTI_ARCHITECTURE_TRANSITION.svg)
+- [`docs/MULTI_ARCHITECTURE_TRANSITION.png`](docs/MULTI_ARCHITECTURE_TRANSITION.png)
+
 Render diagrams with:
 
 ```bash
@@ -124,6 +136,8 @@ dot -Tsvg docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.svg
 dot -Tpng docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.png
 dot -Tpng docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.png
 dot -Tsvg docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.svg
+dot -Tsvg docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.svg
+dot -Tpng docs/MULTI_ARCHITECTURE_TRANSITION.dot -o docs/MULTI_ARCHITECTURE_TRANSITION.png
 ```
 
 The full architecture notes remain in:
@@ -250,6 +264,7 @@ The app currently provides:
 | [`docs/REPO_AUDIT.md`](docs/REPO_AUDIT.md) | Current repository audit and safety baseline |
 | [`docs/CONNECTOR_TAXONOMY.md`](docs/CONNECTOR_TAXONOMY.md) | Connector family taxonomy and attribute labels |
 | [`docs/MODEL_TRAINING_PIPELINE_SPEC.md`](docs/MODEL_TRAINING_PIPELINE_SPEC.md) | Detailed training pipeline spec for crops, labels, 3D models, synthetic renders, and verification |
+| [`docs/MULTI_ARCHITECTURE_TRANSITION.md`](docs/MULTI_ARCHITECTURE_TRANSITION.md) | Plan for evolving from ResNet-only classification to detector plus multi-head model architecture |
 | [`docs/README_ARCHITECTURE.dot`](docs/README_ARCHITECTURE.dot) | Compact Graphviz source for the README architecture diagram |
 | [`docs/SOFTWARE_ARCHITECTURE.dot`](docs/SOFTWARE_ARCHITECTURE.dot) | Graphviz source for the full I/O architecture diagram |
 | [`training/docs/architecture.md`](training/docs/architecture.md) | Current v18 architecture plus roadmap architecture |

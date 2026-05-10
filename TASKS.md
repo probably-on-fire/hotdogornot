@@ -214,6 +214,7 @@ Status values:
 
 ### P0 Tasks
 
+- [ ] Treat current ResNet-18 as baseline/fallback, not the only target architecture.
 - [ ] Create `training/rfconnectorai/classifier/model_multihead.py`.
 - [ ] Create `training/rfconnectorai/classifier/train_multihead.py`.
 - [ ] Implement attribute heads:
@@ -227,6 +228,8 @@ Status values:
   - [ ] current ResNet-18 baseline
   - [ ] ResNet-50
   - [ ] EfficientNetV2 small or MobileNetV3
+  - [ ] MobileViT if dependency/runtime is practical
+  - [ ] ConvNeXt-Tiny if dependency/runtime is practical
 - [ ] Add weighted loss for missing or imbalanced attributes.
 - [ ] Add top-k output.
 - [ ] Add confidence calibration output.
@@ -247,6 +250,7 @@ Status values:
 - [ ] Missing attributes do not crash training.
 - [ ] Per-attribute metrics are reported.
 - [ ] Baseline ResNet result is still available for comparison.
+- [ ] Candidate architectures are compared in Kaggle/Colab or another cloud runtime, not on the local development PC.
 
 ---
 

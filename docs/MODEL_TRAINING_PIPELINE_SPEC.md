@@ -8,6 +8,12 @@ training, and verification strategy.
 The core principle: preserve the existing app and `/predict` service while
 building a much stronger model pipeline underneath it.
 
+ResNet-18 is retained as the baseline/fallback and regression comparison
+point. The target training pipeline is explicitly multi-architecture:
+object detector, fine-grained multi-head classifier, geometry/measurement
+module, spec lookup, optional 3D verification, and mobile/server export
+tracks. See `docs/MULTI_ARCHITECTURE_TRANSITION.md`.
+
 ## 1. Goal
 
 Build a connector-specific object detection and classification pipeline that
@@ -324,6 +330,9 @@ Synthetic data should not replace real photos. It should:
 ### Phase 7: Training Tracks
 
 Train in stages and compare each stage against the current ResNet baseline.
+No architecture should be promoted because it is newer by reputation. Promote
+only models that win the measured bake-off for accuracy, reliability, latency,
+model size, and deployability.
 
 #### 7.1 Detector
 
@@ -371,7 +380,8 @@ Backbones:
 - ResNet-18 baseline,
 - ResNet-50 only if data supports it,
 - EfficientNetV2 small,
-- MobileNetV3/MobileViT for deployment candidates.
+- MobileNetV3/MobileViT for deployment candidates,
+- ConvNeXt-Tiny for fine-grained crop classification bake-off.
 
 Metrics:
 
@@ -541,6 +551,11 @@ Recommended next batches:
 11. 3D verification layer.
 12. Structured `/predict` response.
 13. Flutter richer result UI.
+
+Heavy model training, detector/classifier bake-offs, and expensive validation
+should run in Kaggle or Colab rather than on the local development PC. Commit
+code and scripts locally, push to GitHub, run experiments in the cloud, then
+feed results back into `reports/experiments/`.
 
 ## 5. Non-Negotiable Rules
 

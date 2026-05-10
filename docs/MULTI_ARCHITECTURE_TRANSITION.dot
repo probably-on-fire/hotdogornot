@@ -1,0 +1,218 @@
+digraph MultiArchitectureTransition {
+  graph [
+    label="Connector ID - Transition from ResNet Baseline to Multi-Architecture Vision Pipeline";
+    labelloc=t;
+    fontsize=24;
+    fontname="Arial Bold";
+    bgcolor="#f7f9fc";
+    pad=0.25;
+    rankdir=LR;
+    ranksep=0.75;
+    nodesep=0.50;
+    splines=spline;
+    outputorder=edgesfirst;
+  ];
+
+  node [
+    shape=box;
+    style="rounded,filled";
+    fontname="Arial";
+    fontsize=11;
+    margin="0.12,0.08";
+    color="#2f3b52";
+    penwidth=1.6;
+  ];
+
+  edge [
+    fontname="Arial";
+    fontsize=10;
+    color="#56677a";
+    arrowsize=0.8;
+    penwidth=1.6;
+  ];
+
+  subgraph cluster_baseline {
+    label="Current Baseline";
+    fontname="Arial Bold";
+    fontsize=16;
+    color="#527aa3";
+    style="rounded,filled";
+    fillcolor="#edf6ff";
+
+    image [
+      label="Camera Image\nsingle frame or video frame";
+      shape=folder;
+      fillcolor="#efe6ff:#fbf8ff";
+      gradientangle=90;
+    ];
+    hough [
+      label="Hough Crop + rembg Gate\ncurrent detector substitute";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    resnet [
+      label="ResNet-18 Classifier\nflat class label\nbaseline + fallback";
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+    legacy_json [
+      label="Compatible /predict JSON\nclass_name, confidence,\nprobabilities, bbox";
+      shape=note;
+      fillcolor="#d9ecff:#f7fbff";
+      gradientangle=90;
+    ];
+  }
+
+  subgraph cluster_detection {
+    label="Object Detection Track";
+    fontname="Arial Bold";
+    fontsize=16;
+    color="#be8b00";
+    style="rounded,filled";
+    fillcolor="#fff7df";
+
+    yolo [
+      label="YOLO11n / YOLO11s\nfast connector detector\nmulti-connector separation";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    rtdetr [
+      label="RT-DETR Small\nalternate detector\naccuracy/latency bake-off";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    detector_metrics [
+      label="Detector Metrics\nmAP, false positives,\nmisses, latency";
+      shape=note;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+  }
+
+  subgraph cluster_classifier {
+    label="Fine-Grained Attribute Classification Track";
+    fontname="Arial Bold";
+    fontsize=16;
+    color="#8c67aa";
+    style="rounded,filled";
+    fillcolor="#f4ecfb";
+
+    efficientnet [
+      label="EfficientNetV2-S\nhigh-accuracy crop classifier";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    mobilenet [
+      label="MobileNetV3 / MobileViT\nmobile-first classifier";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    convnext [
+      label="ConvNeXt-Tiny\nstrong fine-grained candidate";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    multihead [
+      label="Multi-Head Attribute Output\nfamily, polarity, gender,\nmount, orientation, termination";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+  }
+
+  subgraph cluster_verification {
+    label="Verification and Decision Layer";
+    fontname="Arial Bold";
+    fontsize=16;
+    color="#5a9b62";
+    style="rounded,filled";
+    fillcolor="#ecfaed";
+
+    geometry [
+      label="Geometry / Measurement\nthread cues, aperture,\nhex, body length, scale reference";
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    specs [
+      label="Taxonomy + Spec Lookup\nconnectors.yaml\ncompatibility constraints";
+      shape=folder;
+      fillcolor="#e5f7e7:#f8fff8";
+      gradientangle=90;
+    ];
+    render_match [
+      label="Optional 3D Render Verification\ncandidate model pose/silhouette check";
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    abstention [
+      label="Confidence / Abstention Gate\nhigh confidence, ambiguous,\nneed angle, need scale, unknown";
+      shape=diamond;
+      fillcolor="#fce3e3:#fff7f7";
+      gradientangle=90;
+    ];
+  }
+
+  subgraph cluster_outputs {
+    label="Deployment Decision";
+    fontname="Arial Bold";
+    fontsize=16;
+    color="#6d6aa5";
+    style="rounded,filled";
+    fillcolor="#f0efff";
+
+    reports [
+      label="Bake-Off Reports\nconfusion matrices,\nfailure gallery, calibration,\nlatency, model card";
+      shape=folder;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+    server [
+      label="Server Fallback\nFastAPI + PyTorch/ONNX";
+      shape=component;
+      fillcolor="#efe6ff:#fbf8ff";
+      gradientangle=90;
+    ];
+    mobile [
+      label="Mobile Exports\nONNX Runtime Mobile,\nTFLite/LiteRT, Core ML";
+      shape=component;
+      fillcolor="#efe6ff:#fbf8ff";
+      gradientangle=90;
+    ];
+    final_json [
+      label="Structured Prediction\nold fields preserved +\nrich detections and specs";
+      shape=note;
+      fillcolor="#fff1cc:#fffaf0";
+      gradientangle=90;
+    ];
+  }
+
+  image -> hough [label="current"];
+  hough -> resnet;
+  resnet -> legacy_json;
+
+  image -> yolo [label="new detector track", color="#b98200", style=dashed];
+  image -> rtdetr [label="alternate detector", color="#b98200", style=dashed];
+  yolo -> detector_metrics;
+  rtdetr -> detector_metrics;
+  detector_metrics -> efficientnet [label="crops", color="#b98200", style=dashed];
+  detector_metrics -> mobilenet [label="crops", color="#b98200", style=dashed];
+  detector_metrics -> convnext [label="crops", color="#b98200", style=dashed];
+
+  resnet -> multihead [label="baseline comparison", color="#527aa3"];
+  efficientnet -> multihead;
+  mobilenet -> multihead;
+  convnext -> multihead;
+
+  multihead -> geometry [label="candidate attributes"];
+  multihead -> specs [label="family + polarity"];
+  geometry -> abstention;
+  specs -> abstention;
+  render_match -> abstention [label="optional second pass", style=dashed, color="#b98200"];
+  multihead -> render_match [label="top candidates", style=dashed, color="#b98200"];
+
+  abstention -> reports [label="evaluate"];
+  reports -> server [label="best server model"];
+  reports -> mobile [label="best edge model"];
+  server -> final_json;
+  mobile -> final_json;
+  legacy_json -> final_json [label="compatibility preserved", color="#527aa3"];
+}
