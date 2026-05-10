@@ -1,4 +1,17 @@
-# SMA Connector AI — Tasks Backlog
+# SMA Connector AI - Development Task Blueprint
+
+This file is the execution checklist from the current repository state to the
+target multi-architecture RF connector identification system.
+
+Core rules:
+
+- Preserve existing Flutter and FastAPI behavior.
+- Preserve `/predict` compatibility.
+- Treat ResNet-18 as baseline/fallback, not the final architecture.
+- Build detector + multi-head classifier + geometry/spec verification.
+- Run heavy model training and bake-offs in Kaggle/Colab/cloud, not on the
+  local PC.
+- Keep local and GitHub `master` synced after each completed batch.
 
 ## Legend
 
@@ -16,132 +29,177 @@ Status values:
 
 ---
 
-## Epic 0 — Repository Audit and Safety Baseline
+## Epic 0 - Repository Audit and Safety Baseline
 
 ### P0 Tasks
 
-- [ ] Create `docs/REPO_AUDIT.md`.
-- [ ] Inventory root folders: `flutter/`, `training/`, `docs/`, `unity/`.
-- [ ] Read and summarize:
-  - [ ] root `README.md`
-  - [ ] `training/README.md`
-  - [ ] `training/docs/architecture.md`
-  - [ ] `training/docs/classifier_journey.md`
-  - [ ] `training/docs/runbook.md`
-  - [ ] `training/docs/capture_protocol.md`
-  - [ ] `flutter/README.md`
-- [ ] Identify current API entry points.
-- [ ] Identify current model load path.
-- [ ] Identify current dataset paths.
-- [ ] Identify current test suite.
-- [ ] Run available Python tests:
-  - [ ] `cd training && pytest`
-- [ ] Run static import check for training package.
-- [ ] Run Flutter dependency check:
-  - [ ] `cd flutter && flutter pub get`
-  - [ ] `cd flutter && flutter analyze`
-- [ ] Document all failures without hiding them.
-- [ ] Confirm current `/predict` response shape.
-- [ ] Add a baseline smoke test if none exists.
+- [x] Create `docs/REPO_AUDIT.md`.
+- [x] Inventory `flutter/`, `training/`, `docs/`, `unity/`.
+- [x] Read current README/training/Flutter architecture docs.
+- [x] Identify current FastAPI entry points.
+- [x] Identify current model load path.
+- [x] Identify current dataset paths.
+- [x] Identify current test suite.
+- [x] Confirm current `/predict` response shape.
+- [x] Document local test/tooling blockers.
+
+### Remaining P0 Tasks
+
+- [ ] Add/confirm a lightweight baseline smoke test for existing `/predict`
+      compatibility if not already covered.
+- [ ] In cloud or a properly provisioned Python 3.11 env, run the full
+      training pytest suite and record results.
+- [ ] In a Flutter-enabled environment, run `flutter analyze` and record
+      results.
 
 ### Acceptance Criteria
 
-- [ ] Repo can be explained in one page.
-- [ ] Existing breakages are documented.
-- [ ] No existing behavior was removed.
-- [ ] There is a known command to run the current server.
-- [ ] There is a known command to run the current app.
+- [x] Existing behavior was not removed.
+- [x] Current server/app paths are documented.
+- [x] Known local blockers are documented.
+- [ ] Full tests are run in the correct environment or documented as blocked.
 
 ---
 
-## Epic 1 — Taxonomy and Connector Specification Model
+## Epic 1 - Taxonomy and Connector Specification Model
 
 ### P0 Tasks
 
-- [ ] Create `docs/CONNECTOR_TAXONOMY.md`.
-- [ ] Define primary connector families:
-  - [ ] SMA
-  - [ ] RP-SMA
-  - [ ] 3.5mm
-  - [ ] 2.92mm / K / SMK
-  - [ ] 2.4mm
-  - [ ] 1.85mm / V
-  - [ ] 1.0mm / W
-  - [ ] SSMA
-  - [ ] SMB
-  - [ ] SMC
-  - [ ] QMA
-  - [ ] TNC
-  - [ ] BNC
-  - [ ] MCX
-  - [ ] 7/16 DIN
-  - [ ] unknown / unsupported
-- [ ] Define attribute labels:
-  - [ ] presence
-  - [ ] family
-  - [ ] precision family
-  - [ ] gender/contact
-  - [ ] polarity
-  - [ ] mount style
-  - [ ] orientation
-  - [ ] cable termination
-  - [ ] finish/material cue
-  - [ ] size/geometry
-  - [ ] confidence state
-- [ ] Create `training/rfconnectorai/specs/connectors.yaml`.
-- [ ] Add frequency range, impedance, coupling, compatibility, and visual notes where known.
-- [ ] Add `unknown` and `not_applicable` values explicitly.
-- [ ] Create `training/rfconnectorai/schemas/taxonomy.py`.
-- [ ] Add unit tests for taxonomy loading and validation.
+- [x] Create `docs/CONNECTOR_TAXONOMY.md`.
+- [x] Create `training/rfconnectorai/specs/connectors.yaml`.
+- [x] Add SMA, RP-SMA, 3.5mm, 2.92mm/K/SMK, 2.4mm, 1.85mm, 1.0mm, SSMA,
+      SMB, SMC, QMA, TNC, BNC, MCX, 7/16 DIN, and unknown.
+- [x] Define attribute values for presence, family, precision family,
+      gender/contact, polarity, mount, orientation, termination, finish,
+      confidence state.
+- [x] Create `training/rfconnectorai/schemas/taxonomy.py`.
+- [x] Add unit tests for taxonomy loading and validation.
+
+### P1 Tasks
+
+- [ ] Add side-A/side-B adapter fields explicitly to taxonomy docs and schemas.
+- [ ] Add examples for SMA-to-SMA, RP-SMA-to-SMA, SMA-to-BNC, SMA-to-MCX,
+      right-angle, tee, and bulkhead adapters.
+- [ ] Add a stable ID/name normalization helper for taxonomy labels.
 
 ### Acceptance Criteria
 
-- [ ] Taxonomy validates from YAML.
-- [ ] Unknown/unsupported connector is a first-class outcome.
-- [ ] Spec lookup is separate from model inference.
-- [ ] Server can import the taxonomy without starting training code.
+- [x] Taxonomy validates from YAML.
+- [x] Unknown/unsupported is first-class.
+- [x] Spec lookup is separate from model inference.
+- [x] Server-safe taxonomy import exists.
 
 ---
 
-## Epic 2 — Dataset Audit
+## Epic 2 - Dataset Audit
 
 ### P0 Tasks
 
 - [ ] Create `training/rfconnectorai/data/audit.py`.
 - [ ] Add CLI:
-  - [ ] `python -m rfconnectorai.data.audit --data-dir data --out docs/DATASET_AUDIT.md`
+
+  ```bash
+  python -m rfconnectorai.data.audit --data-dir data --out docs/DATASET_AUDIT.md
+  ```
+
+- [ ] Support additional roots:
+  - [ ] `training/Images`
+  - [ ] `training/data/labeled`
+  - [ ] `training/data/test_holdout`
+  - [ ] `training/data/reference`
+  - [ ] `training/data/videos`
 - [ ] Count images by folder/class.
-- [ ] Count train/val/test/holdout if present.
-- [ ] Detect real vs synthetic if path metadata permits.
-- [ ] Detect image dimensions and file types.
+- [ ] Count videos/reference files separately.
+- [ ] Detect image file types and dimensions.
 - [ ] Detect unreadable/corrupt images.
-- [ ] Detect duplicate and near-duplicate images.
-- [ ] Identify classes with fewer than target minimum samples.
-- [ ] Identify missing taxonomy classes.
+- [ ] Detect duplicates by hash.
+- [ ] Detect near-duplicate risk if practical.
+- [ ] Detect real vs synthetic from path/name metadata where possible.
+- [ ] Identify likely multi-connector images.
+- [ ] Identify missing classes relative to taxonomy.
+- [ ] Identify classes with fewer than minimum target samples.
+- [ ] Identify train/holdout leakage risks.
 - [ ] Generate `docs/DATASET_AUDIT.md`.
 
 ### P1 Tasks
 
 - [ ] Add blur score.
 - [ ] Add brightness/contrast stats.
-- [ ] Add background diversity approximation.
-- [ ] Add per-class example contact sheet.
-- [ ] Add leakage check by filename/specimen ID if metadata exists.
+- [ ] Add approximate background diversity.
+- [ ] Add per-class contact sheet.
+- [ ] Add specimen/source-group inference.
+- [ ] Add JSON output beside markdown.
 
 ### Acceptance Criteria
 
-- [ ] Dataset audit runs without training.
+- [ ] Audit does not modify or move images.
 - [ ] Audit report is deterministic.
-- [ ] Audit report clearly states why current held-out accuracy is not statistically meaningful if the holdout is tiny.
-- [ ] No images are moved or modified by audit script.
+- [ ] Audit states why the current 8-image holdout is statistically weak.
+- [ ] Audit identifies missing taxonomy families and multi-connector images.
 
 ---
 
-## Epic 3 — Dataset Standardization and Annotation Conversion
+## Epic 3 - Connector Instance Catalog and Crop Workflow
 
 ### P0 Tasks
 
-- [ ] Create standard dataset directory:
+- [ ] Create `training/rfconnectorai/data/crop_instances.py`.
+- [ ] Define `datasets/rfconnectors/instances.jsonl`.
+- [ ] Define one row per connector instance.
+- [ ] Preserve source image path and bbox for every crop.
+- [ ] Add fields:
+  - [ ] `instance_id`
+  - [ ] `source_image`
+  - [ ] `crop_path`
+  - [ ] `bbox_xyxy`
+  - [ ] `label_confidence`
+  - [ ] `source_type`
+  - [ ] `family`
+  - [ ] `precision_family`
+  - [ ] `side_a_gender`
+  - [ ] `side_b_gender`
+  - [ ] `polarity`
+  - [ ] `mount_style`
+  - [ ] `orientation`
+  - [ ] `termination`
+  - [ ] `finish_material_cue`
+  - [ ] `geometry`
+- [ ] Add CLI:
+
+  ```bash
+  python -m rfconnectorai.data.crop_instances \
+    --input training/Images \
+    --manifest datasets/rfconnectors/instances.jsonl \
+    --out datasets/rfconnectors/crops \
+    --dry-run
+  ```
+
+- [ ] Support manual/full-image weak crop entries.
+- [ ] Support detector-generated crop candidates.
+- [ ] Do not modify original source images.
+
+### P1 Tasks
+
+- [ ] Add simple local review manifest for human correction.
+- [ ] Add CVAT/Label Studio/Roboflow export manifest.
+- [ ] Add import path for corrected labels.
+- [ ] Add duplicate crop/source leakage detection.
+
+### Acceptance Criteria
+
+- [ ] Multi-connector images can produce multiple instance rows.
+- [ ] Every crop traces back to a source image.
+- [ ] Unknown/missing attributes are allowed and explicit.
+- [ ] Weak labels are marked as weak.
+
+---
+
+## Epic 4 - Dataset Standardization and YOLO Conversion
+
+### P0 Tasks
+
+- [ ] Create `training/rfconnectorai/data/build_yolo_dataset.py`.
+- [ ] Create output tree:
   - [ ] `datasets/rfconnectors/images/train`
   - [ ] `datasets/rfconnectors/images/val`
   - [ ] `datasets/rfconnectors/images/test`
@@ -150,38 +208,40 @@ Status values:
   - [ ] `datasets/rfconnectors/labels/test`
 - [ ] Create `datasets/rfconnectors/attributes.csv`.
 - [ ] Create `datasets/rfconnectors/data.yaml`.
-- [ ] Create `training/rfconnectorai/data/build_yolo_dataset.py`.
-- [ ] Add `--dry-run`.
-- [ ] Add split-by-specimen support.
-- [ ] Add background/no-connector support.
-- [ ] Add synthetic/real metadata field.
-- [ ] Add validation for class names against taxonomy.
+- [ ] Read from `instances.jsonl`.
+- [ ] Validate labels against taxonomy.
+- [ ] Support `--dry-run`.
+- [ ] Support split-by-specimen/source group.
+- [ ] Track synthetic vs real.
+- [ ] Support background/no-connector examples.
+- [ ] Support weak full-image boxes when true boxes are unavailable.
 
 ### P1 Tasks
 
-- [ ] Add simple annotation helper for full-image labels when bounding boxes are unavailable.
-- [ ] Add script to convert old classification folders into weak YOLO boxes.
-- [ ] Add script to produce a labeling manifest for CVAT/Label Studio/Roboflow/manual annotation.
+- [ ] Add label quality report.
+- [ ] Add class imbalance warning.
+- [ ] Add missing-attribute warning.
+- [ ] Add conversion tests with toy fixture data.
 
 ### Acceptance Criteria
 
-- [ ] Dataset builder does not leak same specimen into train and holdout.
-- [ ] Every exported image has corresponding metadata.
-- [ ] Missing labels are reported clearly.
-- [ ] Output can be consumed by YOLO training.
+- [ ] No same specimen/source group leaks across train/val/test.
+- [ ] YOLO dataset can be consumed by detector training.
+- [ ] Attribute metadata is available for multi-head training.
+- [ ] Dataset builder never silently drops labels.
 
 ---
 
-## Epic 4 — Detection Model Track
+## Epic 5 - Detector Training Track
 
 ### P0 Tasks
 
-- [ ] Add dependency documentation for Ultralytics or selected detector framework.
-- [ ] Create `training/rfconnectorai/detector/train_yolo.py`.
-- [ ] Support model selection:
+- [ ] Add `training/rfconnectorai/detector/__init__.py`.
+- [ ] Add `training/rfconnectorai/detector/train_yolo.py`.
+- [ ] Support model choices:
   - [ ] `yolo11n.pt`
   - [ ] `yolo11s.pt`
-  - [ ] future YOLO26 if installed/supported
+  - [ ] future YOLO variants if installed/supported
 - [ ] Add CLI args:
   - [ ] `--data`
   - [ ] `--model`
@@ -190,124 +250,231 @@ Status values:
   - [ ] `--batch`
   - [ ] `--device`
   - [ ] `--out`
-- [ ] Save training run metadata.
+  - [ ] `--dry-run`
+- [ ] Save run metadata under `reports/experiments/<timestamp>/`.
 - [ ] Save mAP metrics.
 - [ ] Save detector model card.
+- [ ] Add config validation tests.
+- [ ] Do not run expensive training in tests.
 
 ### P1 Tasks
 
-- [ ] Add RT-DETR-small experiment option if dependency is practical.
+- [ ] Add RT-DETR small experiment option if dependency is practical.
 - [ ] Add detector failure gallery.
-- [ ] Add export helper for ONNX/TFLite/CoreML where supported.
-- [ ] Add no-connector rejection tests.
+- [ ] Add no-connector/background rejection metrics.
+- [ ] Add detector export helper for ONNX/TFLite/CoreML where supported.
+- [ ] Add cloud notebook/run instructions for Kaggle/Colab.
 
 ### Acceptance Criteria
 
-- [ ] Detector can locate connector in a phone image.
-- [ ] Background-only images are rejected.
-- [ ] Model artifacts are saved predictably.
-- [ ] Training script has a dry-run/config validation mode.
+- [ ] Detector locates connector instances in phone/product images.
+- [ ] Multi-connector images produce multiple detections.
+- [ ] Background-only images are rejected reliably.
+- [ ] Detector run is reproducible from config.
+- [ ] Heavy training is performed in cloud, not local PC.
 
 ---
 
-## Epic 5 — Multi-Head Attribute Classifier
+## Epic 6 - Multi-Head Attribute Classifier
 
 ### P0 Tasks
 
-- [ ] Treat current ResNet-18 as baseline/fallback, not the only target architecture.
+- [ ] Keep current ResNet-18 path intact as baseline/fallback.
 - [ ] Create `training/rfconnectorai/classifier/model_multihead.py`.
 - [ ] Create `training/rfconnectorai/classifier/train_multihead.py`.
-- [ ] Implement attribute heads:
+- [ ] Create `training/rfconnectorai/classifier/label_encoding.py`.
+- [ ] Implement heads:
   - [ ] family
-  - [ ] gender/contact
+  - [ ] precision family
+  - [ ] side A gender/contact
+  - [ ] side B gender/contact
   - [ ] polarity
   - [ ] mount style
   - [ ] orientation
   - [ ] termination
-- [ ] Support backbones:
-  - [ ] current ResNet-18 baseline
-  - [ ] ResNet-50
-  - [ ] EfficientNetV2 small or MobileNetV3
-  - [ ] MobileViT if dependency/runtime is practical
-  - [ ] ConvNeXt-Tiny if dependency/runtime is practical
-- [ ] Add weighted loss for missing or imbalanced attributes.
+  - [ ] finish/material cue
+- [ ] Support missing labels safely.
+- [ ] Support candidate backbones:
+  - [ ] ResNet-18 baseline
+  - [ ] ResNet-50 if useful
+  - [ ] EfficientNetV2-S
+  - [ ] MobileNetV3
+  - [ ] MobileViT if practical
+  - [ ] ConvNeXt-Tiny if practical
+- [ ] Add weighted/masked losses for missing and imbalanced attributes.
 - [ ] Add top-k output.
 - [ ] Add confidence calibration output.
-- [ ] Save model card.
+- [ ] Save metrics and model card.
+- [ ] Add tests for label encoding and forward pass.
 
 ### P1 Tasks
 
-- [ ] Add hard-negative mining.
 - [ ] Add focal loss option.
-- [ ] Add mixup/cutmix augmentation option.
+- [ ] Add mixup/cutmix option.
 - [ ] Add class-balanced sampler.
-- [ ] Add multi-crop/test-time augmentation option.
-- [ ] Add per-attribute confusion matrices.
+- [ ] Add hard-negative mining.
+- [ ] Add multi-crop/test-time augmentation.
+- [ ] Add per-head confusion matrices.
+- [ ] Add cloud bake-off scripts/configs.
 
 ### Acceptance Criteria
 
 - [ ] Multi-head classifier trains on standardized dataset.
 - [ ] Missing attributes do not crash training.
 - [ ] Per-attribute metrics are reported.
-- [ ] Baseline ResNet result is still available for comparison.
-- [ ] Candidate architectures are compared in Kaggle/Colab or another cloud runtime, not on the local development PC.
+- [ ] ResNet baseline remains comparable.
+- [ ] Candidate architectures are compared in Kaggle/Colab/cloud.
 
 ---
 
-## Epic 6 — Evaluation and Reporting
+## Epic 7 - 3D Model Suite and Synthetic Rendering
 
 ### P0 Tasks
 
-- [ ] Create `training/rfconnectorai/eval/evaluate_all.py`.
-- [ ] Evaluate detector and classifier together.
-- [ ] Produce:
-  - [ ] `metrics.json`
-  - [ ] family confusion matrix
-  - [ ] attribute confusion matrices
-  - [ ] failure gallery
-  - [ ] latency report
-  - [ ] model card
-- [ ] Add abstention thresholds:
-  - [ ] family confidence threshold
-  - [ ] margin between top-1 and top-2
-  - [ ] low image quality flag
-  - [ ] multiple similar connector warning
+- [ ] Create `training/rfconnectorai/synthetic/model_catalog.py`.
+- [ ] Create `training/rfconnectorai/synthetic/render_suite.py`.
+- [ ] Define parametric models for:
+  - [ ] SMA male/female straight
+  - [ ] RP-SMA male/female
+  - [ ] right-angle adapters
+  - [ ] tee/splitter adapters
+  - [ ] bulkhead/panel mount
+  - [ ] cable/crimp/solder connectors
+  - [ ] SMA-to-SMA adapters
+  - [ ] SMA-to-BNC/TNC/MCX/UHF/N adapters
+  - [ ] 3.5mm and 2.92mm/K/SMK lookalikes
+  - [ ] 2.4mm, 1.85mm, 1.0mm precision families
+  - [ ] confusing negatives
+- [ ] Render variations:
+  - [ ] angle/pose
+  - [ ] lighting
+  - [ ] background
+  - [ ] focal length
+  - [ ] blur/noise/compression
+  - [ ] occlusion
+  - [ ] with/without scale reference
+  - [ ] single and multi-connector scenes
+- [ ] Emit perfect labels:
+  - [ ] bbox
+  - [ ] mask if available
+  - [ ] attributes
+  - [ ] geometry
+  - [ ] render seed
+  - [ ] camera pose
+  - [ ] source model ID
 
 ### P1 Tasks
 
-- [ ] Add calibration curve.
-- [ ] Add expected calibration error.
-- [ ] Add bootstrap confidence interval for accuracy.
-- [ ] Add per-class precision/recall/F1.
-- [ ] Add “demo readiness” scorecard.
+- [ ] Add synthetic-vs-real balancing controls.
+- [ ] Add render quality audit.
+- [ ] Add synthetic failure/lookalike set.
+- [ ] Add cloud render/training notes.
+
+### Acceptance Criteria
+
+- [ ] Synthetic renders are traceable to model IDs.
+- [ ] Synthetic images never contaminate real holdout.
+- [ ] Synthetic data can augment detector and classifier training.
+- [ ] Generated labels validate against taxonomy.
+
+---
+
+## Epic 8 - Geometry, Measurement, and 3D Verification
+
+### P0 Tasks
+
+- [ ] Define geometry schema for predictions.
+- [ ] Integrate existing ArUco/hex/aperture/thread modules where useful.
+- [ ] Add `need_scale_reference` state.
+- [ ] Add geometry plausibility checks.
+- [ ] Add spec compatibility checks.
+- [ ] Create optional 3D render verification interface:
+  - [ ] receive top candidate labels
+  - [ ] render candidate poses
+  - [ ] compare silhouette/edges/thread/body proportions
+  - [ ] return confidence adjustment or second-angle request
+
+### P1 Tasks
+
+- [ ] Add calibrated measurement mode.
+- [ ] Add thread count/pitch estimator.
+- [ ] Add second-angle fusion.
+- [ ] Add measurement tests with fixture images/renders.
+
+### Acceptance Criteria
+
+- [ ] Geometry does not claim exact size without scale evidence.
+- [ ] Impossible/spec-incompatible predictions are downgraded.
+- [ ] 3D verification is second-pass only, not the primary detector.
+
+---
+
+## Epic 9 - Evaluation and Reporting Harness
+
+### P0 Tasks
+
+- [ ] Create `training/rfconnectorai/eval/__init__.py`.
+- [ ] Create `training/rfconnectorai/eval/evaluate_all.py`.
+- [ ] Create `training/rfconnectorai/eval/reports.py`.
+- [ ] Evaluate detector and classifier together.
+- [ ] Report:
+  - [ ] mAP@50
+  - [ ] mAP@50-95
+  - [ ] family accuracy
+  - [ ] polarity accuracy
+  - [ ] side A/B gender accuracy
+  - [ ] mount/orientation/termination accuracy
+  - [ ] macro F1
+  - [ ] top-k accuracy
+  - [ ] calibration error
+  - [ ] abstention-aware correctness
+  - [ ] latency
+  - [ ] model size
+- [ ] Produce:
+  - [ ] `metrics.json`
+  - [ ] confusion matrices
+  - [ ] failure gallery
+  - [ ] calibration curve
+  - [ ] latency report
+  - [ ] model card
+  - [ ] config snapshot
+
+### P1 Tasks
+
+- [ ] Add bootstrap confidence intervals.
+- [ ] Add demo-readiness scorecard.
+- [ ] Add before/after comparison against ResNet-18 baseline.
+- [ ] Add cloud-run summary template.
 
 ### Acceptance Criteria
 
 - [ ] Every experiment is comparable to prior runs.
-- [ ] Report distinguishes forced-choice accuracy from abstention-aware correctness.
-- [ ] Failure cases are visible, not hidden.
+- [ ] Forced-choice and abstention-aware metrics are separated.
+- [ ] Failure cases are visible.
 - [ ] No 99.99% claim is made without sufficient validation.
 
 ---
 
-## Epic 7 — FastAPI Prediction Service Upgrade
+## Epic 10 - FastAPI Prediction Service Upgrade
 
 ### P0 Tasks
 
-- [ ] Locate current FastAPI app.
-- [ ] Preserve existing endpoint path and old response fields.
-- [ ] Add structured prediction schema in `training/rfconnectorai/schemas/prediction.py`.
-- [ ] Add output fields:
+- [ ] Preserve existing `/predict` endpoint path.
+- [ ] Preserve old response fields.
+- [ ] Add `training/rfconnectorai/schemas/prediction.py`.
+- [ ] Add structured fields:
   - [ ] request ID
   - [ ] detected
+  - [ ] detections
   - [ ] bbox
-  - [ ] connector family
+  - [ ] family
   - [ ] precision family
-  - [ ] gender/contact
+  - [ ] side A/B gender/contact
   - [ ] polarity
   - [ ] mount style
   - [ ] orientation
   - [ ] termination
+  - [ ] geometry
   - [ ] confidence state
   - [ ] warnings
   - [ ] spec lookup
@@ -315,8 +482,9 @@ Status values:
   - [ ] top alternatives
 - [ ] Add no-connector response.
 - [ ] Add ambiguous response.
-- [ ] Add second-angle recommendation response.
-- [ ] Add unit tests for response schema.
+- [ ] Add second-angle recommendation.
+- [ ] Add response schema tests.
+- [ ] Add old-client compatibility tests.
 
 ### P1 Tasks
 
@@ -325,7 +493,7 @@ Status values:
 - [ ] Add `/taxonomy`.
 - [ ] Add `/specs/{connector_family}`.
 - [ ] Add server-side image quality diagnostics.
-- [ ] Add request logging without storing sensitive images by default.
+- [ ] Add privacy-safe request logging.
 
 ### Acceptance Criteria
 
@@ -336,111 +504,115 @@ Status values:
 
 ---
 
-## Epic 8 — Flutter App Upgrade
+## Epic 11 - Flutter App Upgrade
 
 ### P0 Tasks
 
-- [ ] Locate existing identify screen.
-- [ ] Preserve current camera flow.
-- [ ] Update client data model to parse rich prediction response.
+- [ ] Preserve existing identify/camera flow.
+- [ ] Preserve current screens.
+- [ ] Update API client to parse rich response beside old fields.
 - [ ] Add richer result card:
   - [ ] family
-  - [ ] gender
+  - [ ] side A/B gender/contact
   - [ ] polarity
   - [ ] mount style
   - [ ] orientation
   - [ ] confidence
-  - [ ] top alternatives
   - [ ] warnings
+  - [ ] top alternatives
   - [ ] spec summary
 - [ ] Add visual states:
   - [ ] high confidence
   - [ ] ambiguous
   - [ ] no connector
   - [ ] need another angle
+  - [ ] need scale reference
   - [ ] unsupported connector
 - [ ] Keep correction chips.
-- [ ] Add capture/contribute metadata fields for taxonomy attributes.
+- [ ] Add contributor metadata fields for taxonomy attributes.
 
 ### P1 Tasks
 
-- [ ] Add bounding-box overlay on preview/result image.
+- [ ] Add bounding-box overlay.
 - [ ] Add offline/server inference setting.
 - [ ] Add app-side latency display in dev mode.
-- [ ] Add “capture second angle” guided workflow.
-- [ ] Add “known part number” field in contributor mode.
+- [ ] Add guided second-angle workflow.
+- [ ] Add known part number field.
 - [ ] Add export/share result as JSON.
 
 ### Acceptance Criteria
 
 - [ ] User can identify connector from camera.
-- [ ] Result is understandable to non-ML client.
-- [ ] Low-confidence result does not look like a confident answer.
+- [ ] Low-confidence result does not look confident.
 - [ ] Contributor mode improves future dataset quality.
+- [ ] Flutter analyze passes in a Flutter-enabled environment.
 
 ---
 
-## Epic 9 — Mobile/Desktop Deployment
+## Epic 12 - Mobile, Edge, and Server Deployment
 
 ### P0 Tasks
 
-- [ ] Add export command for detector/classifier.
-- [ ] Test ONNX export.
-- [ ] Test TFLite/LiteRT export where supported.
-- [ ] Test Core ML export where supported.
+- [ ] Create `training/rfconnectorai/export/export_mobile.py`.
+- [ ] Export detector/classifier to ONNX.
+- [ ] Test ONNX Runtime path in cloud/dev environment.
+- [ ] Test TFLite/LiteRT where supported.
+- [ ] Test Core ML where supported.
 - [ ] Document export compatibility.
 - [ ] Add `exports/mobile/README.md`.
 
 ### P1 Tasks
 
-- [ ] Integrate local inference into Flutter Android first.
-- [ ] Add server fallback.
+- [ ] Integrate Android local inference first.
+- [ ] Add server fallback setting.
 - [ ] Add model version selection.
-- [ ] Add latency benchmark on target device.
-- [ ] Add Flutter desktop run path for Windows/Linux/macOS.
+- [ ] Add target-device latency benchmark.
+- [ ] Add Flutter desktop run path.
 
 ### Acceptance Criteria
 
 - [ ] At least one local mobile inference path works.
 - [ ] Server fallback remains stable.
-- [ ] Desktop app can run or the limitation is documented.
+- [ ] Desktop app can run or limitation is documented.
 - [ ] Exported model artifacts are versioned.
 
 ---
 
-## Epic 10 — Client Demo Package
+## Epic 13 - Client Demo Package
 
 ### P0 Tasks
 
 - [ ] Create `docs/CLIENT_DEMO_README.md`.
 - [ ] Create `docs/DEMO_SCRIPT.md`.
 - [ ] Create `docs/LIMITATIONS_AND_NEXT_STEPS.md`.
-- [ ] Create latest model card.
-- [ ] Create before/after metrics table.
-- [ ] Include screenshots or GIFs if available.
-- [ ] Include exact commands:
+- [ ] Create `docs/MODEL_CARD_TEMPLATE.md`.
+- [ ] Add exact commands for:
   - [ ] run server
   - [ ] run Flutter app
   - [ ] run evaluation
   - [ ] export model
+  - [ ] reproduce cloud training
+- [ ] Include before/after metrics table.
+- [ ] Include screenshots/GIFs if available.
+- [ ] Frame limitations professionally.
 
 ### Acceptance Criteria
 
 - [ ] Demo can be run by someone besides the original developer.
-- [ ] Contract client can understand what improved.
-- [ ] Limitations are framed professionally.
+- [ ] Client can understand what improved.
+- [ ] Limitations are honest and confidence-building.
 - [ ] Next data collection plan is clear.
 
 ---
 
-## Epic 11 — CI, Quality, and Project Hygiene
+## Epic 14 - CI, Quality, and Project Hygiene
 
 ### P1 Tasks
 
-- [ ] Add or update GitHub Actions for Python tests.
+- [ ] Update GitHub Actions for Python tests.
 - [ ] Add lint/format commands.
-- [ ] Add `ruff` or equivalent if not present.
-- [ ] Add `mypy` selectively if feasible.
+- [ ] Add `ruff` if not already present.
+- [ ] Add selective `mypy` if feasible.
 - [ ] Add Flutter analyze workflow.
 - [ ] Add small fixture images for tests.
 - [ ] Add `.gitignore` entries for:
@@ -449,248 +621,198 @@ Status values:
   - [ ] model weights
   - [ ] exports
   - [ ] local envs
-- [ ] Add model artifact naming convention.
+- [ ] Add artifact naming convention.
+- [ ] Ensure CI does not require GPU.
 
 ### Acceptance Criteria
 
 - [ ] Tests run predictably.
 - [ ] Large datasets/models are not accidentally committed.
 - [ ] CI does not require GPU.
-- [ ] Local GPU training remains documented.
+- [ ] Cloud training remains documented.
 
 ---
 
-## Epic 12 — Advanced Enhancements
+## Epic 15 - Advanced Enhancements
 
 ### P2/P3 Tasks
 
-- [ ] Add active learning loop:
-  - [ ] collect low-confidence examples
-  - [ ] route to labeling queue
-  - [ ] retrain periodically
-- [ ] Add calibrated measurement mode:
-  - [ ] user places reference object
-  - [ ] estimate diameter/body length/thread pitch
-- [ ] Add segmentation model for precise connector outline.
-- [ ] Add SAM/SAM2-assisted annotation pipeline.
-- [ ] Add VLM/LLM explanation assistant.
-- [ ] Add manufacturer part-number lookup.
-- [ ] Add barcode/QR scan for labeled inventory workflows.
-- [ ] Add AR overlay for connector dimensions.
-- [ ] Add cloud dashboard for collected corrections.
+- [ ] Active learning loop.
+- [ ] Low-confidence collection queue.
+- [ ] Periodic retraining workflow.
+- [ ] Calibrated measurement mode.
+- [ ] SAM/SAM2-assisted annotation.
+- [ ] VLM/LLM explanation assistant.
+- [ ] Manufacturer part-number lookup.
+- [ ] Barcode/QR inventory workflow.
+- [ ] AR overlay for dimensions.
+- [ ] Cloud dashboard for corrections.
 
 ### Acceptance Criteria
 
 - [ ] Advanced features do not block core demo.
-- [ ] Measurement mode clearly labels estimates vs confirmed specs.
-- [ ] LLM/VLM does not override measured classifier confidence without evidence.
+- [ ] Measurement estimates are labeled as estimates.
+- [ ] LLM/VLM does not override visual/geometry confidence without evidence.
 
 ---
 
-## First Codex Execution Batch
+## Execution Batch 1 - Completed: Repo Audit and Taxonomy
 
-Give Codex this exact first batch:
+Completed deliverables:
 
-```text
-Start with IMPLEMENTATION_PLAN.md and TASKS.md as authoritative root planning docs.
-
-Do not rewrite the whole app. First audit the repository and preserve all existing behavior.
-
-Implement only Epic 0 and Epic 1 first:
-
-1. Create docs/REPO_AUDIT.md by inspecting the repo structure, current README docs, current training pipeline, current FastAPI service, current Flutter app, and tests.
-2. Create docs/CONNECTOR_TAXONOMY.md with the connector families and attributes listed in IMPLEMENTATION_PLAN.md.
-3. Create training/rfconnectorai/specs/connectors.yaml with structured specs for SMA, RP-SMA, 3.5mm, 2.92mm/K/SMK, 2.4mm, 1.85mm, 1.0mm, SSMA, SMB, SMC, QMA, TNC, BNC, MCX, 7/16 DIN, unknown.
-4. Add a lightweight taxonomy loader/validator in training/rfconnectorai/schemas/taxonomy.py.
-5. Add tests for loading and validating the taxonomy YAML.
-6. Run pytest for the training package if possible.
-7. Run flutter analyze if Flutter is available.
-8. Do not delete, rename, or break the existing predict endpoint or Flutter screens.
-9. Commit changes in small logical units or show a patch summary if committing is unavailable.
-
-Return:
-- files changed
-- commands run
-- test results
-- any blockers
-- next recommended task batch
-```
+- `docs/REPO_AUDIT.md`
+- `docs/CONNECTOR_TAXONOMY.md`
+- `training/rfconnectorai/specs/connectors.yaml`
+- `training/rfconnectorai/schemas/taxonomy.py`
+- `training/tests/test_taxonomy.py`
 
 ---
 
-## Second Codex Execution Batch
+## Execution Batch 2 - Dataset Audit
 
-```text
-Continue from the completed repo audit and taxonomy.
-
-Implement Epic 2 dataset audit:
-
-1. Create training/rfconnectorai/data/audit.py.
-2. Add a CLI runnable as:
-   python -m rfconnectorai.data.audit --data-dir data --out docs/DATASET_AUDIT.md
-3. The audit must count images by class/folder, detect unreadable files, summarize dimensions, detect duplicates by hash, and identify classes missing relative to the taxonomy.
-4. Do not move or modify any image files.
-5. Generate docs/DATASET_AUDIT.md.
-6. Add tests using temporary fixture folders/images.
-7. Run pytest.
+Implement Epic 2.
 
 Return:
+
 - files changed
 - generated audit summary
 - commands run
-- test results
-- blockers
-```
+- cloud/local environment used
+- test results or blockers
+- next recommended batch
 
 ---
 
-## Third Codex Execution Batch
+## Execution Batch 3 - Instance Catalog and Crop Workflow
 
-```text
-Continue from the taxonomy and dataset audit.
-
-Implement Epic 3 dataset standardization:
-
-1. Create training/rfconnectorai/data/build_yolo_dataset.py.
-2. Add CLI:
-   python -m rfconnectorai.data.build_yolo_dataset --input data/labeled --out datasets/rfconnectors --dry-run
-3. Support export to:
-   datasets/rfconnectors/images/train
-   datasets/rfconnectors/images/val
-   datasets/rfconnectors/images/test
-   datasets/rfconnectors/labels/train
-   datasets/rfconnectors/labels/val
-   datasets/rfconnectors/labels/test
-   datasets/rfconnectors/attributes.csv
-   datasets/rfconnectors/data.yaml
-4. If no bounding boxes exist, support weak full-image boxes and clearly mark them as weak labels.
-5. Prevent train/test leakage by specimen_id if available.
-6. Track real vs synthetic if detectable from path or metadata.
-7. Add tests with toy fixture data.
-8. Run pytest.
+Implement Epic 3.
 
 Return:
+
 - files changed
+- manifest schema summary
+- crop workflow summary
 - command examples
-- test results
 - known limitations
-```
 
 ---
 
-## Fourth Codex Execution Batch
+## Execution Batch 4 - Dataset Standardization
 
-```text
-Continue from the standardized dataset output.
-
-Implement the first detection training track:
-
-1. Add training/rfconnectorai/detector/train_yolo.py.
-2. Support Ultralytics YOLO model selection with yolo11n.pt and yolo11s.pt if available.
-3. Add CLI args for data, model, epochs, imgsz, batch, device, and out.
-4. Save run metadata and metrics under reports/experiments/<timestamp>.
-5. Add export helper stub for ONNX/TFLite/CoreML but do not block training if export dependencies are missing.
-6. Add documentation to training/README.md or docs/DETECTOR_TRAINING.md.
-7. Add tests for CLI argument parsing and config validation.
-8. Do not run expensive training by default in tests.
+Implement Epic 4.
 
 Return:
+
 - files changed
+- dataset tree created or dry-run report
+- validation results
 - command examples
-- test results
+- known limitations
+
+---
+
+## Execution Batch 5 - First Detector Track
+
+Implement Epic 5.
+
+Return:
+
+- files changed
+- cloud command examples
+- config validation results
 - how to run first detector training
-```
+- no local heavy training confirmation
 
 ---
 
-## Fifth Codex Execution Batch
+## Execution Batch 6 - Multi-Head Classifier Track
 
-```text
-Continue from detector training.
-
-Implement the multi-head classifier path:
-
-1. Create training/rfconnectorai/classifier/model_multihead.py.
-2. Create training/rfconnectorai/classifier/train_multihead.py.
-3. Use a configurable backbone initially supporting current ResNet-18 and one mobile-friendly option if already available.
-4. Implement output heads for family, gender, polarity, mount style, orientation, and termination.
-5. Support missing labels safely.
-6. Report per-head accuracy and macro F1.
-7. Save metrics and confusion matrix data under reports/experiments/<timestamp>.
-8. Add tests for model forward pass and dataset label encoding.
-9. Keep current ResNet classifier path intact.
+Implement Epic 6.
 
 Return:
+
 - files changed
+- supported backbones
 - command examples
-- test results
+- label encoding tests
 - next integration steps
-```
 
 ---
 
-## Sixth Codex Execution Batch
+## Execution Batch 7 - 3D/Synthetic Pipeline
 
-```text
-Continue from detector and multi-head classifier.
-
-Upgrade the FastAPI prediction response without breaking old clients:
-
-1. Add training/rfconnectorai/schemas/prediction.py.
-2. Preserve current /predict endpoint path and old fields.
-3. Add structured fields for detections, attributes, confidence, warnings, top alternatives, spec lookup, and latency.
-4. Add no-connector and ambiguous result states.
-5. Add tests for old response compatibility and new structured response.
-6. Update server docs.
+Implement Epic 7.
 
 Return:
+
 - files changed
-- example JSON response
-- test results
-- any Flutter changes needed next
-```
+- model catalog summary
+- render command examples
+- synthetic label format
+- known limitations
 
 ---
 
-## Seventh Codex Execution Batch
+## Execution Batch 8 - Evaluation Harness
 
-```text
-Continue from upgraded API response.
-
-Upgrade the Flutter UI:
-
-1. Parse the richer /predict response while preserving compatibility with old response fields.
-2. Update result card to show family, gender, polarity, mount style, orientation, confidence, warnings, top alternatives, and spec summary.
-3. Add visual states for high confidence, ambiguous, no connector, need another angle, and unsupported connector.
-4. Keep existing identify/camera flow working.
-5. Keep correction chips.
-6. Add contributor metadata fields if practical.
-7. Run flutter analyze.
+Implement Epic 9.
 
 Return:
+
+- files changed
+- report schema
+- metrics supported
+- cloud run instructions
+- blockers
+
+---
+
+## Execution Batch 9 - API Upgrade
+
+Implement Epic 10.
+
+Return:
+
+- files changed
+- example old-compatible JSON
+- example rich JSON
+- test results
+- Flutter changes needed next
+
+---
+
+## Execution Batch 10 - Flutter Upgrade
+
+Implement Epic 11.
+
+Return:
+
 - files changed
 - UI behavior summary
-- analyze/test results
+- analyze/test results from Flutter-capable environment
 - screenshots instructions if applicable
-```
 
 ---
 
-## Eighth Codex Execution Batch
+## Execution Batch 11 - Export/Deployment
 
-```text
-Prepare client demo package:
-
-1. Create docs/CLIENT_DEMO_README.md.
-2. Create docs/DEMO_SCRIPT.md.
-3. Create docs/LIMITATIONS_AND_NEXT_STEPS.md.
-4. Create docs/MODEL_CARD_TEMPLATE.md if not already present.
-5. Add exact commands for server, app, training, eval, and export.
-6. Include a before/after metrics table populated with available actual results; use TBD only where no result exists yet.
-7. Make the limitations professional and confidence-building, not apologetic.
+Implement Epic 12.
 
 Return:
+
+- files changed
+- export commands
+- server/mobile compatibility notes
+- latency benchmark plan
+
+---
+
+## Execution Batch 12 - Client Demo Package
+
+Implement Epic 13.
+
+Return:
+
 - files changed
 - demo instructions
 - remaining blockers before client presentation
-```
