@@ -79,6 +79,62 @@ def export_detector(weights: Path, output: Path, image_size: int = 640) -> Path:
     return output
 
 
+def export_classifier(weights: Path, output: Path, image_size: int = 384) -> Path:
+    """
+    Export the MultiHeadClassifier to ONNX with one named output per head.
+
+    The checkpoint must contain ``head_sizes``, ``backbone``, ``vocabs``, and
+    ``state_dict`` keys as saved by ``train_multihead.py``.
+    """
+    from rfconnectorai.classifier.model_multihead import build_multihead_classifier
+
+    ckpt = torch.load(weights, map_location="cpu", weights_only=False)
+    head_sizes = ckpt["head_sizes"]
+    backbone = ckpt["backbone"]
+    model = build_multihead_classifier(backbone, head_sizes)
+    model.load_state_dict(ckpt["state_dict"])
+    model.eval()
+
+    # The model returns a dict of head_name -> logits.  ONNX cannot export
+    # dicts directly, so wrap in a thin Module that returns a tuple in a
+    # stable head order.
+    head_order = list(head_sizes.keys())
+
+    class _Ordered(torch.nn.Module):
+        def __init__(self, inner, order):
+            super().__init__()
+            self.inner = inner
+            self.order = order
+
+        def forward(self, x):
+            out = self.inner(x)
+            return tuple(out[h] for h in self.order)
+
+    ordered = _Ordered(model, head_order)
+    dummy = torch.randn(1, 3, image_size, image_size)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    torch.onnx.export(
+        ordered,
+        dummy,
+        str(output),
+        input_names=["image"],
+        output_names=head_order,
+        opset_version=17,
+        dynamic_axes={"image": {0: "batch"}, **{h: {0: "batch"} for h in head_order}},
+        dynamo=False,
+    )
+
+    # Also write the vocabs JSON next to the ONNX for easy pairing.
+    vocabs = ckpt.get("vocabs", {})
+    vocabs_path = output.with_name(output.stem + "_vocabs.json")
+    import json
+    vocabs_path.write_text(
+        json.dumps(vocabs, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    return output
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--embedder-checkpoint", type=Path)
@@ -93,6 +149,9 @@ def main():
         help="Also produce INT8-quantized variants alongside the float models. "
              "Output files are named <stem>_int8.onnx.",
     )
+    ap.add_argument("--classifier-weights", type=Path)
+    ap.add_argument("--classifier-out", type=Path)
+    ap.add_argument("--classifier-size", type=int, default=384)
     args = ap.parse_args()
 
     if args.embedder_checkpoint and args.embedder_out:
@@ -118,6 +177,18 @@ def main():
             q = p.with_name(p.stem + "_int8" + p.suffix)
             quantize_int8(p, q)
             print(f"detector ONNX (INT8): {q}  ({q.stat().st_size / 1024 / 1024:.1f} MB)")
+
+    if args.classifier_weights and args.classifier_out:
+        p = export_classifier(
+            weights=args.classifier_weights,
+            output=args.classifier_out,
+            image_size=args.classifier_size,
+        )
+        print(f"classifier ONNX: {p}  ({p.stat().st_size / 1024 / 1024:.1f} MB)")
+        if args.quantize:
+            q = p.with_name(p.stem + "_int8" + p.suffix)
+            quantize_int8(p, q)
+            print(f"classifier ONNX (INT8): {q}  ({q.stat().st_size / 1024 / 1024:.1f} MB)")
 
 
 if __name__ == "__main__":
