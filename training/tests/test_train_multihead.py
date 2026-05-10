@@ -62,13 +62,14 @@ def test_validate_config_rejects_unknown_backbone(tmp_path: Path):
 
 
 def test_validate_config_rejects_zero_or_negative(tmp_path: Path):
-    for kwargs in ({"epochs": 0}, {"batch": 0}, {"imgsz": 0}):
-        cfg = MultiHeadTrainerConfig(
+    for override in ({"epochs": 0}, {"batch": 0}, {"imgsz": 0}):
+        defaults = dict(
             dataset=tmp_path, backbone="resnet18",
             epochs=1, batch=1, imgsz=32, device="cpu",
             out=tmp_path / "r", artifact_out=tmp_path / "a",
-            **kwargs,
         )
+        defaults.update(override)
+        cfg = MultiHeadTrainerConfig(**defaults)
         with pytest.raises(ValueError):
             validate_config(cfg)
 

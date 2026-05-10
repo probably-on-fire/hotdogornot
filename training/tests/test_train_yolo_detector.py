@@ -76,16 +76,17 @@ def test_validate_config_rejects_missing_data(tmp_path: Path):
 
 def test_validate_config_requires_positive_epochs_imgsz_batch(tmp_path: Path):
     data = _write_data_yaml(tmp_path)
-    for kwargs in (
+    for override in (
         {"epochs": 0},
         {"imgsz": 0},
         {"batch": 0},
     ):
-        cfg = TrainerConfig(
+        defaults = dict(
             data=data, model="yolo11n.pt", epochs=1, imgsz=32, batch=1,
             device="cpu", out=tmp_path / "out", artifact_out=tmp_path / "art",
-            **kwargs,
         )
+        defaults.update(override)
+        cfg = TrainerConfig(**defaults)
         with pytest.raises(ValueError):
             validate_config(cfg)
 

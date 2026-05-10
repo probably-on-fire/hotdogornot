@@ -101,10 +101,12 @@ def parse_family_from_folder(name: str) -> tuple[str, str | None]:
 
 
 def _infer_source_type(source: Path) -> SourceType:
-    parts = {p.lower() for p in source.parts}
-    if any(hint in parts for hint in ("synthetic", "synth", "render", "renders", "cad")):
+    parts_lower = [p.lower() for p in source.parts]
+    synthetic_hints = ("synthetic", "synth", "render", "cad")
+    if any(hint in part for part in parts_lower for hint in synthetic_hints):
         return SourceType.SYNTHETIC_RENDER
-    if any(hint in parts for hint in ("videos", "video_frames")):
+    video_hints = ("videos", "video_frames")
+    if any(hint in part for part in parts_lower for hint in video_hints):
         return SourceType.REAL_VIDEO_FRAME
     return SourceType.REAL_PHOTO
 
