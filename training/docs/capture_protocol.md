@@ -27,8 +27,8 @@ different folders and feed different models.
 
 ## What to capture per connector class
 
-For each of the 8 classes (SMA-M, SMA-F, 3.5mm-M, 3.5mm-F, 2.92mm-M,
-2.92mm-F, 2.4mm-M, 2.4mm-F), capture:
+For each of the 10 classes — five families (SMA, 3.5mm, 2.92mm, 2.4mm,
+1.85mm) × two genders (M, F) — capture:
 
 ### 1. Mating-face video (~30 seconds, primary)
 

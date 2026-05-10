@@ -205,11 +205,15 @@ trial differences <12.5pp.
   (md5 `5dd2d7c3…`). One label is wrong by construction — max
   achievable Full is 7/8 = 87.5% until one is removed. Filename
   hint suggests the 2.4mm-M label is correct.
-- SMA-M and SMA-F have **zero** training samples. They're auto-dropped
-  from the trained head by `auto_retrain._populated_classes`. The
-  Flutter app's `_kCanonicalClasses` still lists 8 classes for the
-  contribute dropdown so users can upload SMA samples to grow the
-  data over time.
+- **SMA-M / SMA-F and 1.85mm-M / 1.85mm-F have zero training samples.**
+  Both families are reserved slots — `auto_retrain._populated_classes`
+  drops them from the trained head until each class folder has
+  ≥`MIN_SAMPLES_PER_CLASS` (default 5) images. Flutter app exposes
+  all five families via the chip-correction strip on Identify and
+  the capture chips on Contribute (`_kFamilies` in
+  `identify_screen.dart` / `contribute_screen.dart`), so contributed
+  uploads can grow each family until the next retrain expands the
+  head automatically.
 
 ## Common deployment gotchas
 
