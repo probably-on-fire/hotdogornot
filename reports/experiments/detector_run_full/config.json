@@ -1,0 +1,11 @@
+{
+  "artifact_out": "models/detector",
+  "batch": 96,
+  "data": "datasets/rfconnectors/data.yaml",
+  "dataset_lock": "datasets/rfconnectors/dataset.lock.json",
+  "device": "0",
+  "epochs": 5,
+  "imgsz": 640,
+  "model": "yolo11n.pt",
+  "seq": 1
+}

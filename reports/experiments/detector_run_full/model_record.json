@@ -1,0 +1,16 @@
+{
+  "architecture": "yolo11n",
+  "artifact_path": "models/detector/best.pt",
+  "created_at": "2026-05-10T16:02:31.237661+00:00",
+  "extra": {
+    "batch": 96,
+    "device": "0",
+    "epochs": 5,
+    "imgsz": 640
+  },
+  "metrics_path": "reports/experiments/detector_run_full/metrics.json",
+  "model_id": "detector_yolo11n_2026-05-10_001",
+  "model_type": "detector",
+  "taxonomy_version": "c87ddaf7b0e9bbe56a7a2efee62f08744b383ccf7f30575d3286cfde4a85ece7",
+  "trained_on": "datasets/rfconnectors@rfconnectors_2026_05_10_001"
+}
