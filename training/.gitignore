@@ -10,18 +10,28 @@ dist/
 build/
 
 # Data and models
+#
+# The curated training set IS committed as a github backup so the box
+# isn't a single point of failure. Specifically tracked:
+#   data/labeled/embedder/    — ~14k labeled crops the model trains on
+#   data/test_holdout/        — gold reference set, never trained on
+#   data/videos/              — 3 source MOVs the synth pipeline uses
+#   data/reference/           — vendor reference photos (already kept)
+# Everything else under data/ stays ignored (intermediate workspaces,
+# regenerable synth, scraped junk, transient quarantine folders).
 backups/
 data/raw/
 data/synthetic/
-data/labeled/
 data/processed/
 data/cad/
 data/field_test/
 data/synthetic_faces/
 data/synthetic_angled/
-data/test_holdout/
-data/videos/
 data/archive/
+data/distill_pool/
+data/measure_crops/
+# Audit / scrape quarantine folders stay local-only.
+data/labeled/_quarantine_*/
 models/
 runs/
 *.pt
