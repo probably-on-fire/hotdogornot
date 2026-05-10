@@ -80,14 +80,27 @@ def read_manifest(path: Path) -> list[ConnectorInstance]:
 
 
 def specimen_group_for(instance: ConnectorInstance) -> str:
-    """Infer a specimen-group id from the source image so duplicates of the
-    same physical connector never split across train/val/test.
+    """Infer a specimen-group id from the source image stem.
+
+    Augmentation/variant suffixes (``_bg0``, ``_z50``, ``_central``,
+    ``_clean`` etc.) of the same physical capture share a group, but
+    distinct captures (``agg_0054`` vs ``agg_0055``) get separate groups.
+    Uses the first two underscore-separated parts of the stem as the
+    group key (``prefix_number``); falls back to the full stem when only
+    one part is present.
+
+    Without this two-part key the prior single-prefix heuristic produced
+    only a handful of huge groups (``agg``, ``tight``, ``video``,
+    ``synth``) which collapsed val/test to zero rows on this dataset.
     """
     extra = getattr(instance, "specimen_group", None)
     if extra:
         return str(extra)
-    stem = Path(instance.source_image).stem.split("_")[0]
-    return stem or instance.source_image
+    stem = Path(instance.source_image).stem
+    parts = stem.split("_")
+    if len(parts) >= 2:
+        return f"{parts[0]}_{parts[1]}"
+    return parts[0] if parts else stem
 
 
 def plan_splits(
@@ -289,11 +302,16 @@ def build_dataset(
 
         data_yaml = out_dir / "data.yaml"
         names = [family for family, _ in sorted(family_to_idx.items(), key=lambda x: x[1])]
+        # Ultralytics 8.4.x resolves relative train/val/test paths
+        # against its own datasets_dir or cwd, NOT reliably against the
+        # `path:` field.  Write fully absolute paths so the yaml works
+        # regardless of cwd, settings.json, or Ultralytics version.
+        absolute_root = out_dir.resolve()
         with open(data_yaml, "w", encoding="utf-8") as f:
-            f.write("path: .\n")
-            f.write("train: images/train\n")
-            f.write("val: images/val\n")
-            f.write("test: images/test\n")
+            f.write(f"path: {absolute_root}\n")
+            f.write(f"train: {absolute_root / 'images' / 'train'}\n")
+            f.write(f"val: {absolute_root / 'images' / 'val'}\n")
+            f.write(f"test: {absolute_root / 'images' / 'test'}\n")
             f.write("nc: " + str(len(names)) + "\n")
             f.write("names:\n")
             for n in names:

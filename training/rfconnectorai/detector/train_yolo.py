@@ -178,7 +178,7 @@ def run_training(cfg: TrainerConfig) -> Path:
     project = cfg.out / "ultralytics"
     model = YOLO(cfg.model)
     model.train(
-        data=str(cfg.data),
+        data=str(cfg.data.resolve()),
         epochs=cfg.epochs,
         imgsz=cfg.imgsz,
         batch=cfg.batch,
