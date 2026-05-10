@@ -175,7 +175,9 @@ def run_training(cfg: TrainerConfig) -> Path:
             "ultralytics not installed; install in cloud env before training"
         ) from exc
 
-    project = cfg.out / "ultralytics"
+    # Resolve to absolute so Ultralytics does not prepend its
+    # runs_dir (usually ``runs/detect/``) to a relative project path.
+    project = (cfg.out / "ultralytics").resolve()
     model = YOLO(cfg.model)
     model.train(
         data=str(cfg.data.resolve()),

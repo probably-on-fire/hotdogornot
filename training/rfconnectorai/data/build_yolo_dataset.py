@@ -262,7 +262,13 @@ def build_dataset(
         cls_idx = class_index_for(instance, family_to_idx)
 
         label_line = f"{cls_idx} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n"
-        label_path = labels_root / split / f"{instance.instance_id}.txt"
+
+        # Use instance_id as the canonical stem for both image and label
+        # so YOLO can match them (it pairs by stem).  Using source.name
+        # caused collisions across class folders (e.g. synth_001444.jpg
+        # in 2.4mm-M/ and 2.92mm-M/) and stem mismatches with labels.
+        image_stem = instance.instance_id
+        label_path = labels_root / split / f"{image_stem}.txt"
 
         attributes_rows.append(
             {
@@ -287,7 +293,7 @@ def build_dataset(
             counts[split] += 1
             continue
 
-        image_dst = images_root / split / source.name
+        image_dst = images_root / split / f"{image_stem}{source.suffix}"
         if not image_dst.exists():
             shutil.copy2(source, image_dst)
         label_path.write_text(label_line, encoding="utf-8")
