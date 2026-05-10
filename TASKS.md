@@ -152,36 +152,36 @@ Status values:
       so weak/strong labels are tagged consistently from day one.
 - [x] Create shared geometry schema before writing instance manifest rows
       (`GeometryLabel` in `training/rfconnectorai/schemas/instance.py`).
-- [ ] Reuse the same geometry schema in instance labels and `/predict`
+- [x] Reuse the same geometry schema in instance labels and `/predict`
       response payloads so crops, manifests, and predictions stay in sync.
 - [x] Create `training/rfconnectorai/schemas/instance.py` with
       `ConnectorSide`, `GeometryLabel`, `ConnectorInstance`,
       `LabelConfidence`, and `SourceType` models/enums.
-- [ ] Validate every row of `datasets/rfconnectors/instances.jsonl` through
+- [x] Validate every row of `datasets/rfconnectors/instances.jsonl` through
       the instance schema before training.
-- [ ] Create `training/rfconnectorai/data/crop_instances.py`.
-- [ ] Define `datasets/rfconnectors/instances.jsonl`.
-- [ ] Define one row per connector instance.
-- [ ] Preserve source image path and bbox for every crop.
+- [x] Create `training/rfconnectorai/data/crop_instances.py`.
+- [x] Define `datasets/rfconnectors/instances.jsonl`.
+- [x] Define one row per connector instance.
+- [x] Preserve source image path and bbox for every crop.
 - [ ] Add fields:
-  - [ ] `instance_id`
-  - [ ] `source_image`
-  - [ ] `crop_path`
-  - [ ] `bbox_xyxy`
-  - [ ] `label_confidence`
-  - [ ] `source_type`
-  - [ ] `family`
-  - [ ] `precision_family`
-  - [ ] `side_a_gender`
-  - [ ] `side_b_gender`
-  - [ ] `side_a` (nested: family, precision_family, gender, polarity, threaded, coupling)
-  - [ ] `side_b` (nested: family, precision_family, gender, polarity, threaded, coupling)
-  - [ ] `polarity`
-  - [ ] `mount_style`
-  - [ ] `orientation`
-  - [ ] `termination`
-  - [ ] `finish_material_cue`
-  - [ ] `geometry`
+  - [x] `instance_id`
+  - [x] `source_image`
+  - [x] `crop_path`
+  - [x] `bbox_xyxy`
+  - [x] `label_confidence`
+  - [x] `source_type`
+  - [x] `family`
+  - [x] `precision_family`
+  - [x] `side_a_gender`
+  - [x] `side_b_gender`
+  - [x] `side_a` (nested: family, precision_family, gender, polarity, threaded, coupling)
+  - [x] `side_b` (nested: family, precision_family, gender, polarity, threaded, coupling)
+  - [x] `polarity`
+  - [x] `mount_style`
+  - [x] `orientation`
+  - [x] `termination`
+  - [x] `finish_material_cue`
+  - [x] `geometry`
 - [ ] Add CLI:
 
   ```bash
@@ -192,9 +192,9 @@ Status values:
     --dry-run
   ```
 
-- [ ] Support manual/full-image weak crop entries.
-- [ ] Support detector-generated crop candidates.
-- [ ] Do not modify original source images.
+- [x] Support manual/full-image weak crop entries.
+- [x] Support detector-generated crop candidates.
+- [x] Do not modify original source images.
 
 ### P1 Tasks
 
@@ -216,23 +216,23 @@ Status values:
 
 ### P0 Tasks
 
-- [ ] Create `training/rfconnectorai/data/build_yolo_dataset.py`.
-- [ ] Create output tree:
-  - [ ] `datasets/rfconnectors/images/train`
-  - [ ] `datasets/rfconnectors/images/val`
-  - [ ] `datasets/rfconnectors/images/test`
-  - [ ] `datasets/rfconnectors/labels/train`
-  - [ ] `datasets/rfconnectors/labels/val`
-  - [ ] `datasets/rfconnectors/labels/test`
-- [ ] Create `datasets/rfconnectors/attributes.csv`.
-- [ ] Create `datasets/rfconnectors/data.yaml`.
-- [ ] Read from `instances.jsonl`.
-- [ ] Validate labels against taxonomy.
-- [ ] Support `--dry-run`.
-- [ ] Support split-by-specimen/source group.
-- [ ] Track synthetic vs real.
+- [x] Create `training/rfconnectorai/data/build_yolo_dataset.py`.
+- [x] Create output tree:
+  - [x] `datasets/rfconnectors/images/train`
+  - [x] `datasets/rfconnectors/images/val`
+  - [x] `datasets/rfconnectors/images/test`
+  - [x] `datasets/rfconnectors/labels/train`
+  - [x] `datasets/rfconnectors/labels/val`
+  - [x] `datasets/rfconnectors/labels/test`
+- [x] Create `datasets/rfconnectors/attributes.csv`.
+- [x] Create `datasets/rfconnectors/data.yaml`.
+- [x] Read from `instances.jsonl`.
+- [x] Validate labels against taxonomy.
+- [x] Support `--dry-run`.
+- [x] Support split-by-specimen/source group.
+- [x] Track synthetic vs real.
 - [ ] Support background/no-connector examples.
-- [ ] Support weak full-image boxes when true boxes are unavailable.
+- [x] Support weak full-image boxes when true boxes are unavailable.
 
 ### P1 Tasks
 
@@ -254,30 +254,30 @@ Status values:
 
 ### P0 Tasks
 
-- [ ] Add `training/rfconnectorai/detector/__init__.py`.
-- [ ] Add `training/rfconnectorai/detector/train_yolo.py`.
-- [ ] Support model choices:
-  - [ ] `yolo11n.pt`
-  - [ ] `yolo11s.pt`
-  - [ ] future YOLO variants if installed/supported
-- [ ] Add CLI args:
-  - [ ] `--data`
-  - [ ] `--model`
-  - [ ] `--epochs`
-  - [ ] `--imgsz`
-  - [ ] `--batch`
-  - [ ] `--device`
-  - [ ] `--out`
-  - [ ] `--dry-run`
-- [ ] Save run metadata under `reports/experiments/<timestamp>/`.
+- [x] Add `training/rfconnectorai/detector/__init__.py`.
+- [x] Add `training/rfconnectorai/detector/train_yolo.py`.
+- [x] Support model choices:
+  - [x] `yolo11n.pt`
+  - [x] `yolo11s.pt`
+  - [x] future YOLO variants if installed/supported
+- [x] Add CLI args:
+  - [x] `--data`
+  - [x] `--model`
+  - [x] `--epochs`
+  - [x] `--imgsz`
+  - [x] `--batch`
+  - [x] `--device`
+  - [x] `--out`
+  - [x] `--dry-run`
+- [x] Save run metadata under `reports/experiments/<timestamp>/`.
 - [ ] Save mAP metrics.
 - [ ] Save detector model card.
-- [ ] Write a `ModelRecord` via
+- [x] Write a `ModelRecord` via
       `training/rfconnectorai/models/registry.py` to
       `reports/experiments/<timestamp>/model_record.json`.
-- [ ] Add config validation tests.
-- [ ] Do not run expensive training in tests.
-- [ ] Unit tests must validate model construction and config parsing only;
+- [x] Add config validation tests.
+- [x] Do not run expensive training in tests.
+- [x] Unit tests must validate model construction and config parsing only;
       tests must not train real models or require GPU.
 
 ### P1 Tasks
@@ -302,39 +302,39 @@ Status values:
 
 ### P0 Tasks
 
-- [ ] Keep current ResNet-18 path intact as baseline/fallback.
-- [ ] Create `training/rfconnectorai/classifier/model_multihead.py`.
-- [ ] Create `training/rfconnectorai/classifier/train_multihead.py`.
-- [ ] Create `training/rfconnectorai/classifier/label_encoding.py`.
-- [ ] Implement heads:
-  - [ ] family
-  - [ ] precision family
-  - [ ] side A gender/contact
-  - [ ] side B gender/contact
-  - [ ] polarity
-  - [ ] mount style
-  - [ ] orientation
-  - [ ] termination
-  - [ ] finish/material cue
-- [ ] Support missing labels safely.
-- [ ] Support candidate backbones:
-  - [ ] ResNet-18 baseline
-  - [ ] ResNet-50 if useful
-  - [ ] EfficientNetV2-S
-  - [ ] MobileNetV3
+- [x] Keep current ResNet-18 path intact as baseline/fallback.
+- [x] Create `training/rfconnectorai/classifier/model_multihead.py`.
+- [x] Create `training/rfconnectorai/classifier/train_multihead.py`.
+- [x] Create `training/rfconnectorai/classifier/label_encoding.py`.
+- [x] Implement heads:
+  - [x] family
+  - [x] precision family
+  - [x] side A gender/contact
+  - [x] side B gender/contact
+  - [x] polarity
+  - [x] mount style
+  - [x] orientation
+  - [x] termination
+  - [x] finish/material cue
+- [x] Support missing labels safely.
+- [x] Support candidate backbones:
+  - [x] ResNet-18 baseline
+  - [x] ResNet-50 if useful
+  - [x] EfficientNetV2-S
+  - [x] MobileNetV3
   - [ ] MobileViT if practical
   - [ ] ConvNeXt-Tiny if practical
-- [ ] Add weighted/masked losses for missing and imbalanced attributes.
+- [x] Add weighted/masked losses for missing and imbalanced attributes.
 - [ ] Add top-k output.
 - [ ] Add confidence calibration output.
-- [ ] Save metrics and model card.
-- [ ] Write a `ModelRecord` via
+- [x] Save metrics and model card.
+- [x] Write a `ModelRecord` via
       `training/rfconnectorai/models/registry.py` for every classifier
       run so dataset hash and taxonomy hash stay matched to artifacts.
-- [ ] Add tests for label encoding and forward pass.
-- [ ] Unit tests must validate model construction, label encoding, loss
+- [x] Add tests for label encoding and forward pass.
+- [x] Unit tests must validate model construction, label encoding, loss
       masking, and one tiny forward pass only.
-- [ ] Tests must not train real models or require GPU.
+- [x] Tests must not train real models or require GPU.
 
 ### P1 Tasks
 
@@ -360,8 +360,8 @@ Status values:
 
 ### P0 Tasks
 
-- [ ] Create `training/rfconnectorai/synthetic/model_catalog.py`.
-- [ ] Create `training/rfconnectorai/synthetic/render_suite.py`.
+- [x] Create `training/rfconnectorai/synthetic/model_catalog.py`.
+- [x] Create `training/rfconnectorai/synthetic/render_suite.py`.
 - [ ] Define parametric models for:
   - [ ] SMA male/female straight
   - [ ] RP-SMA male/female
@@ -442,9 +442,9 @@ Status values:
 
 ### P0 Tasks
 
-- [ ] Create `training/rfconnectorai/eval/__init__.py`.
-- [ ] Create `training/rfconnectorai/eval/evaluate_all.py`.
-- [ ] Create `training/rfconnectorai/eval/reports.py`.
+- [x] Create `training/rfconnectorai/eval/__init__.py`.
+- [x] Create `training/rfconnectorai/eval/evaluate_all.py`.
+- [x] Create `training/rfconnectorai/eval/reports.py`.
 - [ ] Evaluate detector and classifier together.
 - [ ] Report:
   - [ ] mAP@50
@@ -508,8 +508,8 @@ API schema and tests must land before any FastAPI handler change. Order:
 
 - [ ] Preserve existing `/predict` endpoint path.
 - [ ] Preserve old response fields.
-- [ ] Add `training/rfconnectorai/schemas/prediction.py`.
-- [ ] Reuse `GeometryLabel` (and side-aware blocks) from
+- [x] Add `training/rfconnectorai/schemas/prediction.py`.
+- [x] Reuse `GeometryLabel` (and side-aware blocks) from
       `training/rfconnectorai/schemas/instance.py` so labels and predictions
       share one geometry/side-aware schema.
 - [ ] Add structured fields:
@@ -604,13 +604,13 @@ API schema and tests must land before any FastAPI handler change. Order:
 
 ### P0 Tasks
 
-- [ ] Create `training/rfconnectorai/export/export_mobile.py`.
+- [x] Create `training/rfconnectorai/export/export_mobile.py`.
 - [ ] Export detector/classifier to ONNX.
 - [ ] Test ONNX Runtime path in cloud/dev environment.
 - [ ] Test TFLite/LiteRT where supported.
 - [ ] Test Core ML where supported.
 - [ ] Document export compatibility.
-- [ ] Add `exports/mobile/README.md`.
+- [x] Add `exports/mobile/README.md`.
 - [ ] Each exported artifact must reference a `ModelRecord` from
       `training/rfconnectorai/models/registry.py` so mobile/server clients
       can identify exactly which trained model produced the export.
@@ -638,10 +638,10 @@ API schema and tests must land before any FastAPI handler change. Order:
 
 - [x] Create `docs/ACCEPTANCE_GATES.md` so each batch and each demo step
       maps to a concrete gate.
-- [ ] Create `docs/CLIENT_DEMO_README.md`.
-- [ ] Create `docs/DEMO_SCRIPT.md`.
-- [ ] Create `docs/LIMITATIONS_AND_NEXT_STEPS.md`.
-- [ ] Create `docs/MODEL_CARD_TEMPLATE.md`.
+- [x] Create `docs/CLIENT_DEMO_README.md`.
+- [x] Create `docs/DEMO_SCRIPT.md`.
+- [x] Create `docs/LIMITATIONS_AND_NEXT_STEPS.md`.
+- [x] Create `docs/MODEL_CARD_TEMPLATE.md`.
 - [ ] Add exact commands for:
   - [ ] run server
   - [ ] run Flutter app
