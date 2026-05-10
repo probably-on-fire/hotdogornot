@@ -68,16 +68,67 @@ def _opaque_bbox(img: Image.Image) -> tuple[int, int, int, int]:
 
 def _crop_brain_only(source: Image.Image) -> Image.Image:
     """Crop the full logo to just the brain mark, dropping the AI RED
-    wordmark below it. Heuristic: find the overall logo bbox, then keep
-    the top ~74% of that vertical extent (the wordmark is the bottom
-    band — narrower stroke widths + clearly separated from the brain
-    by a gap of white)."""
+    wordmark below it.
+
+    Heuristic: the brain and the wordmark are separated by a band of
+    pure white. Walk the rows from top to bottom, count "logo pixels"
+    per row (anything not white-ish), then find the longest run of
+    near-empty rows in the bottom half of the bbox — that's the gap.
+    Crop just above the start of that gap so we keep the entire brain
+    (including the two prominent nodes at the bottom of the brain
+    stem) and lose the wordmark.
+    """
     bbox = _opaque_bbox(source)
     x0, y0, x1, y1 = bbox
-    # Keep the top portion only — covers the brain. Tuned visually.
-    keep_h = int((y1 - y0) * 0.74)
-    cropped = source.crop((x0, y0, x1, y0 + keep_h))
-    return cropped
+    rgba = source.convert("RGBA")
+    px = rgba.load()
+
+    # Count logo pixels per row inside the horizontal extent of the bbox.
+    row_density = []
+    for y in range(y0, y1):
+        n = 0
+        for x in range(x0, x1):
+            r, g, b, a = px[x, y]
+            if a > 0 and (r < 240 or g < 240 or b < 240):
+                n += 1
+        row_density.append(n)
+
+    # Search for the gap only in the bottom half of the bbox — the top
+    # half is all brain. "Empty" = fewer than 0.5% of the row's pixels
+    # are logo (kills JPEG/WebP compression noise without missing real
+    # gaps).
+    h = y1 - y0
+    width_px = x1 - x0
+    empty_threshold = max(2, int(width_px * 0.005))
+    search_start = h // 2
+
+    best_gap_start = -1
+    best_gap_len = 0
+    cur_start = -1
+    cur_len = 0
+    for i in range(search_start, h):
+        if row_density[i] <= empty_threshold:
+            if cur_start < 0:
+                cur_start = i
+                cur_len = 1
+            else:
+                cur_len += 1
+            if cur_len > best_gap_len:
+                best_gap_len = cur_len
+                best_gap_start = cur_start
+        else:
+            cur_start = -1
+            cur_len = 0
+
+    if best_gap_start < 0 or best_gap_len < 4:
+        # No clear gap found — assume there's no wordmark to drop and
+        # return the full bbox.
+        return source.crop((x0, y0, x1, y1))
+
+    # Keep everything above the gap. The gap starts a few px below the
+    # last brain pixel; that natural breathing room is fine to keep.
+    crop_bottom = y0 + best_gap_start
+    return source.crop((x0, y0, x1, crop_bottom))
 
 
 def _composite_centered(brain: Image.Image, fraction: float,
