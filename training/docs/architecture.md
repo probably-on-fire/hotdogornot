@@ -142,9 +142,12 @@ flowchart LR
     class FC,SM trainable
 ```
 
-SMA-M and SMA-F are intentionally absent from the head — we have zero
-source video for SMA so the model would have nothing to learn. Bringing
-them back is a data-collection task, not a model task.
+SMA-M / SMA-F and 1.85mm-M / 1.85mm-F are intentionally absent from
+the head — we have zero training data for either family, so the
+model would have nothing to learn. Both families are wired through
+the data + UI layer (Flutter chips, labeler folders, auto_retrain
+canonical list). The next retrain that finds ≥5 samples per class
+will expand the head automatically.
 
 ---
 

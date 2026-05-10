@@ -49,6 +49,11 @@ CANONICAL_CLASSES = [
     "3.5mm-M", "3.5mm-F",
     "2.92mm-M", "2.92mm-F",
     "2.4mm-M", "2.4mm-F",
+    # 1.85mm — newest addition (~67 GHz, smallest precision connector).
+    # Currently zero training data; auto_retrain drops the class from
+    # the head until it has ≥ MIN_SAMPLES_PER_CLASS images. Same status
+    # SMA had/has.
+    "1.85mm-M", "1.85mm-F",
 ]
 
 
@@ -75,7 +80,7 @@ def _videos_root() -> Path:
     )).resolve()
 
 
-CANONICAL_FAMILIES = ["SMA", "3.5mm", "2.92mm", "2.4mm"]
+CANONICAL_FAMILIES = ["SMA", "3.5mm", "2.92mm", "2.4mm", "1.85mm"]
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 # Connector ID — Flutter App
 
 Cross-platform (iOS + Android) take-a-photo identifier for RF coaxial
-connectors. Talks to the FastAPI predict + labeler service at
-`aired.com/rfcai/*`. Replaces the sidelined Unity AR app under `unity/`.
+connectors (SMA, 3.5mm, 2.92mm, 2.4mm, 1.85mm — male and female).
+Talks to the FastAPI predict + labeler service at `aired.com/rfcai/*`.
+Replaces the sidelined Unity AR app under `unity/`.
 
 ## Tabs the user sees
 
@@ -19,12 +20,13 @@ Camera fills the screen. Tap shutter → photo POSTs to
   "NOT HOT DOG" for female; will be relabeled before public release)
 - Connector family below (`SMA` / `3.5mm` / `2.92mm` / `2.4mm`)
 - Confidence + full class name in a small pill
-- **Chip-correction strip**: family chips (`SMA · 3.5mm · 2.92mm · 2.4mm`)
-  and gender chips (`M · F`) pre-selected from the prediction. Tap a
-  different chip to flip just that axis. Single button below switches
-  between green "Confirm X-Y" (matches prediction) and amber
-  "Save as X-Y" (you've changed something). Save → photo lands in
-  the training folder, brief success toast, auto-return to live preview.
+- **Chip-correction strip**: family chips
+  (`SMA · 3.5mm · 2.92mm · 2.4mm · 1.85mm`) and gender chips (`M · F`)
+  pre-selected from the prediction. Tap a different chip to flip just
+  that axis. Single button below switches between green "Confirm X-Y"
+  (matches prediction) and amber "Save as X-Y" (you've changed
+  something). Save → photo lands in the training folder, brief
+  success toast, auto-return to live preview.
 
 There's also a Photo / Video toggle pill at the top — Video mode
 records a short clip and uploads to `/rfcai/predict-video`, which

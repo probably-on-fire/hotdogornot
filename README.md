@@ -5,7 +5,7 @@
 # Connector ID
 
 **Identify RF coaxial connectors from your phone camera.**
-SMA · 3.5mm · 2.92mm · 2.4mm · male & female.
+SMA · 3.5mm · 2.92mm · 2.4mm · 1.85mm · male & female.
 
 Powered by [aired.com](https://aired.com)
 

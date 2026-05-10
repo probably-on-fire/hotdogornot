@@ -12,7 +12,7 @@ import '../api.dart';
 import '../settings.dart';
 import '../theme.dart';
 
-const _kFamilies = ['SMA', '3.5mm', '2.92mm', '2.4mm'];
+const _kFamilies = ['SMA', '3.5mm', '2.92mm', '2.4mm', '1.85mm'];
 const _kGenders = ['M', 'F'];
 
 // Below this top-class confidence we treat the prediction as "no real

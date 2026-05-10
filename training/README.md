@@ -2,11 +2,18 @@
 
 [![tests](https://github.com/probably-on-fire/hotdogornot/actions/workflows/tests.yml/badge.svg)](https://github.com/probably-on-fire/hotdogornot/actions/workflows/tests.yml)
 
-Identify and measure RF coaxial connectors (SMA, 3.5mm, 2.92mm, 2.4mm — male
-& female) from a phone camera. Combines a **geometry-grounded measurement
-pipeline** (no training required, sub-millimeter accuracy with an ArUco
-scale marker) with a **fine-tuned ResNet-18 classifier** (works on any
-image, including non-perpendicular product photos).
+Identify and measure RF coaxial connectors (SMA, 3.5mm, 2.92mm, 2.4mm,
+1.85mm — male & female) from a phone camera. Combines a
+**geometry-grounded measurement pipeline** (no training required,
+sub-millimeter accuracy with an ArUco scale marker) with a
+**fine-tuned ResNet-18 classifier** (works on any image, including
+non-perpendicular product photos).
+
+Note: 1.85mm is the newest family — added at the data/UI layer but
+not yet in the trained model head. Once `data/labeled/embedder/1.85mm-*/`
+folders contain ≥5 images each (contributable via the Flutter app),
+the next retrain expands the head automatically. SMA has the same
+status (zero training data, slot reserved).
 
 ## Current production state (held-out: 8 phone shots)
 
