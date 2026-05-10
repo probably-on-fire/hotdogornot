@@ -1,0 +1,400 @@
+schema_version: 1
+
+attribute_values:
+  presence:
+    - connector
+    - no_connector
+    - uncertain
+  polarity:
+    - standard
+    - reverse_polarity
+    - not_applicable
+    - unknown
+  gender_contact:
+    - male_pin
+    - female_socket
+    - rp_male_body_female_contact
+    - rp_female_body_male_contact
+    - unknown
+  mount_style:
+    - cable_mount
+    - panel_mount
+    - bulkhead
+    - pcb_through_hole
+    - pcb_edge_mount
+    - pcb_surface_mount
+    - adapter
+    - terminator
+    - unknown
+  orientation:
+    - straight
+    - right_angle
+    - tee
+    - adapter_stack
+    - unknown
+  cable_termination:
+    - solder
+    - crimp
+    - clamp
+    - molded_cable
+    - not_applicable
+    - unknown
+  finish_material_cue:
+    - gold
+    - nickel_silver
+    - black_body
+    - mixed
+    - unknown
+  confidence_state:
+    - high_confidence
+    - ambiguous
+    - insufficient_view
+    - need_second_angle
+    - need_scale_reference
+    - unsupported_connector
+    - no_connector_detected
+
+connectors:
+  - id: sma
+    display_name: SMA
+    aliases:
+      - SubMiniature version A
+    impedance_ohms: 50
+    frequency_range: DC-18 GHz typical
+    coupling: threaded
+    polarity: standard
+    compatibility:
+      mates_with:
+        - SMA
+        - 3.5mm mechanical compatibility with caution
+        - 2.92mm mechanical compatibility with caution
+      not_compatible_with:
+        - 2.4mm
+        - 1.85mm
+        - 1.0mm
+    visual_notes:
+      - Standard SMA male uses a center pin.
+      - Standard SMA female uses a center socket.
+      - Threaded coupling body is a primary visual cue.
+    notes:
+      - Performance can degrade near the upper microwave range.
+
+  - id: rp_sma
+    display_name: RP-SMA
+    aliases:
+      - reverse polarity SMA
+      - reverse-polarity SMA
+    impedance_ohms: 50
+    frequency_range: varies by manufacturer
+    coupling: threaded
+    polarity: reverse_polarity
+    compatibility:
+      mates_with:
+        - RP-SMA
+      not_compatible_with:
+        - standard SMA center-contact convention
+    visual_notes:
+      - Center contact gender is reversed relative to standard SMA.
+      - RP-SMA male body has a female center contact.
+      - RP-SMA female body has a male center pin.
+    notes:
+      - Common on Wi-Fi and wireless devices.
+
+  - id: 3_5mm
+    display_name: 3.5mm
+    aliases:
+      - APC-3.5
+      - SMA 3.5mm
+    impedance_ohms: 50
+    frequency_range: DC-26.5 GHz typical
+    coupling: threaded
+    polarity: standard
+    compatibility:
+      mates_with:
+        - 3.5mm
+        - SMA mechanical compatibility with lower performance ceiling
+        - 2.92mm mechanical compatibility with caution
+      not_compatible_with:
+        - 2.4mm
+        - 1.85mm
+        - 1.0mm
+    visual_notes:
+      - Similar external form to SMA.
+      - Precision construction and air dielectric may not be obvious from a single image.
+    notes:
+      - Use 3.5mm-to-3.5mm mating for expected high-frequency performance.
+
+  - id: 2_92mm
+    display_name: 2.92mm
+    aliases:
+      - K
+      - K connector
+      - SMK
+      - SMK connector
+    impedance_ohms: 50
+    frequency_range: DC-40 GHz to DC-46 GHz typical
+    coupling: threaded
+    polarity: standard
+    compatibility:
+      mates_with:
+        - 2.92mm
+        - SMA mechanical compatibility with lower performance ceiling
+        - 3.5mm mechanical compatibility with caution
+      not_compatible_with:
+        - 2.4mm
+        - 1.85mm
+        - 1.0mm
+    visual_notes:
+      - Often visually similar to SMA and 3.5mm.
+      - May require markings, known scale, or manufacturer context for high confidence.
+    notes:
+      - Frequently used in test and measurement and microwave R&D.
+
+  - id: 2_4mm
+    display_name: 2.4mm
+    aliases: []
+    impedance_ohms: 50
+    frequency_range: DC-50 GHz typical
+    coupling: threaded
+    polarity: standard
+    compatibility:
+      mates_with:
+        - 2.4mm
+      not_compatible_with:
+        - SMA
+        - 3.5mm
+        - 2.92mm
+        - 1.85mm
+        - 1.0mm
+    visual_notes:
+      - Smaller precision interface than SMA-compatible families.
+      - Not mechanically compatible with SMA, 3.5mm, or 2.92mm.
+    notes:
+      - Used in high-frequency test and measurement.
+
+  - id: 1_85mm
+    display_name: 1.85mm
+    aliases:
+      - V
+      - V connector
+    impedance_ohms: 50
+    frequency_range: DC-67 GHz typical
+    coupling: threaded
+    polarity: standard
+    compatibility:
+      mates_with:
+        - 1.85mm
+      not_compatible_with:
+        - SMA
+        - 3.5mm
+        - 2.92mm
+        - 2.4mm
+        - 1.0mm
+    visual_notes:
+      - Very small precision millimeter-wave interface.
+      - Identification likely needs scale or markings.
+    notes:
+      - Used in advanced instrumentation and millimeter-wave R&D.
+
+  - id: 1_0mm
+    display_name: 1.0mm
+    aliases:
+      - W
+      - W connector
+    impedance_ohms: 50
+    frequency_range: DC-110 GHz typical
+    coupling: threaded
+    polarity: standard
+    compatibility:
+      mates_with:
+        - 1.0mm
+      not_compatible_with:
+        - SMA
+        - 3.5mm
+        - 2.92mm
+        - 2.4mm
+        - 1.85mm
+    visual_notes:
+      - Extremely small high-frequency coaxial connector.
+      - Visual-only classification should be treated as scale-sensitive.
+    notes:
+      - Specialized connector for very high frequency instrumentation.
+
+  - id: ssma
+    display_name: SSMA
+    aliases:
+      - SubSubMiniature version A
+    impedance_ohms: 50
+    frequency_range: DC-35 GHz typical
+    coupling: threaded
+    polarity: standard
+    compatibility:
+      mates_with:
+        - SSMA
+      not_compatible_with:
+        - SMA
+    visual_notes:
+      - Smaller than SMA.
+      - Threaded coupling resembles the SMA family.
+    notes:
+      - Useful where space is constrained.
+
+  - id: smb
+    display_name: SMB
+    aliases:
+      - SubMiniature B
+    impedance_ohms:
+      - 50
+      - 75
+    frequency_range: DC-4 GHz typical
+    coupling: snap_on
+    polarity: not_applicable
+    compatibility:
+      mates_with:
+        - SMB
+      not_compatible_with:
+        - SMA threaded interface
+    visual_notes:
+      - Snap-on coupling rather than threaded coupling.
+      - Compact body similar in scale to SMA-related connectors.
+    notes:
+      - Used where quick connect/disconnect is useful.
+
+  - id: smc
+    display_name: SMC
+    aliases:
+      - SubMiniature C
+    impedance_ohms:
+      - 50
+      - 75
+    frequency_range: DC-4 GHz typical
+    coupling: threaded
+    polarity: not_applicable
+    compatibility:
+      mates_with:
+        - SMC
+      not_compatible_with:
+        - SMA
+    visual_notes:
+      - Threaded coupling.
+      - Smaller than SMA.
+    notes:
+      - Lower-frequency secure threaded connector option.
+
+  - id: qma
+    display_name: QMA
+    aliases:
+      - Quick-lock SMA
+    impedance_ohms: 50
+    frequency_range: varies by manufacturer
+    coupling: quick_lock
+    polarity: standard
+    compatibility:
+      mates_with:
+        - QMA
+      not_compatible_with:
+        - SMA threaded coupling
+    visual_notes:
+      - Similar construction intent to SMA but uses quick-lock coupling.
+      - No wrench-tightened threaded coupling.
+    notes:
+      - Common in communication and industrial RF applications.
+
+  - id: tnc
+    display_name: TNC
+    aliases:
+      - Threaded Neill-Concelman
+      - Threaded Neil-Concelman
+    impedance_ohms: 50
+    frequency_range: DC-12 GHz typical
+    coupling: threaded
+    polarity: not_applicable
+    compatibility:
+      mates_with:
+        - TNC
+      not_compatible_with:
+        - BNC bayonet interface
+    visual_notes:
+      - Threaded version of BNC-style family.
+      - Larger than SMA.
+    notes:
+      - Used in antennas, cellular systems, and RF applications.
+
+  - id: bnc
+    display_name: BNC
+    aliases:
+      - Bayonet Neill-Concelman
+      - Bayonet Neil-Concelman
+    impedance_ohms:
+      - 50
+      - 75
+    frequency_range: DC-4 GHz typical
+    coupling: bayonet
+    polarity: not_applicable
+    compatibility:
+      mates_with:
+        - BNC
+      not_compatible_with:
+        - TNC threaded interface
+    visual_notes:
+      - Bayonet locking lugs are the major visual cue.
+      - Common on lab, video, radio, and test equipment.
+    notes:
+      - Mechanical stability degrades at higher microwave frequencies.
+
+  - id: mcx
+    display_name: MCX
+    aliases:
+      - Micro coaxial
+    impedance_ohms: 50
+    frequency_range: DC-6 GHz typical
+    coupling: snap_on
+    polarity: not_applicable
+    compatibility:
+      mates_with:
+        - MCX
+      not_compatible_with:
+        - SMA threaded interface
+    visual_notes:
+      - Small snap-on connector.
+      - Often much smaller than SMB.
+    notes:
+      - Used in GPS, cellular, tuner cards, and compact RF hardware.
+
+  - id: 7_16_din
+    display_name: 7/16 DIN
+    aliases:
+      - DIN 7/16
+      - 7-16 DIN
+    impedance_ohms: 50
+    frequency_range: DC-7.5 GHz typical
+    coupling: threaded
+    polarity: not_applicable
+    compatibility:
+      mates_with:
+        - 7/16 DIN
+      not_compatible_with:
+        - SMA
+    visual_notes:
+      - Much larger high-power connector.
+      - Wrench-tightened threaded coupling.
+    notes:
+      - Used in antenna systems, cellular networks, defense, and high-power RF.
+
+  - id: unknown
+    display_name: unknown
+    aliases:
+      - unsupported
+      - uncertain
+    impedance_ohms: null
+    frequency_range: unknown
+    coupling: unknown
+    polarity: unknown
+    compatibility:
+      mates_with: []
+      not_compatible_with: []
+    visual_notes:
+      - Use when no supported connector is visible or evidence is insufficient.
+      - Use when the family is outside the supported taxonomy.
+    notes:
+      - Unknown is a valid model/app outcome, not an exception.
