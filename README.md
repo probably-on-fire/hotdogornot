@@ -103,15 +103,25 @@ Camera frame
   -> mobile/desktop result card
 ```
 
-Graphviz source for the detailed architecture diagram:
+![Connector ID high-level architecture](docs/README_ARCHITECTURE.svg)
+
+README diagram source:
+
+- [`docs/README_ARCHITECTURE.dot`](docs/README_ARCHITECTURE.dot)
+- [`docs/README_ARCHITECTURE.svg`](docs/README_ARCHITECTURE.svg)
+- [`docs/README_ARCHITECTURE.png`](docs/README_ARCHITECTURE.png)
+
+Detailed software architecture diagram:
 
 - [`docs/SOFTWARE_ARCHITECTURE.dot`](docs/SOFTWARE_ARCHITECTURE.dot)
 - [`docs/SOFTWARE_ARCHITECTURE.svg`](docs/SOFTWARE_ARCHITECTURE.svg)
 - [`docs/SOFTWARE_ARCHITECTURE.png`](docs/SOFTWARE_ARCHITECTURE.png)
 
-Render it with:
+Render diagrams with:
 
 ```bash
+dot -Tsvg docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.svg
+dot -Tpng docs/README_ARCHITECTURE.dot -o docs/README_ARCHITECTURE.png
 dot -Tpng docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.png
 dot -Tsvg docs/SOFTWARE_ARCHITECTURE.dot -o docs/SOFTWARE_ARCHITECTURE.svg
 ```
@@ -239,6 +249,7 @@ The app currently provides:
 | [`TASKS.md`](TASKS.md) | Epic-by-epic backlog and execution batches |
 | [`docs/REPO_AUDIT.md`](docs/REPO_AUDIT.md) | Current repository audit and safety baseline |
 | [`docs/CONNECTOR_TAXONOMY.md`](docs/CONNECTOR_TAXONOMY.md) | Connector family taxonomy and attribute labels |
+| [`docs/README_ARCHITECTURE.dot`](docs/README_ARCHITECTURE.dot) | Compact Graphviz source for the README architecture diagram |
 | [`docs/SOFTWARE_ARCHITECTURE.dot`](docs/SOFTWARE_ARCHITECTURE.dot) | Graphviz source for the full I/O architecture diagram |
 | [`training/docs/architecture.md`](training/docs/architecture.md) | Current v18 architecture plus roadmap architecture |
 | [`training/docs/classifier_journey.md`](training/docs/classifier_journey.md) | Experiment history and lessons learned |

@@ -1,0 +1,107 @@
+digraph ConnectorIDReadmeArchitecture {
+  graph [
+    label="Connector ID - High-Level Architecture";
+    labelloc=t;
+    fontsize=24;
+    fontname="Arial Bold";
+    bgcolor="#f7f9fc";
+    pad=0.25;
+    rankdir=TB;
+    ranksep=0.55;
+    nodesep=0.40;
+    splines=spline;
+    outputorder=edgesfirst;
+  ];
+
+  node [
+    shape=box;
+    style="rounded,filled";
+    fontname="Arial";
+    fontsize=12;
+    margin="0.12,0.08";
+    color="#2f3b52";
+    penwidth=1.5;
+  ];
+
+  edge [
+    fontname="Arial";
+    fontsize=10;
+    color="#56677a";
+    arrowsize=0.8;
+    penwidth=1.5;
+  ];
+
+  camera [
+    label="Camera / Gallery\nphoto, video, desktop file";
+    shape=folder;
+    fillcolor="#efe6ff:#fbf8ff";
+    gradientangle=90;
+  ];
+
+  app [
+    label="Flutter App\nmobile now, desktop planned";
+    shape=component;
+    fillcolor="#cfe6ff:#f8fbff";
+    gradientangle=90;
+  ];
+
+  api [
+    label="FastAPI Service\n/predict remains compatible";
+    fillcolor="#d9ecff:#f7fbff";
+    gradientangle=90;
+  ];
+
+  current [
+    label="Current Baseline\nHough crop + rembg gate\nResNet-18 classifier";
+    fillcolor="#d9ecff:#f7fbff";
+    gradientangle=90;
+  ];
+
+  planned [
+    label="Roadmap Vision Pipeline\nobject detector + multi-head attributes\nmeasurement assist + abstention";
+    fillcolor="#fff1cc:#fffaf0";
+    gradientangle=90;
+  ];
+
+  specs [
+    label="Taxonomy + Spec Lookup\nconnectors.yaml\nfamily, polarity, gender, specs";
+    shape=folder;
+    fillcolor="#e5f7e7:#f8fff8";
+    gradientangle=90;
+  ];
+
+  result [
+    label="Result Card\nconnector type, confidence,\nwarnings, alternatives, specs";
+    fillcolor="#fff1cc:#fffaf0";
+    gradientangle=90;
+  ];
+
+  feedback [
+    label="Data Feedback Loop\nContribute captures -> training data\nholdout set -> evaluation reports";
+    shape=folder;
+    fillcolor="#e5f7e7:#f8fff8";
+    gradientangle=90;
+  ];
+
+  deploy [
+    label="Deployment Targets\nserver fallback now\nONNX / TFLite / Core ML planned";
+    shape=component;
+    fillcolor="#efe6ff:#fbf8ff";
+    gradientangle=90;
+  ];
+
+  { rank=same; current; planned; }
+
+  camera -> app [label="capture"];
+  app -> api [label="POST image/video"];
+  api -> current [label="preserved path"];
+  api -> planned [label="new path", style=dashed, color="#b98200"];
+  current -> result [label="old fields"];
+  planned -> specs [label="family + attributes", style=dashed, color="#b98200"];
+  specs -> result [label="spec summary", color="#5a9b62"];
+  result -> app [label="display + correction"];
+  app -> feedback [label="confirmed/corrected captures", color="#5a9b62"];
+  feedback -> planned [label="train/evaluate", style=dashed, color="#5a9b62"];
+  planned -> deploy [label="approved models", style=dashed, color="#8c67aa"];
+  deploy -> api [label="serve"];
+}
