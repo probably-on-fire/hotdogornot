@@ -36,7 +36,10 @@ def test_skips_when_no_new_data(tmp_path, monkeypatch, capsys):
     model.mkdir(parents=True)
     _seed_dataset(data, n_per_class=5)
     # version.json claims last train used same number of samples → delta = 0.
-    (model / "version.json").write_text(json.dumps({"n_train_samples": 5 * 8}))
+    # Must match n_per_class * number of CANONICAL_CLASSES that pass the
+    # min-samples-per-class filter (default=5, so all 10 classes qualify).
+    n_classes = len(auto_retrain.CANONICAL_CLASSES)
+    (model / "version.json").write_text(json.dumps({"n_train_samples": 5 * n_classes}))
 
     argv = [
         "auto_retrain",
