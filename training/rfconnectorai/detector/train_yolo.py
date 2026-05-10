@@ -186,7 +186,7 @@ def run_training(cfg: TrainerConfig) -> Path:
         project=str(project),
         name=DEFAULT_OUT_NAME,
         exist_ok=True,
-        verbose=False,
+        verbose=True,
     )
     best = project / DEFAULT_OUT_NAME / "weights" / "best.pt"
     if not best.exists():
