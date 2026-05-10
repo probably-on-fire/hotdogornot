@@ -726,6 +726,27 @@ Completed deliverables:
 - `training/rfconnectorai/schemas/taxonomy.py`
 - `training/tests/test_taxonomy.py`
 
+## Execution Batches 2-10 - Scaffolded On Master
+
+Per-batch deliverables landed on `master` and pushed to GitHub for cloud
+training/testing on Kaggle/Colab. No heavy training was run on the local
+PC. Acceptance gates remain in `docs/ACCEPTANCE_GATES.md`.
+
+| Batch | Scope | Key Files |
+|---|---|---|
+| 2 | Annotation protocol, acceptance gates, instance schema, model registry, dataset audit, schema/registry tests | `docs/ANNOTATION_PROTOCOL.md`, `docs/ACCEPTANCE_GATES.md`, `training/rfconnectorai/schemas/instance.py`, `training/rfconnectorai/models/registry.py`, `training/rfconnectorai/data/audit.py`, `training/tests/test_instance_schema.py`, `training/tests/test_model_registry.py`, `training/tests/test_data_audit.py` |
+| 3 | Crop instance manifest workflow | `training/rfconnectorai/data/crop_instances.py`, `training/tests/test_crop_instances.py` |
+| 4 | Standardized YOLO dataset builder + dataset.lock.json | `training/rfconnectorai/data/build_yolo_dataset.py`, `training/tests/test_build_yolo_dataset.py` |
+| 5 | YOLO detector training scaffold (cloud-only, dry-run safe locally) | `training/rfconnectorai/detector/train_yolo.py`, `training/tests/test_train_yolo_detector.py` |
+| 6 | Multi-head classifier scaffold (label encoding, model, trainer) | `training/rfconnectorai/classifier/label_encoding.py`, `model_multihead.py`, `train_multihead.py`, `training/tests/test_label_encoding.py`, `training/tests/test_train_multihead.py` |
+| 7 | Prediction response schema + Epic 10 fixture tests | `training/rfconnectorai/schemas/prediction.py`, `training/tests/test_prediction_schema.py` |
+| 8 | Evaluation harness scaffold (metrics + reports + CLI) | `training/rfconnectorai/eval/evaluate_all.py`, `reports.py`, `training/tests/test_eval_harness.py` |
+| 9 | Synthetic render planner + parametric model catalog | `training/rfconnectorai/synthetic/model_catalog.py`, `render_suite.py`, `training/tests/test_synthetic_catalog.py` |
+| 10 | Mobile/server export + demo package scaffolding | `training/rfconnectorai/export/export_mobile.py`, `training/tests/test_export_mobile.py`, `exports/mobile/README.md`, `docs/CLIENT_DEMO_README.md`, `docs/DEMO_SCRIPT.md`, `docs/LIMITATIONS_AND_NEXT_STEPS.md`, `docs/MODEL_CARD_TEMPLATE.md` |
+
+The cloud bake-off must run the full pytest suite, then run real
+detector/classifier training on Kaggle/Colab. Local PCs only `--dry-run`.
+
 ---
 
 ## Execution Batch 2 - Dataset Audit and Schema Foundations

@@ -53,17 +53,25 @@ foundation:
 
 ## Current Implementation Status
 
-- Batch 1 complete: repo audit, taxonomy/spec foundation, annotation
-  protocol, acceptance gates, and instance schema scaffolding.
-- Next batch: dataset audit plus schema-validated instance manifest
-  (Execution Batch 2 in [`TASKS.md`](TASKS.md)).
-- Heavy training runs in Kaggle/Colab/cloud, not on the local PC.
+- Batches 1-10 scaffolded on `master`: taxonomy, annotation protocol,
+  acceptance gates, instance schema, model registry, dataset audit,
+  crop manifest, YOLO dataset builder, detector training scaffold,
+  multi-head classifier scaffold, prediction response schema, evaluation
+  harness, synthetic render planner, mobile/server export scaffold, and
+  the demo package.
+- Heavy training and rendering run in Kaggle/Colab/cloud — not on the
+  local PC. Local invocation is restricted to `--dry-run`.
 - Existing `/predict` compatibility is a hard constraint.
+- Next: real cloud runs against the YOLO data builder + multihead
+  trainer + eval harness, with results posted back into
+  `reports/experiments/<run>/`.
 
 Execution gates:
 [`docs/ACCEPTANCE_GATES.md`](docs/ACCEPTANCE_GATES.md).
 Labeling rulebook:
 [`docs/ANNOTATION_PROTOCOL.md`](docs/ANNOTATION_PROTOCOL.md).
+Client demo entry:
+[`docs/CLIENT_DEMO_README.md`](docs/CLIENT_DEMO_README.md).
 
 ---
 
@@ -306,7 +314,13 @@ of `dot` commands.
 | [`docs/MODEL_TRAINING_PIPELINE_SPEC.md`](docs/MODEL_TRAINING_PIPELINE_SPEC.md) | Detailed training pipeline spec for crops, labels, 3D models, synthetic renders, and verification |
 | [`docs/MULTI_ARCHITECTURE_TRANSITION.md`](docs/MULTI_ARCHITECTURE_TRANSITION.md) | Plan for evolving from ResNet-only classification to detector plus multi-head model architecture |
 | [`training/rfconnectorai/schemas/instance.py`](training/rfconnectorai/schemas/instance.py) | Instance manifest schema (`ConnectorInstance`, `ConnectorSide`, `GeometryLabel`, `LabelConfidence`, `SourceType`) |
+| [`training/rfconnectorai/schemas/prediction.py`](training/rfconnectorai/schemas/prediction.py) | API response schema (`PredictResponse`, `Detection`, fixture builders) |
 | [`training/rfconnectorai/models/registry.py`](training/rfconnectorai/models/registry.py) | Model record/version registry (`ModelRecord`) for trained artifacts |
+| [`docs/CLIENT_DEMO_README.md`](docs/CLIENT_DEMO_README.md) | Entry point for running the client-facing demo |
+| [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) | 5-10 minute walk-through script for the demo |
+| [`docs/LIMITATIONS_AND_NEXT_STEPS.md`](docs/LIMITATIONS_AND_NEXT_STEPS.md) | Honest limitations and roadmap |
+| [`docs/MODEL_CARD_TEMPLATE.md`](docs/MODEL_CARD_TEMPLATE.md) | Template for promoted detector / classifier / multihead model cards |
+| [`exports/mobile/README.md`](exports/mobile/README.md) | Mobile/server export layout and compatibility notes |
 | [`docs/README_TECHNICAL_OVERVIEW.dot`](docs/README_TECHNICAL_OVERVIEW.dot) | High-level technical marketing Graphviz source embedded at the top of this README |
 | [`docs/SYSTEM_ARCHITECTURE_POSTER.dot`](docs/SYSTEM_ARCHITECTURE_POSTER.dot) | Poster-style full system architecture Graphviz source |
 | [`docs/README_ARCHITECTURE.dot`](docs/README_ARCHITECTURE.dot) | Compact Graphviz source for the README architecture diagram |
