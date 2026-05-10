@@ -13,7 +13,7 @@ Powered by [aired.com](https://aired.com)
 
 </div>
 
-![Connector ID technical overview](docs/README_TECHNICAL_OVERVIEW.svg)
+![Connector ID system architecture](docs/Readme_System_Architecture.png)
 
 ---
 
