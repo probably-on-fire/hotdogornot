@@ -107,7 +107,10 @@ def _config_from_env() -> dict:
         "max_video_bytes": int(os.environ.get("RFCAI_MAX_VIDEO_BYTES", DEFAULT_MAX_VIDEO_BYTES)),
         "video_fps": float(os.environ.get("RFCAI_VIDEO_FPS", DEFAULT_VIDEO_FPS)),
         "video_max_frames": int(os.environ.get("RFCAI_VIDEO_MAX_FRAMES", DEFAULT_VIDEO_MAX_FRAMES)),
-        "max_detections": int(os.environ.get("RFCAI_MAX_DETECTIONS", 4)),
+        # 2 keeps recall high while halving the rembg + classify cost
+        # vs the previous 4. Override via RFCAI_MAX_DETECTIONS env if a
+        # frame regularly contains > 2 connectors.
+        "max_detections": int(os.environ.get("RFCAI_MAX_DETECTIONS", 2)),
         "fg_filter_enabled": os.environ.get("RFCAI_FG_FILTER", "1") not in ("0", "false", "False"),
         "min_fg_fraction": float(os.environ.get("RFCAI_MIN_FG_FRACTION", DEFAULT_MIN_FG_FRACTION)),
         "min_uniform_fg": float(os.environ.get("RFCAI_MIN_UNIFORM_FG", DEFAULT_MIN_UNIFORM_FG)),
