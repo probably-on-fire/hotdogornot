@@ -13,6 +13,11 @@ class Prediction {
     required this.confidence,
     required this.probabilities,
     required this.bbox,
+    this.serverFamily,
+    this.serverGender,
+    this.familyConfidence,
+    this.genderConfidence,
+    this.spec,
   });
 
   final String className;
@@ -20,14 +25,25 @@ class Prediction {
   final Map<String, double> probabilities;
   final Map<String, int> bbox;
 
-  /// Convenience: family is everything before the last "-".
+  // Optional structured fields the upgraded /predict service emits
+  // alongside the legacy `class_name`. Older servers return null/None
+  // and the parser falls back to deriving from `className`.
+  final String? serverFamily;
+  final String? serverGender;
+  final double? familyConfidence;
+  final double? genderConfidence;
+  final Map<String, dynamic>? spec;
+
+  /// Family is server-provided when available, else derived from className.
   String get family {
+    if (serverFamily != null && serverFamily!.isNotEmpty) return serverFamily!;
     final i = className.lastIndexOf('-');
     return i < 0 ? className : className.substring(0, i);
   }
 
-  /// Convenience: gender is everything after the last "-" ("M" or "F").
+  /// Gender is server-provided when available, else derived ("M"/"F").
   String get gender {
+    if (serverGender != null && serverGender!.isNotEmpty) return serverGender!;
     final i = className.lastIndexOf('-');
     return i < 0 ? '' : className.substring(i + 1);
   }
@@ -45,6 +61,13 @@ class Prediction {
       bbox: (j['bbox'] as Map<String, dynamic>).map(
         (k, v) => MapEntry(k, (v as num).toInt()),
       ),
+      serverFamily: j['family'] as String?,
+      serverGender: j['gender'] as String?,
+      familyConfidence: (j['family_confidence'] as num?)?.toDouble(),
+      genderConfidence: (j['gender_confidence'] as num?)?.toDouble(),
+      spec: j['spec'] is Map<String, dynamic>
+          ? j['spec'] as Map<String, dynamic>
+          : null,
     );
   }
 }

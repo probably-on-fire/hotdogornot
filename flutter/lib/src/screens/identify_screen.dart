@@ -820,6 +820,10 @@ class _IdentifyScreenState extends State<IdentifyScreen>
                   color: color, fontSize: 12, fontWeight: FontWeight.w600),
             ),
           ),
+          if (p.spec != null) ...[
+            const SizedBox(height: 10),
+            _SpecLine(spec: p.spec!),
+          ],
           const SizedBox(height: 14),
           _buildCorrectionStrip(p),
           if (_contributing)
@@ -1010,3 +1014,107 @@ class _RoundIconButton extends StatelessWidget {
     );
   }
 }
+
+/// Compact spec line shown on the result panel when the predict
+/// service returned a `spec` block from connectors.yaml. Shows the
+/// frequency range + impedance + coupling inline; tap to expand the
+/// full notes + compatibility lists.
+class _SpecLine extends StatefulWidget {
+  const _SpecLine({required this.spec});
+  final Map<String, dynamic> spec;
+
+  @override
+  State<_SpecLine> createState() => _SpecLineState();
+}
+
+class _SpecLineState extends State<_SpecLine> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.spec;
+    final freq = s['frequency_range']?.toString();
+    final z = s['impedance_ohms']?.toString();
+    final coupling = s['coupling']?.toString();
+    final summary = [
+      if (freq != null) freq,
+      if (z != null) '$z Ω',
+      if (coupling != null) coupling,
+    ].join(' · ');
+    if (summary.isEmpty) return const SizedBox.shrink();
+
+    final notes = (s['visual_notes'] as List?)?.cast<dynamic>() ?? const [];
+    final compat = s['compatibility'] as Map<String, dynamic>?;
+    final matesWith = (compat?['mates_with'] as List?)?.cast<dynamic>() ?? const [];
+
+    return GestureDetector(
+      onTap: () => setState(() => _expanded = !_expanded),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedSize(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        alignment: Alignment.topCenter,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.06),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 12, color: Colors.white60),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      summary,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _expanded ? Icons.expand_less : Icons.expand_more,
+                    size: 14,
+                    color: Colors.white54,
+                  ),
+                ],
+              ),
+              if (_expanded) ...[
+                if (notes.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  ...notes.take(3).map((n) => Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 1),
+                        child: Text(
+                          '• $n',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.white70,
+                            height: 1.3,
+                          ),
+                        ),
+                      )),
+                ],
+                if (matesWith.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Mates with: ${matesWith.join(", ")}',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      color: Colors.white54,
+                    ),
+                  ),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
