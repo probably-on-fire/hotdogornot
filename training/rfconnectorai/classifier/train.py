@@ -365,15 +365,28 @@ def train(config: TrainConfig) -> dict:
     metrics_path = config.out_dir / "metrics.json"
 
     torch.save(model.state_dict(), weights_path)
+    # Write labels.json with class names in the *exact same order* the
+    # dataset used to assign training indices. Using dataset.class_names
+    # rather than config.class_names guarantees labels.json[i] matches
+    # the model's softmax index i, even if config_class_names was passed
+    # in a different order. We hit a silent inversion bug in production
+    # (see docs/yolo_hybrid_evaluation_2026-05-11.md) when these two
+    # orders disagreed — every gender prediction was relabeled to its
+    # opposite before reaching the phone app.
+    train_dataset = ConnectorFolderDataset(
+        config.data_dir, config.class_names
+    )
+    assert train_dataset.class_names == config.class_names, (
+        "labels.json/config order mismatch — would silently swap classes "
+        "at inference. Investigate dataset.class_names vs config.class_names."
+    )
     labels_path.write_text(json.dumps({
-        "class_names": config.class_names,
+        "class_names": train_dataset.class_names,
         "input_size": INPUT_SIZE,
         "architecture": "resnet18",
         "n_train_samples": len(train_idx),
         "n_val_samples": len(val_idx),
-        "class_counts": ConnectorFolderDataset(
-            config.data_dir, config.class_names
-        ).class_counts(),
+        "class_counts": train_dataset.class_counts(),
     }, indent=2))
     metrics_blob = {"history": [asdict(m) for m in history]}
     metrics_path.write_text(json.dumps(metrics_blob, indent=2))
