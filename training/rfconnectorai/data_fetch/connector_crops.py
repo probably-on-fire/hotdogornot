@@ -178,3 +178,54 @@ def detect_connector_crops(
 
     candidates.sort(key=lambda r: -r.area_px)
     return candidates[:max_crops]
+
+
+def detect_connector_crops_yolo(
+    frame_bgr: np.ndarray,
+    yolo_model,
+    pad_frac: float = 0.3,
+    max_crops: int = 4,
+    conf: float = 0.20,
+) -> list[CropResult]:
+    """Fallback detector for cases where Hough finds no circles —
+    YOLO sees connectors at non-perpendicular angles where the face
+    isn't a clean circle. Wider crops than Hough since YOLO already
+    captures the full connector.
+
+    `yolo_model` is an already-loaded `ultralytics.YOLO` instance.
+    Caller is responsible for the lifecycle (load once at service
+    startup, reuse per request).
+    """
+    h, w = frame_bgr.shape[:2]
+    results = yolo_model.predict(frame_bgr, conf=conf, verbose=False)
+    boxes = results[0].boxes
+    if boxes is None or len(boxes) == 0:
+        return []
+    candidates: list[CropResult] = []
+    for i in range(len(boxes)):
+        x1, y1, x2, y2 = boxes.xyxy[i].cpu().numpy().astype(int)
+        x1, y1 = max(0, int(x1)), max(0, int(y1))
+        x2, y2 = min(w, int(x2)), min(h, int(y2))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        bw, bh = x2 - x1, y2 - y1
+        # Pad outward to a square, same shape contract as Hough crops.
+        side = int(max(bw, bh) * (1 + 2 * pad_frac))
+        cx = x1 + bw // 2
+        cy = y1 + bh // 2
+        x0 = max(0, cx - side // 2)
+        y0 = max(0, cy - side // 2)
+        x_end = min(w, x0 + side)
+        y_end = min(h, y0 + side)
+        if x_end - x0 < side: x0 = max(0, x_end - side)
+        if y_end - y0 < side: y0 = max(0, y_end - side)
+        crop = frame_bgr[y0:y_end, x0:x_end].copy()
+        candidates.append(CropResult(
+            crop=crop,
+            bbox=(x1, y1, bw, bh),
+            center=(cx, cy),
+            area_px=int(bw * bh),
+        ))
+    candidates.sort(key=lambda r: -r.area_px)
+    return candidates[:max_crops]
+

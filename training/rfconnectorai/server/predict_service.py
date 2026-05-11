@@ -45,7 +45,9 @@ from fastapi.responses import JSONResponse
 from rfconnectorai.classifier.predict import (
     ConnectorClassifier, EnsembleClassifier,
 )
-from rfconnectorai.data_fetch.connector_crops import detect_connector_crops
+from rfconnectorai.data_fetch.connector_crops import (
+    detect_connector_crops, detect_connector_crops_yolo,
+)
 from rfconnectorai.server.labeler import create_router as create_labeler_router
 
 
@@ -81,6 +83,21 @@ DEFAULT_LOW_CENTER_RATIO = 2.0     # tuned to recover 2.4mm-F crops at 1.74/2.14
 DEFAULT_HIGH_CENTER_RATIO = 5.0
 DEFAULT_MIN_UNIFORM_FG = 0.20       # for the "fills the crop" pattern
 
+# YOLO fallback: when Hough returns no crops, try the trained YOLO
+# detector (committed at models/detector/best.pt). Hough handles
+# perpendicular face-on shots; YOLO catches off-axis cases Hough
+# misses. The rembg fg filter still gates whatever YOLO returns, so
+# the 0% false-positive property on background frames is preserved.
+DEFAULT_YOLO_FALLBACK = False
+DEFAULT_YOLO_WEIGHTS = "models/detector/best.pt"   # relative to repo root
+DEFAULT_YOLO_CONF = 0.20
+
+# Spec lookup. After classification, each prediction is enriched with
+# a `spec` block from connectors.yaml (frequency range, impedance,
+# vendor variants, etc.) so the phone app can show a richer result
+# card without the classifier needing to know any of that.
+DEFAULT_SPECS_PATH = "rfconnectorai/specs/connectors.yaml"
+
 
 def _config_from_env() -> dict:
     return {
@@ -97,6 +114,10 @@ def _config_from_env() -> dict:
         "low_center_ratio": float(os.environ.get("RFCAI_LOW_CENTER_RATIO", DEFAULT_LOW_CENTER_RATIO)),
         "high_center_ratio": float(os.environ.get("RFCAI_HIGH_CENTER_RATIO", DEFAULT_HIGH_CENTER_RATIO)),
         "classify_on_cleaned": os.environ.get("RFCAI_CLASSIFY_ON_CLEANED", "0") in ("1", "true", "True"),
+        "yolo_fallback": os.environ.get("RFCAI_YOLO_FALLBACK", "0") in ("1", "true", "True"),
+        "yolo_weights": Path(os.environ.get("RFCAI_YOLO_WEIGHTS", DEFAULT_YOLO_WEIGHTS)),
+        "yolo_conf": float(os.environ.get("RFCAI_YOLO_CONF", DEFAULT_YOLO_CONF)),
+        "specs_path": Path(os.environ.get("RFCAI_SPECS_PATH", DEFAULT_SPECS_PATH)),
     }
 
 
@@ -115,6 +136,10 @@ def create_app(config: dict | None = None) -> FastAPI:
     low_center_ratio: float = cfg["low_center_ratio"]
     high_center_ratio: float = cfg["high_center_ratio"]
     classify_on_cleaned: bool = cfg["classify_on_cleaned"]
+    yolo_fallback_enabled: bool = cfg.get("yolo_fallback", False)
+    yolo_weights_path: Path = cfg.get("yolo_weights", Path(DEFAULT_YOLO_WEIGHTS))
+    yolo_conf_threshold: float = cfg.get("yolo_conf", DEFAULT_YOLO_CONF)
+    specs_path: Path = cfg.get("specs_path", Path(DEFAULT_SPECS_PATH))
 
     app = FastAPI(title="RF Connector AI prediction service", version="1.0.0")
 
@@ -155,6 +180,81 @@ def create_app(config: dict | None = None) -> FastAPI:
                 classifier = ConnectorClassifier.load(model_dir)
         except Exception as e:
             print(f"[predict_service] classifier load failed: {e}")
+
+    # YOLO fallback detector — only fires when Hough returns 0 crops.
+    # Lazy import so the service still starts if ultralytics is not
+    # installed (fallback simply disables).
+    yolo_model = None
+    if yolo_fallback_enabled:
+        try:
+            from ultralytics import YOLO   # type: ignore
+            if not yolo_weights_path.exists():
+                raise FileNotFoundError(yolo_weights_path)
+            yolo_model = YOLO(str(yolo_weights_path))
+            print(f"[predict_service] YOLO fallback enabled "
+                  f"({yolo_weights_path}, conf={yolo_conf_threshold})")
+        except Exception as e:
+            print(f"[predict_service] YOLO fallback unavailable: {e}")
+            yolo_model = None
+
+    # Spec lookup. Maps family name → spec dict from connectors.yaml.
+    # Built once at startup; lookup per-prediction is O(1).
+    spec_table: dict[str, dict] = {}
+    if specs_path.exists():
+        try:
+            import yaml   # type: ignore
+            raw = yaml.safe_load(specs_path.read_text())
+            # connectors.yaml structure (schema v1): top-level
+            # `connectors:` list, each entry has `id` and
+            # `display_name`. We index by display_name lowercased so a
+            # class_name like "2.4mm-M" looks up the "2.4mm" entry
+            # with a single dict access.
+            if isinstance(raw, dict) and "connectors" in raw:
+                for entry in raw["connectors"]:
+                    if not isinstance(entry, dict):
+                        continue
+                    display = entry.get("display_name") or entry.get("name")
+                    family_id = entry.get("id") or entry.get("family")
+                    if display:
+                        spec_table[str(display).lower()] = entry
+                    if family_id:
+                        spec_table[str(family_id).lower()] = entry
+            elif isinstance(raw, dict):
+                for k, v in raw.items():
+                    if isinstance(v, dict):
+                        spec_table[str(k).lower()] = v
+            print(f"[predict_service] spec lookup loaded "
+                  f"({len(spec_table)} keys from {specs_path})")
+        except Exception as e:
+            print(f"[predict_service] spec lookup unavailable: {e}")
+
+    def _lookup_spec(class_name: str) -> dict | None:
+        """`class_name` like '2.4mm-M' → spec dict for '2.4mm' family,
+        or None if no entry."""
+        if "-" not in class_name:
+            return None
+        family = class_name.rsplit("-", 1)[0].lower()
+        # Normalise the family key the same way connectors.yaml uses it
+        # ('2.4mm', 'sma', etc.).
+        return spec_table.get(family) or spec_table.get(family.upper())
+
+    def _decompose_probabilities(
+        probabilities: dict[str, float],
+    ) -> tuple[str, str, float, float]:
+        """From a 6-class softmax keyed by 'FAMILY-GENDER', marginalize
+        into family-confidence and gender-confidence. Returns the most
+        likely family + gender + their marginal probabilities."""
+        fam_p: dict[str, float] = {}
+        gen_p: dict[str, float] = {}
+        for cls, p in probabilities.items():
+            if "-" not in cls:
+                continue
+            f, g = cls.rsplit("-", 1)
+            fam_p[f] = fam_p.get(f, 0.0) + float(p)
+            gen_p[g] = gen_p.get(g, 0.0) + float(p)
+        top_fam = max(fam_p.items(), key=lambda kv: kv[1]) if fam_p else ("", 0.0)
+        top_gen = max(gen_p.items(), key=lambda kv: kv[1]) if gen_p else ("", 0.0)
+        return top_fam[0], top_gen[0], top_fam[1], top_gen[1]
 
     # rembg session for the foreground pre-filter. Lazy import so the
     # service still starts on a box without rembg (filter just disables
@@ -239,6 +339,15 @@ def create_app(config: dict | None = None) -> FastAPI:
                 "low_center_ratio": low_center_ratio,
                 "high_center_ratio": high_center_ratio,
             },
+            "yolo_fallback": {
+                "enabled": yolo_fallback_enabled,
+                "available": yolo_model is not None,
+                "conf_threshold": yolo_conf_threshold,
+            },
+            "spec_lookup": {
+                "available": bool(spec_table),
+                "families_indexed": len(spec_table),
+            },
         }
 
     def _classify_frame(bgr: np.ndarray) -> list[dict]:
@@ -248,6 +357,20 @@ def create_app(config: dict | None = None) -> FastAPI:
         ResNet-18 will otherwise emit a confident wrong answer for
         background patches)."""
         crops = detect_connector_crops(bgr, max_crops=max_detections)
+        crop_source = "hough"
+        if not crops and yolo_model is not None:
+            # Hough found nothing — try YOLO as a fallback. The rembg
+            # foreground filter still runs per-crop below, so an empty
+            # frame (wall, desk) that YOLO mis-detects still gets
+            # rejected before classification.
+            crops = detect_connector_crops_yolo(
+                bgr,
+                yolo_model,
+                max_crops=max_detections,
+                conf=yolo_conf_threshold,
+            )
+            if crops:
+                crop_source = "yolo"
         out = []
         for c in crops:
             keep, fg_frac, center_ratio, rgba = _crop_passes_fg_filter(c.crop)
@@ -268,14 +391,27 @@ def create_app(config: dict | None = None) -> FastAPI:
                 rgb_crop = cv2.cvtColor(c.crop, cv2.COLOR_BGR2RGB)
                 pred = classifier.predict(rgb_crop)
             x, y, bw, bh = c.bbox
+            probs = {k: float(v) for k, v in pred.probabilities.items()}
+            family, gender, fam_conf, gen_conf = _decompose_probabilities(probs)
+            spec = _lookup_spec(pred.class_name)
             out.append({
+                # Original fields — kept verbatim for backwards compat
+                # with the Flutter app.
                 "class_name": pred.class_name,
                 "confidence": float(pred.confidence),
-                "probabilities": {k: float(v) for k, v in pred.probabilities.items()},
+                "probabilities": probs,
                 "bbox": {"x": int(x), "y": int(y), "w": int(bw), "h": int(bh)},
+                # New structured fields — additive, safe for older
+                # clients to ignore.
+                "family": family,
+                "gender": gender,
+                "family_confidence": fam_conf,
+                "gender_confidence": gen_conf,
+                "spec": spec,
                 "_diag": {
                     "fg_fraction": fg_frac,
                     "center_density_ratio": center_ratio,
+                    "crop_source": crop_source,
                 },
             })
         return out
