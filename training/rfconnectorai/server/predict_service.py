@@ -282,21 +282,50 @@ def create_app(config: dict | None = None) -> FastAPI:
             print(f"[predict_service] rembg unavailable, fg filter disabled: {e}")
             rembg_session = None
 
+    def _compute_full_rgba(bgr: np.ndarray) -> np.ndarray | None:
+        """Run rembg ONCE on the full image — cheaper than running it
+        per Hough crop because rembg's U^2-Net resizes its input to a
+        fixed 320x320 working size anyway, so the cost is roughly
+        flat in image size. The full-frame alpha is then sliced per
+        crop in `_crop_passes_fg_filter`. Returns None if rembg is
+        unavailable or fails."""
+        if rembg_session is None:
+            return None
+        try:
+            from rembg import remove   # type: ignore
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            rgba = remove(rgb, session=rembg_session)
+            if rgba.ndim == 3 and rgba.shape[2] == 4:
+                return rgba
+            return None
+        except Exception:
+            return None
+
     def _crop_passes_fg_filter(
         crop_bgr: np.ndarray,
+        precomputed_rgba: np.ndarray | None = None,
     ) -> tuple[bool, float, float, np.ndarray | None]:
         """Returns (keep, fg_fraction, center_density_ratio, rgba).
         rgba is the rembg output (H,W,4) on success — useful for the
-        optional 'classify on cleaned crop' path."""
-        if rembg_session is None:
+        optional 'classify on cleaned crop' path.
+
+        If `precomputed_rgba` is provided (a slice of the full-image
+        rgba covering this crop's bbox), use it directly and skip the
+        per-crop rembg call — saves ~1s per crop on CPU. The caller is
+        responsible for slicing the full-image rgba to match the crop
+        bbox precisely."""
+        if precomputed_rgba is not None:
+            rgba = precomputed_rgba
+        elif rembg_session is None:
             return True, 1.0, 1.0, None
-        try:
-            from rembg import remove   # type: ignore
-            # rembg treats raw ndarrays as RGB; we have BGR from cv2.
-            crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
-            rgba = remove(crop_rgb, session=rembg_session)
-        except Exception:
-            return True, 1.0, 1.0, None   # fail open on rembg errors
+        else:
+            try:
+                from rembg import remove   # type: ignore
+                # rembg treats raw ndarrays as RGB; we have BGR from cv2.
+                crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+                rgba = remove(crop_rgb, session=rembg_session)
+            except Exception:
+                return True, 1.0, 1.0, None   # fail open on rembg errors
         if rgba.ndim != 3 or rgba.shape[2] != 4:
             print(f"[predict_service] WARNING: rembg returned non-RGBA "
                   f"({rgba.shape}); fg filter inactive on this crop")
@@ -365,11 +394,7 @@ def create_app(config: dict | None = None) -> FastAPI:
         crops are dropped before classification (the bias-locked
         ResNet-18 will otherwise emit a confident wrong answer for
         background patches)."""
-        import time as _time
-        _t0 = _time.perf_counter()
         crops = detect_connector_crops(bgr, max_crops=max_detections)
-        _t_hough_ms = (_time.perf_counter() - _t0) * 1000
-        _per_crop_ms: list[dict] = []
         crop_source = "hough"
         if not crops and yolo_model is not None:
             # Hough found nothing — try YOLO as a fallback. The rembg
@@ -384,14 +409,32 @@ def create_app(config: dict | None = None) -> FastAPI:
             )
             if crops:
                 crop_source = "yolo"
+        # Single rembg call on the full frame — silhouette is then
+        # sliced per Hough crop, avoiding the per-crop rembg cost
+        # (saves ~1s/crop on CPU with u2netp).
+        full_rgba = _compute_full_rgba(bgr) if crops else None
+        full_h, full_w = bgr.shape[:2]
         out = []
         for c in crops:
-            _t_c = _time.perf_counter()
-            keep, fg_frac, center_ratio, rgba = _crop_passes_fg_filter(c.crop)
-            _t_fg_ms = (_time.perf_counter() - _t_c) * 1000
-            _t_c = _time.perf_counter()
+            crop_rgba = None
+            if full_rgba is not None:
+                # bbox is (x, y, w, h) on the original frame. Crop's
+                # square padded box is built around (cx, cy) — replicate
+                # that math so the slice lines up with c.crop.
+                bx, by, bw, bh = c.bbox
+                side = c.crop.shape[0]   # crops are square
+                cx, cy = c.center
+                x0 = max(0, cx - side // 2)
+                y0 = max(0, cy - side // 2)
+                x1 = min(full_w, x0 + side)
+                y1 = min(full_h, y0 + side)
+                if x1 - x0 < side: x0 = max(0, x1 - side)
+                if y1 - y0 < side: y0 = max(0, y1 - side)
+                crop_rgba = full_rgba[y0:y1, x0:x1]
+            keep, fg_frac, center_ratio, rgba = _crop_passes_fg_filter(
+                c.crop, precomputed_rgba=crop_rgba,
+            )
             if not keep:
-                _per_crop_ms.append({"fg": _t_fg_ms, "kept": False})
                 continue
             if classify_on_cleaned and rgba is not None:
                 # Composite the rembg silhouette over white, drop alpha.
@@ -407,19 +450,10 @@ def create_app(config: dict | None = None) -> FastAPI:
             else:
                 rgb_crop = cv2.cvtColor(c.crop, cv2.COLOR_BGR2RGB)
                 pred = classifier.predict(rgb_crop)
-            _t_cls_ms = (_time.perf_counter() - _t_c) * 1000
-            _per_crop_ms.append({
-                "fg": round(_t_fg_ms, 1),
-                "cls": round(_t_cls_ms, 1),
-                "crop_shape": list(c.crop.shape),
-            })
             x, y, bw, bh = c.bbox
             probs = {k: float(v) for k, v in pred.probabilities.items()}
             family, gender, fam_conf, gen_conf = _decompose_probabilities(probs)
             spec = _lookup_spec(pred.class_name)
-            print(f"[predict_timing] hough={_t_hough_ms:.0f}ms "
-                  f"per_crop={_per_crop_ms}  total_so_far={(_time.perf_counter()-_t0)*1000:.0f}ms",
-                  flush=True)
             out.append({
                 # Original fields — kept verbatim for backwards compat
                 # with the Flutter app.
