@@ -1,0 +1,117 @@
+{
+  "n_images": 8,
+  "n_detected": 8,
+  "full_correct": 6,
+  "family_correct": 6,
+  "gender_correct": 7,
+  "accuracy": {
+    "full": 0.75,
+    "family": 0.75,
+    "gender": 0.875,
+    "detect_recall": 1.0
+  },
+  "latency_ms": {
+    "mean": 5006.570523139089,
+    "max": 6511.028680950403
+  },
+  "url": "http://127.0.0.1:8503/predict",
+  "holdout": "/opt/rfcai/repo/training/data/test_holdout",
+  "rows": [
+    {
+      "file": "2_4mm-m.jpeg",
+      "truth": "2.4mm-F",
+      "pred": "2.4mm-F",
+      "pred_family": "2.4mm",
+      "pred_gender": "F",
+      "confidence": 0.3178410530090332,
+      "family_confidence": 0.4125736579298973,
+      "gender_confidence": 0.6747657954692841,
+      "detected": true,
+      "crop_source": "hough"
+    },
+    {
+      "file": "IMG_0271.jpeg",
+      "truth": "2.4mm-F",
+      "pred": "2.4mm-F",
+      "pred_family": "2.4mm",
+      "pred_gender": "F",
+      "confidence": 0.7594724893569946,
+      "family_confidence": 0.8159995339810848,
+      "gender_confidence": 0.8821694478392601,
+      "detected": true,
+      "crop_source": "hough"
+    },
+    {
+      "file": "IMG_0272.jpeg",
+      "truth": "2.4mm-F",
+      "pred": "2.4mm-F",
+      "pred_family": "2.4mm",
+      "pred_gender": "F",
+      "confidence": 0.8470670580863953,
+      "family_confidence": 0.8894773535430431,
+      "gender_confidence": 0.9101737691089511,
+      "detected": true,
+      "crop_source": "hough"
+    },
+    {
+      "file": "IMG_0270.jpeg",
+      "truth": "2.4mm-M",
+      "pred": "3.5mm-F",
+      "pred_family": "3.5mm",
+      "pred_gender": "F",
+      "confidence": 0.6398606300354004,
+      "family_confidence": 0.6880180798470974,
+      "gender_confidence": 0.7928878962993622,
+      "detected": true,
+      "crop_source": "hough"
+    },
+    {
+      "file": "IMG_0274.jpeg",
+      "truth": "2.92mm-F",
+      "pred": "2.4mm-F",
+      "pred_family": "2.4mm",
+      "pred_gender": "F",
+      "confidence": 0.3178410530090332,
+      "family_confidence": 0.4125736579298973,
+      "gender_confidence": 0.6747657954692841,
+      "detected": true,
+      "crop_source": "hough"
+    },
+    {
+      "file": "IMG_0273.jpeg",
+      "truth": "2.92mm-M",
+      "pred": "2.92mm-M",
+      "pred_family": "2.92mm",
+      "pred_gender": "M",
+      "confidence": 0.5829463601112366,
+      "family_confidence": 0.7790887504816055,
+      "gender_confidence": 0.7287691682577133,
+      "detected": true,
+      "crop_source": "hough"
+    },
+    {
+      "file": "IMG_0276.jpeg",
+      "truth": "3.5mm-F",
+      "pred": "3.5mm-F",
+      "pred_family": "3.5mm",
+      "pred_gender": "F",
+      "confidence": 0.7597558498382568,
+      "family_confidence": 0.7690632650628686,
+      "gender_confidence": 0.8232120051980019,
+      "detected": true,
+      "crop_source": "hough"
+    },
+    {
+      "file": "IMG_0275.jpeg",
+      "truth": "3.5mm-M",
+      "pred": "3.5mm-M",
+      "pred_family": "3.5mm",
+      "pred_gender": "M",
+      "confidence": 0.5737150311470032,
+      "family_confidence": 0.8744458258152008,
+      "gender_confidence": 0.6694017723202705,
+      "detected": true,
+      "crop_source": "hough"
+    }
+  ]
+}
