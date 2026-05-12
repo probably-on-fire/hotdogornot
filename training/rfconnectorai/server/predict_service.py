@@ -356,7 +356,11 @@ def create_app(config: dict | None = None) -> FastAPI:
         crops are dropped before classification (the bias-locked
         ResNet-18 will otherwise emit a confident wrong answer for
         background patches)."""
+        import time as _time
+        _t0 = _time.perf_counter()
         crops = detect_connector_crops(bgr, max_crops=max_detections)
+        _t_hough_ms = (_time.perf_counter() - _t0) * 1000
+        _per_crop_ms: list[dict] = []
         crop_source = "hough"
         if not crops and yolo_model is not None:
             # Hough found nothing — try YOLO as a fallback. The rembg
@@ -373,8 +377,12 @@ def create_app(config: dict | None = None) -> FastAPI:
                 crop_source = "yolo"
         out = []
         for c in crops:
+            _t_c = _time.perf_counter()
             keep, fg_frac, center_ratio, rgba = _crop_passes_fg_filter(c.crop)
+            _t_fg_ms = (_time.perf_counter() - _t_c) * 1000
+            _t_c = _time.perf_counter()
             if not keep:
+                _per_crop_ms.append({"fg": _t_fg_ms, "kept": False})
                 continue
             if classify_on_cleaned and rgba is not None:
                 # Composite the rembg silhouette over white, drop alpha.
@@ -390,10 +398,19 @@ def create_app(config: dict | None = None) -> FastAPI:
             else:
                 rgb_crop = cv2.cvtColor(c.crop, cv2.COLOR_BGR2RGB)
                 pred = classifier.predict(rgb_crop)
+            _t_cls_ms = (_time.perf_counter() - _t_c) * 1000
+            _per_crop_ms.append({
+                "fg": round(_t_fg_ms, 1),
+                "cls": round(_t_cls_ms, 1),
+                "crop_shape": list(c.crop.shape),
+            })
             x, y, bw, bh = c.bbox
             probs = {k: float(v) for k, v in pred.probabilities.items()}
             family, gender, fam_conf, gen_conf = _decompose_probabilities(probs)
             spec = _lookup_spec(pred.class_name)
+            print(f"[predict_timing] hough={_t_hough_ms:.0f}ms "
+                  f"per_crop={_per_crop_ms}  total_so_far={(_time.perf_counter()-_t0)*1000:.0f}ms",
+                  flush=True)
             out.append({
                 # Original fields — kept verbatim for backwards compat
                 # with the Flutter app.
