@@ -440,6 +440,11 @@ class _AboutScreenState extends State<AboutScreen> {
               // Advanced section — only visible in dev mode.
               if (widget.settings.devMode) ...[
                 const SizedBox(height: 28),
+                _OnDeviceToggle(
+                  settings: widget.settings,
+                  onChanged: () => setState(() {}),
+                ),
+                const SizedBox(height: 12),
                 _AdvancedSection(
                   relayCtl: _relayCtl,
                   tokenCtl: _tokenCtl,
@@ -670,3 +675,37 @@ class _AdvancedSection extends StatelessWidget {
     );
   }
 }
+
+/// Toggle for the on-device classifier path. Only shown in dev mode.
+/// When on, /predict calls bypass aired.com and run the bundled
+/// ResNet-18 ONNX locally.
+class _OnDeviceToggle extends StatelessWidget {
+  const _OnDeviceToggle({required this.settings, required this.onChanged});
+  final Settings settings;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: SwitchListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+        title: const Text('On-device inference',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+        subtitle: const Text(
+          'Run the classifier locally instead of POSTing to aired.com. '
+          'No network round-trip, works offline. Accuracy may differ — '
+          'currently no rembg / Hough preprocessing on this path.',
+          style: TextStyle(fontSize: 11),
+        ),
+        value: settings.onDeviceMode,
+        onChanged: (v) async {
+          settings.onDeviceMode = v;
+          await settings.save();
+          onChanged();
+        },
+      ),
+    );
+  }
+}
+

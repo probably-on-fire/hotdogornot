@@ -10,6 +10,7 @@ class Settings {
     required this.labelerUser,
     required this.labelerPass,
     required this.devMode,
+    required this.onDeviceMode,
   });
 
   String relayBaseUrl;
@@ -20,12 +21,18 @@ class Settings {
   // panel are visible. Toggled by 7-tap on the version string in About.
   // Default off so end users see only Identify + About.
   bool devMode;
+  // When true, /predict calls bypass the server and run the bundled
+  // ResNet-18 ONNX model on-device. Useful for offline / low-latency
+  // identification. Default off (still uses aired.com). Toggle in the
+  // Advanced section (dev-mode-gated).
+  bool onDeviceMode;
 
   static const _kRelay = 'relay_base_url';
   static const _kToken = 'device_token';
   static const _kUser = 'labeler_user';
   static const _kPass = 'labeler_pass';
   static const _kDevMode = 'dev_mode';
+  static const _kOnDevice = 'on_device_mode';
 
   static const _defaultRelay = 'https://aired.com/rfcai';
   static const _defaultToken =
@@ -41,6 +48,7 @@ class Settings {
       labelerUser: prefs.getString(_kUser) ?? _defaultUser,
       labelerPass: prefs.getString(_kPass) ?? _defaultPass,
       devMode: prefs.getBool(_kDevMode) ?? false,
+      onDeviceMode: prefs.getBool(_kOnDevice) ?? false,
     );
   }
 
@@ -51,6 +59,7 @@ class Settings {
     await prefs.setString(_kUser, labelerUser);
     await prefs.setString(_kPass, labelerPass);
     await prefs.setBool(_kDevMode, devMode);
+    await prefs.setBool(_kOnDevice, onDeviceMode);
   }
 
   String get predictUrl => '$relayBaseUrl/predict';

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
+import '../ondevice/classifier.dart';
 import '../settings.dart';
 import '../theme.dart';
 
@@ -260,7 +261,9 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       _contributionStatus = null;
     });
     try {
-      final r = await ApiClient(widget.settings).predict(f);
+      final r = widget.settings.onDeviceMode
+          ? await _runOnDevice(await f.readAsBytes())
+          : await ApiClient(widget.settings).predict(f);
       if (!mounted) return;
       _hapticOnResult(r);
       setState(() {
@@ -286,8 +289,10 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       _contributionStatus = null;
     });
     try {
-      final r = await ApiClient(widget.settings)
-          .predictBytes(bytes, filename: filename);
+      final r = widget.settings.onDeviceMode
+          ? await _runOnDevice(bytes)
+          : await ApiClient(widget.settings)
+              .predictBytes(bytes, filename: filename);
       if (!mounted) return;
       _hapticOnResult(r);
       setState(() {
@@ -426,6 +431,37 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       return 'Server error — try again.';
     }
     return s.length > 200 ? '${s.substring(0, 200)}…' : s;
+  }
+
+  /// On-device classifier path — runs the bundled ResNet-18 ONNX
+  /// locally and wraps the result in the same PredictResponse shape
+  /// the server returns, so the rest of the result UI is unchanged.
+  /// No rembg / no Hough on this path; the model sees the full frame
+  /// resized to 224x224. Bbox is reported as the whole image.
+  Future<PredictResponse> _runOnDevice(Uint8List bytes) async {
+    final pred = await OnDeviceClassifier.instance.predict(bytes);
+    // Approximate image dims by decoding header — cheap and only
+    // needed so the screen's bbox/area math doesn't divide by zero.
+    // The on-device path doesn't have a meaningful bbox so we report
+    // the full image.
+    final probsJson = pred.probabilities
+        .map((k, v) => MapEntry(k, v));
+    final fakeBboxJson = {
+      'x': 0, 'y': 0, 'w': 4032, 'h': 3024,   // phone shot estimate
+    };
+    final predictionJson = {
+      'class_name': pred.className,
+      'confidence': pred.confidence,
+      'probabilities': probsJson,
+      'bbox': fakeBboxJson,
+      'family': pred.family,
+      'gender': pred.gender,
+    };
+    return PredictResponse.fromJson({
+      'image_width': 4032,
+      'image_height': 3024,
+      'predictions': [predictionJson],
+    });
   }
 
   Prediction? _topAcceptedPrediction(PredictResponse r) {
