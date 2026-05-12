@@ -278,35 +278,14 @@ def create_app(config: dict | None = None) -> FastAPI:
     ) -> tuple[bool, float, float, np.ndarray | None]:
         """Returns (keep, fg_fraction, center_density_ratio, rgba).
         rgba is the rembg output (H,W,4) on success — useful for the
-        optional 'classify on cleaned crop' path.
-
-        rembg's U^2-Net is internally fixed at 320x320, so feeding it a
-        full-resolution 1k+ px crop just wastes CPU on upsampling we
-        don't need. We downscale first if the crop is much larger than
-        the model's working size — gets the same silhouette at a
-        fraction of the cost. The returned rgba is at the downsampled
-        size; classify-on-cleaned then composites on a similarly-sized
-        white background, which is fine because the classifier resizes
-        its input to 224x224 anyway.
-        """
+        optional 'classify on cleaned crop' path."""
         if rembg_session is None:
             return True, 1.0, 1.0, None
         try:
             from rembg import remove   # type: ignore
-            h, w = crop_bgr.shape[:2]
-            long_edge = max(h, w)
-            REMBG_MAX = 480  # ~50% above the U^2-Net 320 working size
-            if long_edge > REMBG_MAX:
-                rscale = REMBG_MAX / long_edge
-                small = cv2.resize(
-                    crop_bgr,
-                    (int(round(w * rscale)), int(round(h * rscale))),
-                    interpolation=cv2.INTER_AREA,
-                )
-                small_rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
-            else:
-                small_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
-            rgba = remove(small_rgb, session=rembg_session)
+            # rembg treats raw ndarrays as RGB; we have BGR from cv2.
+            crop_rgb = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2RGB)
+            rgba = remove(crop_rgb, session=rembg_session)
         except Exception:
             return True, 1.0, 1.0, None   # fail open on rembg errors
         if rgba.ndim != 3 or rgba.shape[2] != 4:
