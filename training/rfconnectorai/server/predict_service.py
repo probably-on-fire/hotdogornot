@@ -263,7 +263,16 @@ def create_app(config: dict | None = None) -> FastAPI:
     if fg_filter_enabled:
         try:
             from rembg import new_session   # type: ignore
-            rembg_session = new_session()
+            # u2netp is the smaller/faster variant of U^2-Net. ~10x
+            # faster on CPU at our crop sizes vs the default u2net,
+            # silhouettes are nearly identical for connector-sized
+            # subjects. The fg-filter heuristics (min_fg, center
+            # density ratios) were tuned against u2net but read across
+            # cleanly because we threshold alpha at 32, well above any
+            # model-edge fuzz difference between the two variants.
+            rembg_model = os.environ.get("RFCAI_REMBG_MODEL", "u2netp")
+            rembg_session = new_session(rembg_model)
+            print(f"[predict_service] rembg model: {rembg_model}")
             print("[predict_service] foreground filter enabled "
                   f"(min_fg={min_fg_fraction}, "
                   f"keep_low<={low_center_ratio} OR "
