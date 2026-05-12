@@ -163,12 +163,35 @@ Two complementary pipelines:
 
 **Taxonomy and specs** (`rfconnectorai/specs/`, `rfconnectorai/schemas/`)
 
+Authored in the
+[trextrader/hotdogornot](https://github.com/trextrader/hotdogornot)
+fork's Epic 1 (taxonomy + connector specification model). Adopted
+verbatim into the main repo and wired into `predict_service` for
+per-prediction `spec` enrichment after the
+2026-05-11 head-to-head bench. Same files drive
+`schemas/taxonomy.py` validation and the fork's still-on-the-shelf
+multi-head training scaffold.
+
   - `specs/connectors.yaml` - structured connector spec lookup for SMA,
     RP-SMA, 3.5mm, 2.92mm/K/SMK, 2.4mm, 1.85mm, 1.0mm, SSMA, SMB, SMC,
     QMA, TNC, BNC, MCX, 7/16 DIN, and unknown.
   - `schemas/taxonomy.py` - lightweight YAML loader/validator that can be
     imported by tests, future API endpoints, and future dataset tooling
     without starting model training.
+
+**Detection: Hough + YOLO11n fallback** (`rfconnectorai/data_fetch/connector_crops.py`)
+
+  - Hough Circles is the primary crop detector — fast, no model needed,
+    well-tuned for connector-face geometry.
+  - YOLO11n fallback (`detect_connector_crops_yolo`) fires when Hough
+    returns 0 crops on a frame, catching off-axis or non-perpendicular
+    shots Hough misses. Detector weights are the
+    [trextrader/hotdogornot](https://github.com/trextrader/hotdogornot)
+    fork's Epic 5 output: trained 5 epochs to mAP50=0.979 on the
+    fork's eval set, committed at
+    [`models/detector/best.pt`](../models/detector/best.pt). The rembg
+    foreground gate still runs on whatever YOLO returns, so the 0% FP
+    property on background frames is preserved through the fallback.
 
 ---
 

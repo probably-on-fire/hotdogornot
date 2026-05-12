@@ -8,6 +8,13 @@ smooths the output).
 This doc visualizes both pipelines. For *why* we ended up here see
 `classifier_journey.md`. For deploy/retrain ops see `runbook.md`.
 
+The **YOLO11n crop fallback**, the **`spec` enrichment** off
+`connectors.yaml`, and the **typed prediction-schema direction** in
+the inference flow below all originated in the
+[trextrader/hotdogornot](https://github.com/trextrader/hotdogornot)
+fork — see [`yolo_hybrid_evaluation_2026-05-11.md`](yolo_hybrid_evaluation_2026-05-11.md)
+for the three-way bench that justified keeping these pieces.
+
 Roadmap note: `../../IMPLEMENTATION_PLAN.md` and `../../TASKS.md` now
 define the next architecture direction. The current v18 path remains the
 compatibility baseline, but the target system adds detector training,

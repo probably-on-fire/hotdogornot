@@ -129,6 +129,17 @@ Predictions now include structured fields beside the legacy
 result panel displays the spec on tap. Older clients that only
 consume `class_name` still work — the new fields are additive.
 
+The `connectors.yaml` taxonomy (16 families across SMA, RP-SMA, 3.5mm,
+2.92mm/K, 2.4mm, 1.85mm, 1.0mm, SSMA, SMB, SMC, QMA, TNC, BNC, MCX,
+7/16 DIN, and an unknown bucket) and the typed prediction-schema
+direction came from the [trextrader/hotdogornot
+fork](https://github.com/trextrader/hotdogornot)'s
+multi-architecture rewrite. See
+[`training/docs/yolo_hybrid_evaluation_2026-05-11.md`](training/docs/yolo_hybrid_evaluation_2026-05-11.md)
+for the three-way bench (production v18 + Hough vs the fork's YOLO
+hybrid vs full multi-head) that justified the pieces we kept vs the
+pieces we deferred.
+
 ### Standalone on-device path (iOS-first, Tier 1)
 
 The Flutter app also bundles the same ResNet-18 ONNX (44 MB) in
@@ -363,6 +374,38 @@ of `dot` commands.
 | [`training/README.md`](training/README.md) | Training and serving stack guide |
 
 ---
+
+## Acknowledgements
+
+Significant parts of the current production pipeline started in
+the [trextrader/hotdogornot](https://github.com/trextrader/hotdogornot)
+fork — adopted into this main repo after head-to-head benching
+([`training/docs/yolo_hybrid_evaluation_2026-05-11.md`](training/docs/yolo_hybrid_evaluation_2026-05-11.md)).
+Specifically:
+
+- **YOLO11n crop detector** (`models/detector/best.pt`, trained to
+  mAP50=0.979) — now wired as a fallback when Hough returns no
+  crops. Original detector training + weights are Jerry's work in
+  the fork.
+- **Connector taxonomy** (`training/rfconnectorai/specs/connectors.yaml`,
+  16 families with structured spec lookup) — authored in the fork,
+  now driving the per-prediction `spec` enrichment in `/predict`.
+- **Typed prediction schemas** that motivated the additive
+  structured `family` / `gender` / `family_confidence` /
+  `gender_confidence` fields on the existing response.
+- **Pydantic instance / prediction / taxonomy schemas** — informed
+  the labels.json discipline (now enforced by an assertion in
+  `train.py`) and the eval-harness pattern.
+- **Detect-classify pipeline** (`pipeline/detect_classify.py`) —
+  end-to-end YOLO-then-multi-head scaffolding that benched but
+  hasn't shipped to production (production still serves the
+  ResNet-18 single-head). Code path is intact for when richer
+  attribute labels arrive.
+
+What's kept on the main repo: the production ResNet-18 single-head
+classifier, rembg foreground gating with `u2netp`, Hough crops, 5×
+TTA, all backed by the eval-harness reports under
+[`training/reports/`](training/reports/).
 
 <div align="center">
 

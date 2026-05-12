@@ -102,12 +102,17 @@ RFCAI_MIN_FG_FRACTION=0.05      # rembg threshold floor
 RFCAI_REMBG_MODEL=u2netp        # lighter U^2-Net variant; ~3x faster than u2net
                                 # with same silhouette quality on this dataset.
                                 # Drops mean /predict latency 9.5s -> 5.0s.
-RFCAI_YOLO_FALLBACK=1           # when Hough finds 0 crops, try YOLO11n
+RFCAI_YOLO_FALLBACK=1           # YOLO11n detector fallback when Hough finds 0
+                                # crops. Detector trained by trextrader, lives
+                                # at models/detector/best.pt — mAP50=0.979 on
+                                # the fork's eval set.
 RFCAI_YOLO_WEIGHTS=/opt/rfcai/repo/models/detector/best.pt
 RFCAI_YOLO_CONF=0.2             # YOLO conf threshold for fallback crops
 RFCAI_SPECS_PATH=/opt/rfcai/repo/training/rfconnectorai/specs/connectors.yaml
                                 # spec lookup — each prediction enriched
                                 # with frequency range, impedance, etc.
+                                # connectors.yaml authored by trextrader
+                                # (16-family taxonomy) in the fork's Epic 1.
 # RFCAI_ENSEMBLE_WEIGHTS=...     # comma-separated extra weight files for averaging
 ```
 
