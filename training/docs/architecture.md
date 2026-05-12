@@ -45,64 +45,93 @@ verification, and mobile/server export tracks.
 
 ```mermaid
 flowchart TD
-    Start([📱 User taps shutter]) --> Upload[POST /rfcai/predict<br/>~3 MB JPEG over HTTPS]
+    Start([📱 User taps shutter]) --> Branch{onDeviceMode?}
+
+    Branch -->|on| OnDeviceNet[ResNet-18 ONNX<br/>local · 50-100 ms]
+    OnDeviceNet --> JSON
+
+    Branch -->|off| Upload[POST /rfcai/predict<br/>~3 MB JPEG over HTTPS]
     Upload --> Decode[cv2.imdecode → BGR]
-
-    Decode --> FGFilter{rembg fg filter<br/>foreground area<br/>≥ threshold?}
-    FGFilter -->|No| EmptyResp[Return predictions: empty]
-    EmptyResp --> NoConnector([📱 'No connector detected'])
-
-    FGFilter -->|Yes| Composite[rembg full silhouette<br/>composite on white bg<br/>removes wood-bench bias]
-    Composite --> Hough[cv2.HoughCircles<br/>1–3 candidate crops]
-    Hough --> EachCrop[For each crop]
-    EachCrop --> Resize[Resize → 224×224<br/>ImageNet normalize]
+    Decode --> Hough[Hough Circles<br/>1–3 candidate crops]
+    Hough -->|0 crops| YoloFallback[YOLO11n fallback<br/>conf=0.20]
+    YoloFallback --> EachCrop
+    Hough -->|≥1 crops| EachCrop[For each crop]
+    EachCrop --> FGFilter{rembg u2netp fg filter<br/>foreground area<br/>≥ threshold?}
+    FGFilter -->|No| EmptyResp[Drop crop]
+    FGFilter -->|Yes| Composite[Composite silhouette on white<br/>RFCAI_CLASSIFY_ON_CLEANED=1]
+    Composite --> Resize[Resize → 224×224<br/>ImageNet normalize]
     Resize --> Model[ResNet-18 backbone<br/>+ Linear 512→6]
     Model --> TTA[5× TTA<br/>identity · h-flip<br/>+90° · -90° · center-crop]
     TTA --> Avg[Average softmax<br/>across 5 augmentations]
     Avg --> Rank[Pick highest-confidence<br/>across all crops]
-    Rank --> JSON[Return JSON]
+    Rank --> Enrich[Add family · gender ·<br/>marginal confidences ·<br/>spec from connectors.yaml]
+    Enrich --> JSON[Return JSON]
 
     JSON --> Gate1{confidence<br/>≥ 0.40?}
     Gate1 -->|No| LowConf([📱 'No clear connector'])
     Gate1 -->|Yes| Gate2{bbox area<br/>≥ 2% of image?}
     Gate2 -->|No| TooSmall([📱 'Move closer'])
-    Gate2 -->|Yes| Result([📱 Result panel<br/>HOT DOG / NOT HOT DOG<br/>+ family + class + chips])
+    Gate2 -->|Yes| Result([📱 Result panel<br/>HOT DOG / NOT HOT DOG<br/>+ family + class + chips + spec])
 
     classDef phone fill:#1d222c,stroke:#4f8cff,color:#fff
     classDef decision fill:#3a2f15,stroke:#ffb347,color:#fff
     classDef terminal fill:#1a3320,stroke:#4ade80,color:#fff
     classDef reject fill:#3a1a1a,stroke:#e63946,color:#fff
-    class Start,Upload,JSON phone
-    class FGFilter,Gate1,Gate2 decision
+    classDef ondevice fill:#1f2a1a,stroke:#7be07b,color:#fff
+    class Start,Upload,JSON,OnDeviceNet phone
+    class Branch,FGFilter,Gate1,Gate2 decision
     class Result terminal
-    class NoConnector,LowConf,TooSmall reject
+    class LowConf,TooSmall,EmptyResp reject
+    class OnDeviceNet ondevice
 ```
 
-### Stage timing (CPU on the box, ~250–500 ms total)
+### Stage timing (current production, CPU on the box)
+
+After the u2netp rembg swap (2026-05-11) production runs at:
 
 | Stage | ms |
 |---|---|
 | HTTPS upload (~3 MB JPEG) | 100–200 |
-| JPEG decode | 5 |
-| rembg fg filter | 80–120 |
-| rembg full silhouette + composite | 60–80 |
-| Hough Circle crop | 20 |
-| ResNet-18 forward × 5 TTA × N crops | 30–80 |
-| Response + render on phone | 30 |
+| JPEG decode | ~70 |
+| Hough crops (full-res) | 1700 |
+| rembg u2netp fg filter (per crop) | 1000–1100 |
+| Resnet-18 + 5× TTA (per crop) | 50–300 |
+| Spec lookup + structured enrichment | <1 |
+| **Total mean** | **~5.0 s** |
 
-GPUs on the box are now wired up (`runbook.md`) but the predict
-service still runs CPU — moving classifier inference to GPU would cut
-that line roughly in half.
+Pre-u2netp baseline was 9.5 s — see
+`reports/holdout_2026-05-11_post_improvements.md` vs
+`reports/holdout_2026-05-11_u2netp.md`.
+
+GPUs on the box are wired up (`runbook.md`) but the predict service
+still runs on CPU — moving classifier inference to GPU would cut the
+classify line ~10× but doesn't help rembg or Hough.
 
 ### Production env knobs (`/etc/default/rfcai-predict`)
 
 ```
-RFCAI_FG_FILTER=1                # rembg foreground gate (Stage 2)
-RFCAI_CLASSIFY_ON_CLEANED=1      # composite on white before classify (Stage 3)
-RFCAI_TTA=5                      # 5× test-time augmentation (Stage 5)
+RFCAI_FG_FILTER=1                # rembg foreground gate
+RFCAI_CLASSIFY_ON_CLEANED=1      # composite on white before classify
+RFCAI_REMBG_MODEL=u2netp         # lighter U^2-Net variant (~3× faster)
+RFCAI_YOLO_FALLBACK=1            # YOLO11n crop fallback when Hough empty
+RFCAI_YOLO_WEIGHTS=/opt/rfcai/repo/models/detector/best.pt
+RFCAI_YOLO_CONF=0.2              # detection threshold for fallback
+RFCAI_SPECS_PATH=...connectors.yaml   # spec lookup
 RFCAI_MIN_CONFIDENCE=0.40        # phone-side gate (Result panel)
 RFCAI_MIN_BBOX_FRACTION=0.02     # phone-side gate (Result panel)
 ```
+
+### Standalone on-phone path (Tier 1 spike)
+
+The Flutter app bundles the same ResNet-18 ONNX in `flutter/assets/models/`
+and runs it locally via the `onnxruntime` package when
+`Settings.onDeviceMode` is on. Skips rembg + Hough + TTA entirely —
+the model sees the full frame resized to 224×224. Tradeoff: no
+foreground gate (empty scenes still classify as one of the 6 classes
+with potentially-high softmax confidence), no Hough zoom-in (smaller
+connectors in the frame get downsampled aggressively). Useful for
+offline / zero-latency identification; ~50–100 ms inference per
+frame. See `flutter/lib/src/ondevice/classifier.dart`.
 
 ---
 

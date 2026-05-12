@@ -101,6 +101,21 @@ each screen an `isActive` prop based on the selected tab; the
 inactive tab disposes its controller in `didUpdateWidget` so the
 active tab can claim it.
 
+## On-device inference (Tier 1 spike)
+
+The app bundles the v18 ResNet-18 ONNX in `assets/models/` and can
+run the classifier entirely on-device via the `onnxruntime` package.
+Toggle in **About → Advanced → "On-device inference"** (dev-mode-gated).
+When on, the Identify screen's predict path bypasses `/predict` and
+runs locally — no network round-trip, works offline, ~50–100 ms per
+frame. Result is wrapped in the same `PredictResponse` shape so the
+rest of the UI (chip correction, spec card) is unchanged.
+
+The on-device path intentionally skips rembg + Hough + TTA in this
+tier, so accuracy may differ from the server path. See
+`../training/docs/yolo_hybrid_evaluation_2026-05-11.md` for the
+field-test plan and Tier-2/Tier-3 follow-ups.
+
 ## Code layout
 
 ```
@@ -110,15 +125,25 @@ lib/
     app.dart                      — MaterialApp + theme wiring
     theme.dart                    — dark theme + HOT DOG / NOT HOT DOG colors
     settings.dart                 — persisted Settings (relay, token,
-                                    labeler creds, devMode)
+                                    labeler creds, devMode, onDeviceMode)
     api.dart                      — multipart POST to /predict and
-                                    /labeler/upload-{train,test,video}
+                                    /labeler/upload-{train,test,video}.
+                                    Parses optional structured fields
+                                    (family, gender, *_confidence, spec).
+    ondevice/
+      classifier.dart             — singleton ResNet-18 ONNX wrapper.
+                                    Loads weights.synth_20ep.onnx from
+                                    the asset bundle on first use,
+                                    reused across requests.
     screens/
       main_shell.dart             — bottom-nav shell, conditional tabs
-      identify_screen.dart        — camera + predict + chip-correction
+      identify_screen.dart        — camera + predict + chip-correction.
+                                    Routes through ondevice classifier
+                                    when onDeviceMode is on.
       contribute_screen.dart      — camera-first capture (dev mode)
       about_screen.dart           — hero + request form + privacy +
-                                    Advanced (dev mode)
+                                    Advanced (dev mode, has on-device
+                                    toggle)
 tool/
   generate_icon.py                — PIL script that crops the aired.com
                                     brain mark out of the full logo +
@@ -130,6 +155,10 @@ assets/
     icon_foreground.png           — Android adaptive foreground
     source/aired_logo_full.png    — committed source; re-crop with
                                     tool/generate_icon.py
+  models/
+    connector_classifier.onnx     — bundled v18 weights for on-device
+                                    inference (~44 MB)
+    labels.json                   — class_names + ImageNet preproc
 ```
 
 ## Backend coupling

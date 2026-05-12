@@ -106,11 +106,40 @@ Current documented model:
 | Family accuracy | 75% |
 | Gender accuracy | 87.5% |
 | Background false positives | 0% |
+| Mean /predict latency | ~5.0 s |
 | Held-out size | 8 phone shots |
 
 The current model is an ImageNet-pretrained ResNet-18 with a linear head.
 The 8-image holdout is too small to support strong accuracy claims; one
 miss changes accuracy by 12.5 percentage points.
+
+Tracked benchmark reports under
+[`training/reports/`](training/reports/). Re-run with
+[`training/scripts/eval_holdout.py`](training/scripts/eval_holdout.py)
+after any production change — this is the gate that catches silent
+regressions (e.g. the labels.json inversion that drifted gender
+accuracy from 87.5% to 12.5% for 9 days unnoticed before our
+eval-harness discipline started).
+
+Predictions now include structured fields beside the legacy
+`class_name`: `family`, `gender`, `family_confidence`,
+`gender_confidence`, and a `spec` block from
+[`training/rfconnectorai/specs/connectors.yaml`](training/rfconnectorai/specs/connectors.yaml)
+(frequency range, impedance, coupling, compatibility). The Flutter
+result panel displays the spec on tap. Older clients that only
+consume `class_name` still work — the new fields are additive.
+
+### Standalone on-device path (iOS-first, Tier 1)
+
+The Flutter app also bundles the same ResNet-18 ONNX (44 MB) in
+`flutter/assets/models/` and can run inference entirely on the
+phone via the `onnxruntime` package. Toggle in **About → Advanced
+→ "On-device inference"** (dev-mode-gated). No network round-trip,
+works offline, ~50–100 ms per inference. Skips rembg + Hough + TTA
+in this tier — accuracy may differ from the server path; planned
+field test on iPhone determines whether to ship as-is or port the
+preprocessing stack too (Tier 2 / Tier 3 in
+`training/docs/yolo_hybrid_evaluation_2026-05-11.md`).
 
 ResNet-18 is now treated as the baseline and fallback, not the final
 architecture. The model strategy is moving to a multi-architecture pipeline:

@@ -80,16 +80,15 @@ Should show:
   "ensemble_size": 1,                 // or N if RFCAI_ENSEMBLE_WEIGHTS set
   "max_detections": 4,
   "classify_on_cleaned": true,
-  "fg_filter": {
-    "enabled": true,
-    "available": true,
-    ...
-  }
+  "fg_filter": {"enabled": true, "available": true, ...},
+  "yolo_fallback": {"enabled": true, "available": true,
+                    "conf_threshold": 0.2},
+  "spec_lookup": {"available": true, "families_indexed": 23}
 }
 ```
 
-If `available: false`, rembg failed to load — usually means the
-`/opt/rfcai/training/.venv` is missing the `rembg` package.
+If `fg_filter.available: false`, rembg failed to load — usually means
+the `/opt/rfcai/training/.venv` is missing the `rembg` package.
 
 ## Production env knobs (`/etc/default/rfcai-predict`)
 
@@ -100,7 +99,41 @@ Currently in production:
 RFCAI_FG_FILTER=1               # rembg pre-filter; rejects no-connector frames
 RFCAI_CLASSIFY_ON_CLEANED=1     # feed rembg-cleaned silhouette to classifier
 RFCAI_MIN_FG_FRACTION=0.05      # rembg threshold floor
+RFCAI_REMBG_MODEL=u2netp        # lighter U^2-Net variant; ~3x faster than u2net
+                                # with same silhouette quality on this dataset.
+                                # Drops mean /predict latency 9.5s -> 5.0s.
+RFCAI_YOLO_FALLBACK=1           # when Hough finds 0 crops, try YOLO11n
+RFCAI_YOLO_WEIGHTS=/opt/rfcai/repo/models/detector/best.pt
+RFCAI_YOLO_CONF=0.2             # YOLO conf threshold for fallback crops
+RFCAI_SPECS_PATH=/opt/rfcai/repo/training/rfconnectorai/specs/connectors.yaml
+                                # spec lookup — each prediction enriched
+                                # with frequency range, impedance, etc.
 # RFCAI_ENSEMBLE_WEIGHTS=...     # comma-separated extra weight files for averaging
+```
+
+## Tracked benchmark history (`training/reports/`)
+
+Every accuracy- or latency-affecting change should be followed by a
+run of `scripts/eval_holdout.py`, with the resulting `report.json` +
+`report.md` committed under `training/reports/holdout_YYYY-MM-DD_*.md`.
+This is the artifact path that catches silent regressions like the
+labels.json inversion (which drifted production gender from 87.5% to
+12.5% for 9 days unnoticed).
+
+| Report | Latency | Full / Family / Gender | Notes |
+|---|---|---|---|
+| `holdout_2026-05-11_post_improvements.md` | 9.5 s | 75 / 75 / 87.5 | After u2net + per-crop rembg + structured output |
+| `holdout_2026-05-11_baseline_restored.md` | 9.7 s | 75 / 75 / 87.5 | After reverting latency-opt attempts that broke accuracy |
+| `holdout_2026-05-11_u2netp.md` | **5.0 s** | 75 / 75 / 87.5 | After rembg u2net → u2netp swap. **Current production.** |
+
+Run:
+
+```bash
+python scripts/eval_holdout.py \
+  --url http://127.0.0.1:8503/predict \
+  --token $RFCAI_DEVICE_TOKEN \
+  --holdout /opt/rfcai/repo/training/data/test_holdout \
+  --out training/reports/holdout_$(date -u +%Y-%m-%d)_<label>
 ```
 
 ## Model file layout in `/home/rfcai/training/models/connector_classifier/`

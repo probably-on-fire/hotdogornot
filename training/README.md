@@ -60,6 +60,11 @@ status (zero training data, slot reserved).
 | Family (1-of-4) | **75%** |
 | Gender (M/F) | **87.5%** |
 | False positives on backgrounds | 0% (rembg fg pre-filter) |
+| Mean `/predict` latency | ~5.0 s (after rembg u2netp swap, 2026-05-11) |
+
+Tracked benchmarks under [`reports/`](reports/). Re-run with
+[`scripts/eval_holdout.py`](scripts/eval_holdout.py) after any change
+that touches the predict pipeline.
 
 Deployed at `https://aired.com/rfcai/predict`. Production config:
 - `RFCAI_FG_FILTER=1` — rejects no-connector frames before classification
