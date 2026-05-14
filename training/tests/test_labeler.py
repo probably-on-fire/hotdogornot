@@ -88,3 +88,25 @@ def test_stats_returns_train_and_holdout_counts(client, labeler_dirs):
     assert body["holdout"]["2.4mm-M"] == 1
     assert body["train"]["SMA-M"] == 0
     assert body["holdout"]["SMA-F"] == 0
+
+
+def test_upload_video_requires_gender(client):
+    # Without gender field → FastAPI 422 (missing required form field).
+    r = client.post(
+        "/rfcai/labeler/upload-video",
+        auth=("u", "p"),
+        data={"family": "2.4mm"},
+        files={"file": ("clip.mp4", b"\x00\x00\x00\x00", "video/mp4")},
+    )
+    assert r.status_code == 422
+
+
+def test_upload_video_rejects_invalid_class(client):
+    r = client.post(
+        "/rfcai/labeler/upload-video",
+        auth=("u", "p"),
+        data={"family": "2.4mm", "gender": "X"},
+        files={"file": ("clip.mp4", b"\x00\x00\x00\x00", "video/mp4")},
+    )
+    assert r.status_code == 400
+    assert "X" in r.text or "unknown" in r.text.lower()

@@ -556,6 +556,7 @@ def create_router() -> APIRouter:
     @r.post("/upload-video", response_class=HTMLResponse)
     async def upload_video(
         family: str = Form(...),
+        gender: str = Form(...),
         fps: float = Form(5.0),
         sensitivity: float = Form(2.0),
         max_crops: int = Form(5),
@@ -564,6 +565,9 @@ def create_router() -> APIRouter:
     ):
         if family not in CANONICAL_FAMILIES:
             raise HTTPException(400, f"unknown family {family!r}")
+        target_cls = f"{family}-{gender}"
+        if target_cls not in CANONICAL_CLASSES:
+            raise HTTPException(400, f"unknown class {target_cls!r}")
         if not file.filename:
             raise HTTPException(400, "no file")
         ext = Path(file.filename).suffix.lower()
@@ -589,7 +593,7 @@ def create_router() -> APIRouter:
             ff = imageio_ffmpeg.get_ffmpeg_exe()
         except Exception as e:
             raise HTTPException(500, f"ffmpeg not available: {e}")
-        target_cls = f"{family}-M"
+        # target_cls already validated above
         out_dir = _data_root() / target_cls
         out_dir.mkdir(parents=True, exist_ok=True)
         # Pick a fresh starting index for "agg_NNNN.jpg" output names.
