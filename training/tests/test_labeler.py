@@ -179,3 +179,39 @@ def test_upload_then_delete_roundtrip(client, labeler_dirs):
     )
     assert r2.status_code == 200
     assert not Path(path).exists()
+
+
+def test_upload_test_then_delete_roundtrip(client, labeler_dirs):
+    # Mirror of test_upload_then_delete_roundtrip but for holdout uploads.
+    # Pin that /delete accepts paths under _test_holdout_root() — the
+    # Undo flow on the client posts the path back to /delete regardless
+    # of whether the original upload was train or holdout.
+    r1 = client.post(
+        "/rfcai/labeler/upload-test",
+        auth=("u", "p"),
+        data={"cls": "2.4mm-F"},
+        files=[("images", ("h.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    path = r1.json()["saved"][0]["path"]
+    assert Path(path).exists()
+
+    r2 = client.post(
+        "/rfcai/labeler/delete",
+        auth=("u", "p"),
+        data={"path": path},
+    )
+    assert r2.status_code == 200
+    assert not Path(path).exists()
+
+
+def test_real_capture_counts_skips_non_image_sidecars(labeler_dirs):
+    labeled, _, _ = labeler_dirs
+    _seed_class_dir(labeled, "SMA-F", [
+        "photo_real.jpg",       # real
+        ".DS_Store",            # macOS sidecar, skip
+        "Thumbs.db",            # Windows sidecar, skip
+        "notes.txt",            # stray text, skip
+        "photo_real.json",      # sidecar metadata, skip
+    ])
+    counts = labeler._real_capture_counts(labeled)
+    assert counts["SMA-F"] == 1

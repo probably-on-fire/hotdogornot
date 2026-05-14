@@ -215,18 +215,21 @@ def _mark_duplicates(records: list[CropRecord], max_distance: int = 6) -> None:
 
 
 def _safe_path(raw: str) -> Path:
-    """Validate that `raw` points inside the labeled-data root. Prevents
-    path-traversal attacks via a crafted form value."""
-    root = _data_root()
+    """Validate that `raw` points inside the labeled-data root or the
+    test-holdout root. Prevents path-traversal attacks via a crafted
+    form value. Both roots are accepted so that /delete can undo uploads
+    made via /upload-test as well as /upload-train."""
     try:
         candidate = Path(raw).resolve()
     except Exception:
         raise HTTPException(400, "bad path")
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        raise HTTPException(400, "path outside data root")
-    return candidate
+    for root in (_data_root(), _test_holdout_root()):
+        try:
+            candidate.relative_to(root)
+            return candidate
+        except ValueError:
+            continue
+    raise HTTPException(400, "path outside data roots")
 
 
 def _class_counts() -> dict[str, int]:
@@ -255,6 +258,8 @@ def _real_capture_counts(root: Path) -> dict[str, int]:
         n = 0
         for p in d.iterdir():
             if not p.is_file():
+                continue
+            if p.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
                 continue
             stem = p.stem
             if stem.startswith("synth_"):

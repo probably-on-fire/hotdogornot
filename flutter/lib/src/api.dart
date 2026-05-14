@@ -281,7 +281,7 @@ class ApiClient {
       '${settings.labelerUser}:${settings.labelerPass}',
     ));
     req.headers['Authorization'] = 'Basic $basic';
-    final streamed = await req.send().timeout(const Duration(seconds: 15));
+    final streamed = await req.send().timeout(const Duration(seconds: 30));
     final resp = await http.Response.fromStream(streamed);
     if (resp.statusCode != 200) {
       throw _ApiError(resp.statusCode, resp.body);

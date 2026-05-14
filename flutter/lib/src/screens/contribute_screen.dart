@@ -62,7 +62,8 @@ class _ContributeScreenState extends State<ContributeScreen>
   final Map<String, int> _sessionCounts = {};   // training uploads per class
   final Map<String, int> _sessionHoldout = {};  // holdout uploads per class
   // Tail-ordered stack of server-acked uploads in this session.
-  // Tapping Undo pops + DELETEs the tail. Capped at 50 to bound memory.
+  // Tapping Undo pops + DELETEs the tail. Capped at 500 to bound memory
+  // — well above any plausible per-session capture volume.
   final List<_SessionRecord> _undoStack = [];
   String? _toast;                // transient status pill above the chips
   bool _toastIsError = false;
@@ -260,7 +261,7 @@ class _ContributeScreenState extends State<ContributeScreen>
       setState(() {
         for (final rec in result.saved) {
           _undoStack.add(_SessionRecord(record: rec, holdout: isHoldout));
-          if (_undoStack.length > 50) _undoStack.removeAt(0);
+          if (_undoStack.length > 500) _undoStack.removeAt(0);
           _uploadedCount++;
           final m = isHoldout ? _sessionHoldout : _sessionCounts;
           m[rec.cls] = (m[rec.cls] ?? 0) + 1;
@@ -288,7 +289,7 @@ class _ContributeScreenState extends State<ContributeScreen>
       setState(() {
         for (final rec in result.saved) {
           _undoStack.add(_SessionRecord(record: rec, holdout: isHoldout));
-          if (_undoStack.length > 50) _undoStack.removeAt(0);
+          if (_undoStack.length > 500) _undoStack.removeAt(0);
           _uploadedCount++;
           final m = isHoldout ? _sessionHoldout : _sessionCounts;
           m[rec.cls] = (m[rec.cls] ?? 0) + 1;
@@ -358,11 +359,10 @@ class _ContributeScreenState extends State<ContributeScreen>
       final bytes = await f.readAsBytes();
       final pred = await OnDeviceClassifier.instance.predict(bytes);
       if (!mounted) return;
-      final agree = pred.className == cls;
-      if (agree) {
-        _showToast(
-          '✓ #$_uploadedCount $cls (agree ${pred.confidence.toStringAsFixed(2)})',
-        );
+      if (pred.className == cls) {
+        // Model agrees with the chip — the upload's success toast is
+        // sufficient. Don't fire a redundant toast that would race the
+        // upload's setState and confuse the displayed counter.
         return;
       }
       final selFamily = cls.contains('-')
