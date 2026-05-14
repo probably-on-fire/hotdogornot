@@ -56,6 +56,13 @@ class _ContributeScreenState extends State<ContributeScreen>
   // training; toggling on is the explicit "this is for evaluation" act.
   bool _holdout = false;
 
+  // Session ID stamped into uploaded filenames so this batch can be
+  // separated from older training data via glob (photo_YYYY-MM-DD_*).
+  // Set once on screen open; doesn't reset across captures.
+  final String _sessionId = DateTime.now()
+      .toIso8601String()
+      .substring(0, 10);  // YYYY-MM-DD
+
   bool _shutterBusy = false;     // single-flight guard on capture
   int _uploadInFlight = 0;       // count of background uploads posting now
   int _uploadedCount = 0;        // session total successful uploads
@@ -255,8 +262,8 @@ class _ContributeScreenState extends State<ContributeScreen>
     try {
       final api = ApiClient(widget.settings);
       final UploadResult result = isHoldout
-          ? await api.uploadTestHoldoutPhoto(f, cls)
-          : await api.uploadTrainingPhoto(f, cls);
+          ? await api.uploadTestHoldoutPhoto(f, cls, session: _sessionId)
+          : await api.uploadTrainingPhoto(f, cls, session: _sessionId);
       if (!mounted) return;
       setState(() {
         for (final rec in result.saved) {
@@ -283,8 +290,8 @@ class _ContributeScreenState extends State<ContributeScreen>
     try {
       final api = ApiClient(widget.settings);
       final UploadResult result = isHoldout
-          ? await api.uploadTestHoldoutPhotoBytes(bytes, cls, filename: filename)
-          : await api.uploadTrainingPhotoBytes(bytes, cls, filename: filename);
+          ? await api.uploadTestHoldoutPhotoBytes(bytes, cls, filename: filename, session: _sessionId)
+          : await api.uploadTrainingPhotoBytes(bytes, cls, filename: filename, session: _sessionId);
       if (!mounted) return;
       setState(() {
         for (final rec in result.saved) {

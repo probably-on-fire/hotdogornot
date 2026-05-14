@@ -5,6 +5,7 @@ env var pointed at it so we can build a fixture directory tree.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -215,3 +216,56 @@ def test_real_capture_counts_skips_non_image_sidecars(labeler_dirs):
     ])
     counts = labeler._real_capture_counts(labeled)
     assert counts["SMA-F"] == 1
+
+
+def test_upload_train_default_session_is_today(client, labeler_dirs):
+    labeled, _, _ = labeler_dirs
+    r = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "2.4mm-M"},
+        files=[("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r.status_code == 200
+    path = r.json()["saved"][0]["path"]
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    assert f"photo_{today}_a.jpg" in path
+    assert Path(path).exists()
+
+
+def test_upload_train_honors_explicit_session(client, labeler_dirs):
+    r = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "2.4mm-M", "session": "experiment_42"},
+        files=[("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r.status_code == 200
+    path = r.json()["saved"][0]["path"]
+    assert "photo_experiment_42_a.jpg" in path
+
+
+def test_upload_train_rejects_invalid_session(client):
+    r = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "2.4mm-M", "session": "../../etc"},
+        files=[("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r.status_code == 400
+
+
+def test_upload_test_default_session_is_today(client, labeler_dirs):
+    _, holdout, _ = labeler_dirs
+    r = client.post(
+        "/rfcai/labeler/upload-test",
+        auth=("u", "p"),
+        data={"cls": "SMA-F"},
+        files=[("images", ("h.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r.status_code == 200
+    path = r.json()["saved"][0]["path"]
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    assert f"{today}_h.jpg" in path
+    # Holdout filenames don't carry the "photo_" prefix.
+    assert "photo_" not in Path(path).name

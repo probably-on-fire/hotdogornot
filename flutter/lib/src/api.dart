@@ -198,11 +198,14 @@ class ApiClient {
   }
 
   /// POST a training photo to the labeler. cls is the canonical class
-  /// e.g. "2.4mm-M".
-  Future<UploadResult> uploadTrainingPhoto(File imageFile, String cls) async {
+  /// e.g. "2.4mm-M". Optional [session] is prepended to the filename on
+  /// the server; defaults to today's UTC date when omitted.
+  Future<UploadResult> uploadTrainingPhoto(File imageFile, String cls, {String? session}) async {
+    final fields = {'cls': cls};
+    if (session != null && session.isNotEmpty) fields['session'] = session;
     final body = await _uploadMultipart(
       url: settings.labelerUploadTrainUrl(),
-      fields: {'cls': cls},
+      fields: fields,
       fileField: 'images',
       file: imageFile,
     );
@@ -214,10 +217,13 @@ class ApiClient {
     Uint8List bytes,
     String cls, {
     String filename = 'photo.jpg',
+    String? session,
   }) async {
+    final fields = {'cls': cls};
+    if (session != null && session.isNotEmpty) fields['session'] = session;
     final body = await _uploadMultipartBytes(
       url: settings.labelerUploadTrainUrl(),
-      fields: {'cls': cls},
+      fields: fields,
       fileField: 'images',
       bytes: bytes,
       filename: filename,
@@ -229,11 +235,14 @@ class ApiClient {
   /// class. Held-out photos are not used in training — they live in
   /// data/test_holdout/[cls]/ and are scored against during retrain
   /// benchmarks. Use this when growing the test set with new phone
-  /// shots whose label is known.
-  Future<UploadResult> uploadTestHoldoutPhoto(File imageFile, String cls) async {
+  /// shots whose label is known. Optional [session] is prepended to the
+  /// filename on the server.
+  Future<UploadResult> uploadTestHoldoutPhoto(File imageFile, String cls, {String? session}) async {
+    final fields = {'cls': cls};
+    if (session != null && session.isNotEmpty) fields['session'] = session;
     final body = await _uploadMultipart(
       url: settings.labelerUploadTestUrl(),
-      fields: {'cls': cls},
+      fields: fields,
       fileField: 'images',
       file: imageFile,
     );
@@ -245,10 +254,13 @@ class ApiClient {
     Uint8List bytes,
     String cls, {
     String filename = 'photo.jpg',
+    String? session,
   }) async {
+    final fields = {'cls': cls};
+    if (session != null && session.isNotEmpty) fields['session'] = session;
     final body = await _uploadMultipartBytes(
       url: settings.labelerUploadTestUrl(),
-      fields: {'cls': cls},
+      fields: fields,
       fileField: 'images',
       bytes: bytes,
       filename: filename,

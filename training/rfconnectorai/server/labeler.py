@@ -25,6 +25,7 @@ service refuses to serve the labeler routes (predict still works).
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -32,6 +33,7 @@ import tempfile
 import time
 import urllib.parse
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -81,6 +83,21 @@ def _videos_root() -> Path:
 
 
 CANONICAL_FAMILIES = ["SMA", "3.5mm", "2.92mm", "2.4mm", "1.85mm"]
+
+
+_SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def _resolve_session(raw: str | None) -> str:
+    """Validate a client-supplied session token or default to today's UTC date.
+
+    Format constraint keeps filenames safe (no path traversal, no spaces, no
+    dots that would confuse extension parsing). Empty/missing -> server stamp."""
+    if not raw:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if not _SESSION_RE.fullmatch(raw):
+        raise HTTPException(400, f"invalid session token {raw!r}")
+    return raw
 
 
 # ---------------------------------------------------------------------------
@@ -478,16 +495,18 @@ def create_router() -> APIRouter:
     @r.post("/upload-train")
     async def upload_train(
         cls: str = Form(...),
+        session: str = Form(""),
         images: list[UploadFile] = File(...),
         _: str = Depends(_require_basic_auth),
     ):
         """Drop phone photos directly into the training set for a class.
 
-        Saved to data/labeled/embedder/<class>/photo_<stem><ext>.
+        Saved to data/labeled/embedder/<class>/photo_<session>_<stem><ext>.
         Returns JSON {saved: [{cls, path}], errors: [str]} so the Flutter
         Undo flow can stash the server-authoritative path."""
         if cls not in CANONICAL_CLASSES:
             raise HTTPException(400, f"unknown class {cls!r}")
+        session_tag = _resolve_session(session)
         out_dir = _data_root() / cls
         out_dir.mkdir(parents=True, exist_ok=True)
         saved: list[dict] = []
@@ -502,10 +521,10 @@ def create_router() -> APIRouter:
                 continue
             stem = Path(image.filename).stem or f"upload_{int(time.time())}"
             stem = Path(stem).name
-            dst = out_dir / f"photo_{stem}{ext}"
+            dst = out_dir / f"photo_{session_tag}_{stem}{ext}"
             n = 1
             while dst.exists():
-                dst = out_dir / f"photo_{stem}_dup{n}{ext}"
+                dst = out_dir / f"photo_{session_tag}_{stem}_dup{n}{ext}"
                 n += 1
             data = await image.read()
             dst.write_bytes(data)
@@ -517,11 +536,13 @@ def create_router() -> APIRouter:
     @r.post("/upload-test")
     async def upload_test(
         cls: str = Form(...),
+        session: str = Form(""),
         images: list[UploadFile] = File(...),
         _: str = Depends(_require_basic_auth),
     ):
         if cls not in CANONICAL_CLASSES:
             raise HTTPException(400, f"unknown class {cls!r}")
+        session_tag = _resolve_session(session)
         out_dir = _test_holdout_root() / cls
         out_dir.mkdir(parents=True, exist_ok=True)
         saved: list[dict] = []
@@ -536,10 +557,10 @@ def create_router() -> APIRouter:
                 continue
             stem = Path(image.filename).stem or f"upload_{int(time.time())}"
             stem = Path(stem).name
-            dst = out_dir / f"{stem}{ext}"
+            dst = out_dir / f"{session_tag}_{stem}{ext}"
             n = 1
             while dst.exists():
-                dst = out_dir / f"{stem}_dup{n}{ext}"
+                dst = out_dir / f"{session_tag}_{stem}_dup{n}{ext}"
                 n += 1
             data = await image.read()
             dst.write_bytes(data)
