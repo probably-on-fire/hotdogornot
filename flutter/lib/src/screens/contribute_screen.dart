@@ -10,6 +10,7 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
+import '../ondevice/classifier.dart';
 import '../settings.dart';
 
 const _kFamilies = ['SMA', '3.5mm', '2.92mm', '2.4mm', '1.85mm'];
@@ -122,6 +123,8 @@ class _ContributeScreenState extends State<ContributeScreen>
       if (mounted) setState(() => _camInitFailed = true);
       return;
     }
+    // Fire-and-forget warm-up — singleton means Identify benefits too.
+    unawaited(OnDeviceClassifier.instance.init().catchError((_) {}));
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
@@ -176,6 +179,7 @@ class _ContributeScreenState extends State<ContributeScreen>
         final shot = await cam.takePicture();
         // Fire-and-forget upload so the camera is ready for the next shot.
         unawaited(_uploadFile(File(shot.path)));
+        unawaited(_runOnDeviceCheck(File(shot.path), _classLabel));
       } else {
         // Web / no-camera fallback — OS camera dialog.
         final pf = await ImagePicker().pickImage(
@@ -346,6 +350,41 @@ class _ContributeScreenState extends State<ContributeScreen>
     } catch (e) {
       if (mounted) setState(() => _undoStack.add(last));
       _showToast('Undo failed: ${_friendlyError(e)}', error: true);
+    }
+  }
+
+  Future<void> _runOnDeviceCheck(File f, String cls) async {
+    try {
+      final bytes = await f.readAsBytes();
+      final pred = await OnDeviceClassifier.instance.predict(bytes);
+      if (!mounted) return;
+      final agree = pred.className == cls;
+      if (agree) {
+        _showToast(
+          '✓ #$_uploadedCount $cls (agree ${pred.confidence.toStringAsFixed(2)})',
+        );
+        return;
+      }
+      final selFamily = cls.contains('-')
+          ? cls.substring(0, cls.lastIndexOf('-'))
+          : cls;
+      final familyMatch = pred.family == selFamily;
+      final lowConf = pred.confidence < 0.4;
+      if (familyMatch && !lowConf) {
+        _showToast(
+          '⚠ picked ${cls.substring(cls.lastIndexOf("-") + 1)}, '
+          'model says ${pred.gender} (${pred.confidence.toStringAsFixed(2)})',
+          error: true,
+        );
+      } else {
+        _showToast(
+          '⚠ model says ${pred.className} '
+          '(${pred.confidence.toStringAsFixed(2)})',
+          error: true,
+        );
+      }
+    } catch (_) {
+      // Model not loaded / inference failed — silently fall back.
     }
   }
 
