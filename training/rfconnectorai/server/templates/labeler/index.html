@@ -304,13 +304,19 @@
             <option value="SMA">SMA</option>
           </select>
         </label>
+        <label>Gender:
+          <select name="gender">
+            <option value="M">M</option>
+            <option value="F">F</option>
+          </select>
+        </label>
         <label>fps: <input type="number" name="fps" value="5" min="1" max="30" step="1" style="width: 60px;"></label>
         <label>max crops/frame: <input type="number" name="max_crops" value="5" min="1" max="10" step="1" style="width: 60px;"></label>
         <label>Video: <input type="file" name="file" accept="video/*" required></label>
-        <button type="submit">Extract + dump to &lt;family&gt;-M/</button>
+        <button type="submit">Extract + dump to &lt;family&gt;-&lt;gender&gt;/</button>
         <span style="font-size: 11px; color: var(--muted);">
-          All crops land in <code>&lt;family&gt;-M</code>. Use the labeler's Flip button
-          to fix wrong-gender ones.
+          Crops land in <code>&lt;family&gt;-&lt;gender&gt;</code> based on the dropdown selection.
+          Use the labeler's Flip button to fix wrong-gender ones.
         </span>
       </form>
     </div>

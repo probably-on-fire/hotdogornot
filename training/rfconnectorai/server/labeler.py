@@ -575,7 +575,8 @@ def create_router() -> APIRouter:
         saved_video.write_bytes(data)
 
         # Extract frames at requested fps, run Hough, dump crops to
-        # <family>-M (user will Flip wrong-gender ones via the labeler).
+        # the target class directory (user can still Flip mistakes
+        # via the labeler grid).
         try:
             import imageio_ffmpeg
             ff = imageio_ffmpeg.get_ffmpeg_exe()
