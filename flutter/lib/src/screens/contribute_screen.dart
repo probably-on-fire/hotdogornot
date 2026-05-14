@@ -15,6 +15,12 @@ import '../settings.dart';
 const _kFamilies = ['SMA', '3.5mm', '2.92mm', '2.4mm', '1.85mm'];
 const _kGenders = ['M', 'F'];
 
+class _SessionRecord {
+  _SessionRecord({required this.record, required this.holdout});
+  final UploadRecord record;
+  final bool holdout;
+}
+
 /// Camera-first capture screen. Set the class via chips, tap shutter,
 /// upload happens in the background while the camera stays live so the
 /// next shot is one tap away. No predict round-trip.
@@ -54,6 +60,9 @@ class _ContributeScreenState extends State<ContributeScreen>
   int _uploadedCount = 0;        // session total successful uploads
   final Map<String, int> _sessionCounts = {};   // training uploads per class
   final Map<String, int> _sessionHoldout = {};  // holdout uploads per class
+  // Tail-ordered stack of server-acked uploads in this session.
+  // Tapping Undo pops + DELETEs the tail. Capped at 50 to bound memory.
+  final List<_SessionRecord> _undoStack = [];
   String? _toast;                // transient status pill above the chips
   bool _toastIsError = false;
   Timer? _toastTimer;
@@ -240,16 +249,18 @@ class _ContributeScreenState extends State<ContributeScreen>
     if (mounted) setState(() => _uploadInFlight++);
     try {
       final api = ApiClient(widget.settings);
-      if (isHoldout) {
-        await api.uploadTestHoldoutPhoto(f, cls);
-      } else {
-        await api.uploadTrainingPhoto(f, cls);
-      }
+      final UploadResult result = isHoldout
+          ? await api.uploadTestHoldoutPhoto(f, cls)
+          : await api.uploadTrainingPhoto(f, cls);
       if (!mounted) return;
       setState(() {
-        _uploadedCount++;
-        final m = isHoldout ? _sessionHoldout : _sessionCounts;
-        m[cls] = (m[cls] ?? 0) + 1;
+        for (final rec in result.saved) {
+          _undoStack.add(_SessionRecord(record: rec, holdout: isHoldout));
+          if (_undoStack.length > 50) _undoStack.removeAt(0);
+          _uploadedCount++;
+          final m = isHoldout ? _sessionHoldout : _sessionCounts;
+          m[rec.cls] = (m[rec.cls] ?? 0) + 1;
+        }
       });
       _showToast('✓ #$_uploadedCount $cls${isHoldout ? " · holdout" : ""}');
       HapticFeedback.selectionClick();
@@ -266,16 +277,18 @@ class _ContributeScreenState extends State<ContributeScreen>
     if (mounted) setState(() => _uploadInFlight++);
     try {
       final api = ApiClient(widget.settings);
-      if (isHoldout) {
-        await api.uploadTestHoldoutPhotoBytes(bytes, cls, filename: filename);
-      } else {
-        await api.uploadTrainingPhotoBytes(bytes, cls, filename: filename);
-      }
+      final UploadResult result = isHoldout
+          ? await api.uploadTestHoldoutPhotoBytes(bytes, cls, filename: filename)
+          : await api.uploadTrainingPhotoBytes(bytes, cls, filename: filename);
       if (!mounted) return;
       setState(() {
-        _uploadedCount++;
-        final m = isHoldout ? _sessionHoldout : _sessionCounts;
-        m[cls] = (m[cls] ?? 0) + 1;
+        for (final rec in result.saved) {
+          _undoStack.add(_SessionRecord(record: rec, holdout: isHoldout));
+          if (_undoStack.length > 50) _undoStack.removeAt(0);
+          _uploadedCount++;
+          final m = isHoldout ? _sessionHoldout : _sessionCounts;
+          m[rec.cls] = (m[rec.cls] ?? 0) + 1;
+        }
       });
       _showToast('✓ #$_uploadedCount $cls${isHoldout ? " · holdout" : ""}');
     } catch (e) {
@@ -313,6 +326,27 @@ class _ContributeScreenState extends State<ContributeScreen>
       return 'Image too large.';
     }
     return s.length > 100 ? '${s.substring(0, 100)}…' : s;
+  }
+
+  Future<void> _undoLast() async {
+    if (_undoStack.isEmpty) return;
+    final last = _undoStack.removeLast();
+    if (mounted) setState(() {});
+    try {
+      await ApiClient(widget.settings).deleteLabelerFile(last.record.path);
+      if (!mounted) return;
+      setState(() {
+        _uploadedCount = (_uploadedCount - 1).clamp(0, 1 << 30);
+        final m = last.holdout ? _sessionHoldout : _sessionCounts;
+        if ((m[last.record.cls] ?? 0) > 0) {
+          m[last.record.cls] = m[last.record.cls]! - 1;
+        }
+      });
+      _showToast('↩ Undone ${last.record.cls}');
+    } catch (e) {
+      if (mounted) setState(() => _undoStack.add(last));
+      _showToast('Undo failed: ${_friendlyError(e)}', error: true);
+    }
   }
 
   @override
@@ -524,6 +558,12 @@ class _ContributeScreenState extends State<ContributeScreen>
               label: 'Video',
               onTap: _pickAndUploadVideo,
             ),
+            const SizedBox(width: 24),
+            _SmallAction(
+              icon: Icons.undo,
+              label: _undoStack.isEmpty ? 'Undo' : 'Undo (${_undoStack.length})',
+              onTap: _undoStack.isEmpty ? null : _undoLast,
+            ),
           ],
         ),
       ],
@@ -671,28 +711,31 @@ class _SmallAction extends StatelessWidget {
   });
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
+    final disabled = onTap == null;
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.55),
+          color: Colors.black.withOpacity(disabled ? 0.3 : 0.55),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white24),
+          border: Border.all(
+              color: disabled ? Colors.white12 : Colors.white24),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: Colors.white70),
+            Icon(icon, size: 14,
+                color: disabled ? Colors.white24 : Colors.white70),
             const SizedBox(width: 6),
             Text(
               label,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: disabled ? Colors.white38 : Colors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
