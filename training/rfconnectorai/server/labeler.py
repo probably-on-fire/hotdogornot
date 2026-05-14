@@ -259,7 +259,7 @@ def _real_capture_counts(root: Path) -> dict[str, int]:
             stem = p.stem
             if stem.startswith("synth_"):
                 continue
-            if stem.endswith("_clean") or stem.endswith("_central"):
+            if stem.endswith(("_clean", "_mask", "_central", "_centralv2")):
                 continue
             # _bg<digits>, _z<digits> — derived augmentations.
             if "_bg" in stem and stem.rsplit("_bg", 1)[1].isdigit():

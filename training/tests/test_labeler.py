@@ -48,14 +48,16 @@ def client(labeler_dirs):
 def test_real_capture_counts_skips_synth_and_derived(labeler_dirs):
     labeled, _, _ = labeler_dirs
     _seed_class_dir(labeled, "2.4mm-M", [
-        "photo_IMG_1.jpg",          # real
-        "photo_IMG_2.jpg",          # real
-        "video_0001.jpg",           # real (video extraction)
-        "photo_IMG_1_clean.jpg",    # rembg-derived, skip
-        "photo_IMG_1_bg0.jpg",      # bg-randomized, skip
-        "photo_IMG_1_z0.jpg",       # zoom-randomized, skip
-        "photo_IMG_1_central.jpg",  # central crop, skip
-        "synth_000001.jpg",         # synth, skip
+        "photo_IMG_1.jpg",            # real
+        "photo_IMG_2.jpg",            # real
+        "video_0001.jpg",             # real (video extraction)
+        "photo_IMG_1_clean.jpg",      # rembg-derived, skip
+        "photo_IMG_1_mask.jpg",       # rembg mask, skip
+        "photo_IMG_1_bg0.jpg",        # bg-randomized, skip
+        "photo_IMG_1_z0.jpg",         # zoom-randomized, skip
+        "photo_IMG_1_central.jpg",    # central crop, skip
+        "photo_IMG_1_centralv2.jpg",  # central crop v2, skip
+        "synth_000001.jpg",           # synth, skip
     ])
     counts = labeler._real_capture_counts(labeled)
     assert counts["2.4mm-M"] == 3
