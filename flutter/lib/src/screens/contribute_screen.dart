@@ -52,6 +52,8 @@ class _ContributeScreenState extends State<ContributeScreen>
   bool _shutterBusy = false;     // single-flight guard on capture
   int _uploadInFlight = 0;       // count of background uploads posting now
   int _uploadedCount = 0;        // session total successful uploads
+  final Map<String, int> _sessionCounts = {};   // training uploads per class
+  final Map<String, int> _sessionHoldout = {};  // holdout uploads per class
   String? _toast;                // transient status pill above the chips
   bool _toastIsError = false;
   Timer? _toastTimer;
@@ -244,7 +246,11 @@ class _ContributeScreenState extends State<ContributeScreen>
         await api.uploadTrainingPhoto(f, cls);
       }
       if (!mounted) return;
-      setState(() => _uploadedCount++);
+      setState(() {
+        _uploadedCount++;
+        final m = isHoldout ? _sessionHoldout : _sessionCounts;
+        m[cls] = (m[cls] ?? 0) + 1;
+      });
       _showToast('✓ #$_uploadedCount $cls${isHoldout ? " · holdout" : ""}');
       HapticFeedback.selectionClick();
     } catch (e) {
@@ -266,7 +272,11 @@ class _ContributeScreenState extends State<ContributeScreen>
         await api.uploadTrainingPhotoBytes(bytes, cls, filename: filename);
       }
       if (!mounted) return;
-      setState(() => _uploadedCount++);
+      setState(() {
+        _uploadedCount++;
+        final m = isHoldout ? _sessionHoldout : _sessionCounts;
+        m[cls] = (m[cls] ?? 0) + 1;
+      });
       _showToast('✓ #$_uploadedCount $cls${isHoldout ? " · holdout" : ""}');
     } catch (e) {
       _showToast('Upload failed: ${_friendlyError(e)}', error: true);
@@ -394,12 +404,29 @@ class _ContributeScreenState extends State<ContributeScreen>
     );
   }
 
+  Future<void> _showStatsSheet() async {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1B1B1B),
+      isScrollControlled: true,
+      builder: (ctx) => _StatsSheet(
+        settings: widget.settings,
+        sessionTrain: Map.unmodifiable(_sessionCounts),
+        sessionHoldout: Map.unmodifiable(_sessionHoldout),
+      ),
+    );
+  }
+
   Widget _buildTopBar() {
     return Row(
       children: [
-        _CounterPill(
-          count: _uploadedCount,
-          inFlight: _uploadInFlight,
+        GestureDetector(
+          onTap: _showStatsSheet,
+          child: _CounterPill(
+            count: _uploadedCount,
+            inFlight: _uploadInFlight,
+          ),
         ),
         const Spacer(),
         _HoldoutToggle(
@@ -702,6 +729,170 @@ class _StatusPill extends StatelessWidget {
             fontWeight: FontWeight.w700,
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _StatsSheet extends StatefulWidget {
+  const _StatsSheet({
+    required this.settings,
+    required this.sessionTrain,
+    required this.sessionHoldout,
+  });
+  final Settings settings;
+  final Map<String, int> sessionTrain;
+  final Map<String, int> sessionHoldout;
+
+  @override
+  State<_StatsSheet> createState() => _StatsSheetState();
+}
+
+class _StatsSheetState extends State<_StatsSheet> {
+  LabelerStats? _stats;
+  String? _err;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _loading = true;
+      _err = null;
+    });
+    try {
+      final s = await ApiClient(widget.settings).fetchLabelerStats();
+      if (!mounted) return;
+      setState(() {
+        _stats = s;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _err = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  static const _kClasses = [
+    'SMA-M', 'SMA-F',
+    '1.85mm-M', '1.85mm-F',
+    '2.4mm-M', '2.4mm-F',
+    '2.92mm-M', '2.92mm-F',
+    '3.5mm-M', '3.5mm-F',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final stats = _stats;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Text(
+                  'Per-class progress',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.refresh, color: Colors.white70),
+                  onPressed: _loading ? null : _refresh,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_err != null)
+              Text(
+                'Failed to load stats: $_err',
+                style: const TextStyle(color: Colors.redAccent),
+              )
+            else
+              ..._kClasses.map((cls) {
+                final sessTrain = widget.sessionTrain[cls] ?? 0;
+                final sessHoldout = widget.sessionHoldout[cls] ?? 0;
+                final serverTrain = stats?.train[cls] ?? 0;
+                final serverHoldout = stats?.holdout[cls] ?? 0;
+                final starved = serverTrain < 5;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      if (starved)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 6),
+                          child: Icon(Icons.circle,
+                              color: Colors.redAccent, size: 8),
+                        )
+                      else
+                        const SizedBox(width: 14),
+                      Expanded(
+                        child: Text(
+                          cls,
+                          style: TextStyle(
+                            color: starved
+                                ? Colors.redAccent
+                                : Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      _statCell(
+                          label: 'session', train: sessTrain, holdout: sessHoldout),
+                      const SizedBox(width: 16),
+                      _statCell(
+                          label: 'server', train: serverTrain, holdout: serverHoldout),
+                    ],
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _statCell({
+    required String label,
+    required int train,
+    required int holdout,
+  }) {
+    return SizedBox(
+      width: 90,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white38, fontSize: 10),
+          ),
+          Text(
+            holdout > 0 ? '$train  +$holdout' : '$train',
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
