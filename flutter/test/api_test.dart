@@ -124,4 +124,39 @@ void main() {
       expect(r.predictions, hasLength(1));
     });
   });
+
+  group('UploadResult.fromJson', () {
+    test('parses saved + errors', () {
+      final r = UploadResult.fromJson({
+        'saved': [
+          {'cls': '2.4mm-M', 'path': '/data/labeled/embedder/2.4mm-M/photo_a.jpg'},
+          {'cls': '2.4mm-M', 'path': '/data/labeled/embedder/2.4mm-M/photo_b.jpg'},
+        ],
+        'errors': <String>[],
+      });
+      expect(r.saved, hasLength(2));
+      expect(r.saved.first.cls, '2.4mm-M');
+      expect(r.saved.first.path,
+          '/data/labeled/embedder/2.4mm-M/photo_a.jpg');
+      expect(r.errors, isEmpty);
+    });
+
+    test('parses errors-only response', () {
+      final r = UploadResult.fromJson({
+        'saved': const [],
+        'errors': const ['bad ext "x.bmp"'],
+      });
+      expect(r.saved, isEmpty);
+      expect(r.errors, hasLength(1));
+    });
+
+    test('missing errors field defaults to empty', () {
+      final r = UploadResult.fromJson({
+        'saved': [
+          {'cls': 'SMA-F', 'path': '/p.jpg'},
+        ],
+      });
+      expect(r.errors, isEmpty);
+    });
+  });
 }

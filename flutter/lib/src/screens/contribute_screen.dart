@@ -219,7 +219,7 @@ class _ContributeScreenState extends State<ContributeScreen>
     if (mounted) setState(() => _uploadInFlight++);
     try {
       final api = ApiClient(widget.settings);
-      await api.uploadTrainingVideo(File(picked.path!), _family);
+      await api.uploadTrainingVideo(File(picked.path!), _family, _gender);
       if (!mounted) return;
       _showToast('✓ Video sent — server is extracting crops');
     } catch (e) {

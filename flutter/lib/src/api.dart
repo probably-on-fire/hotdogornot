@@ -6,6 +6,50 @@ import 'package:http/http.dart' as http;
 
 import 'settings.dart';
 
+/// One file the server saved. The `path` round-trips through
+/// `/labeler/delete` for the Undo flow.
+class UploadRecord {
+  UploadRecord({required this.cls, required this.path});
+  final String cls;
+  final String path;
+
+  factory UploadRecord.fromJson(Map<String, dynamic> j) =>
+      UploadRecord(cls: j['cls'] as String, path: j['path'] as String);
+}
+
+/// Parsed JSON from `/upload-train` and `/upload-test`.
+class UploadResult {
+  UploadResult({required this.saved, required this.errors});
+  final List<UploadRecord> saved;
+  final List<String> errors;
+
+  factory UploadResult.fromJson(Map<String, dynamic> j) {
+    final saved = (j['saved'] as List? ?? [])
+        .map((e) => UploadRecord.fromJson(e as Map<String, dynamic>))
+        .toList();
+    final errors = (j['errors'] as List? ?? [])
+        .map((e) => e.toString())
+        .toList();
+    return UploadResult(saved: saved, errors: errors);
+  }
+}
+
+/// Per-class capture counts returned by `/labeler/stats`.
+class LabelerStats {
+  LabelerStats({required this.train, required this.holdout});
+  final Map<String, int> train;
+  final Map<String, int> holdout;
+
+  factory LabelerStats.fromJson(Map<String, dynamic> j) {
+    Map<String, int> toIntMap(Map<String, dynamic> m) =>
+        m.map((k, v) => MapEntry(k, (v as num).toInt()));
+    return LabelerStats(
+      train: toIntMap(j['train'] as Map<String, dynamic>),
+      holdout: toIntMap(j['holdout'] as Map<String, dynamic>),
+    );
+  }
+}
+
 /// One detection from the /predict endpoint.
 class Prediction {
   Prediction({
@@ -155,66 +199,72 @@ class ApiClient {
 
   /// POST a training photo to the labeler. cls is the canonical class
   /// e.g. "2.4mm-M".
-  Future<String> uploadTrainingPhoto(File imageFile, String cls) async {
-    return _uploadMultipart(
+  Future<UploadResult> uploadTrainingPhoto(File imageFile, String cls) async {
+    final body = await _uploadMultipart(
       url: settings.labelerUploadTrainUrl(),
       fields: {'cls': cls},
       fileField: 'images',
       file: imageFile,
     );
+    return UploadResult.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 
   /// Bytes variant of uploadTrainingPhoto for web/no-path-access.
-  Future<String> uploadTrainingPhotoBytes(
+  Future<UploadResult> uploadTrainingPhotoBytes(
     Uint8List bytes,
     String cls, {
     String filename = 'photo.jpg',
   }) async {
-    return _uploadMultipartBytes(
+    final body = await _uploadMultipartBytes(
       url: settings.labelerUploadTrainUrl(),
       fields: {'cls': cls},
       fileField: 'images',
       bytes: bytes,
       filename: filename,
     );
+    return UploadResult.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 
   /// POST a held-out test photo to the labeler. cls is the canonical
   /// class. Held-out photos are not used in training — they live in
-  /// data/test_holdout/<cls>/ and are scored against during retrain
+  /// data/test_holdout/[cls]/ and are scored against during retrain
   /// benchmarks. Use this when growing the test set with new phone
   /// shots whose label is known.
-  Future<String> uploadTestHoldoutPhoto(File imageFile, String cls) async {
-    return _uploadMultipart(
+  Future<UploadResult> uploadTestHoldoutPhoto(File imageFile, String cls) async {
+    final body = await _uploadMultipart(
       url: settings.labelerUploadTestUrl(),
       fields: {'cls': cls},
       fileField: 'images',
       file: imageFile,
     );
+    return UploadResult.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 
   /// Bytes variant of uploadTestHoldoutPhoto for web/no-path-access.
-  Future<String> uploadTestHoldoutPhotoBytes(
+  Future<UploadResult> uploadTestHoldoutPhotoBytes(
     Uint8List bytes,
     String cls, {
     String filename = 'photo.jpg',
   }) async {
-    return _uploadMultipartBytes(
+    final body = await _uploadMultipartBytes(
       url: settings.labelerUploadTestUrl(),
       fields: {'cls': cls},
       fileField: 'images',
       bytes: bytes,
       filename: filename,
     );
+    return UploadResult.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 
   /// POST a training video to the labeler. family is "2.4mm" / "2.92mm" /
-  /// "3.5mm" / "SMA".
-  Future<String> uploadTrainingVideo(File videoFile, String family) async {
+  /// "3.5mm" / "SMA". gender is "M" or "F".
+  Future<String> uploadTrainingVideo(
+      File videoFile, String family, String gender) async {
     return _uploadMultipart(
       url: settings.labelerUploadVideoUrl(),
       fields: {
         'family': family,
+        'gender': gender,
         'fps': '5',
         'sensitivity': '2.0',
         'max_crops': '5',
@@ -222,6 +272,39 @@ class ApiClient {
       fileField: 'file',
       file: videoFile,
     );
+  }
+
+  /// GET /labeler/stats — per-class real-capture counts.
+  Future<LabelerStats> fetchLabelerStats() async {
+    final req = http.Request('GET', Uri.parse(settings.labelerStatsUrl()));
+    final basic = base64Encode(utf8.encode(
+      '${settings.labelerUser}:${settings.labelerPass}',
+    ));
+    req.headers['Authorization'] = 'Basic $basic';
+    final streamed = await req.send().timeout(const Duration(seconds: 15));
+    final resp = await http.Response.fromStream(streamed);
+    if (resp.statusCode != 200) {
+      throw _ApiError(resp.statusCode, resp.body);
+    }
+    return LabelerStats.fromJson(jsonDecode(resp.body));
+  }
+
+  /// POST /labeler/delete — unlink one server-side file by path.
+  /// Used by the in-app Undo flow.
+  Future<void> deleteLabelerFile(String path) async {
+    final req = http.MultipartRequest(
+      'POST', Uri.parse(settings.labelerDeleteUrl()),
+    );
+    final basic = base64Encode(utf8.encode(
+      '${settings.labelerUser}:${settings.labelerPass}',
+    ));
+    req.headers['Authorization'] = 'Basic $basic';
+    req.fields['path'] = path;
+    final streamed = await req.send().timeout(const Duration(seconds: 15));
+    final resp = await http.Response.fromStream(streamed);
+    if (resp.statusCode != 200) {
+      throw _ApiError(resp.statusCode, resp.body);
+    }
   }
 
   Future<String> _uploadMultipart({

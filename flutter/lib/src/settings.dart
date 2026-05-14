@@ -71,4 +71,8 @@ class Settings {
   String labelerUploadTestUrl() => '$relayBaseUrl/labeler/upload-test';
 
   String labelerUploadVideoUrl() => '$relayBaseUrl/labeler/upload-video';
+
+  String labelerStatsUrl() => '$relayBaseUrl/labeler/stats';
+
+  String labelerDeleteUrl() => '$relayBaseUrl/labeler/delete';
 }
