@@ -110,3 +110,72 @@ def test_upload_video_rejects_invalid_class(client):
     )
     assert r.status_code == 400
     assert "X" in r.text or "unknown" in r.text.lower()
+
+
+def test_upload_train_returns_json(client, labeler_dirs):
+    labeled, _, _ = labeler_dirs
+    r = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "2.4mm-M"},
+        files=[
+            ("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg")),
+            ("images", ("b.jpg", b"\xff\xd8\xff\xd9", "image/jpeg")),
+        ],
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["saved"]) == 2
+    for entry in body["saved"]:
+        assert entry["cls"] == "2.4mm-M"
+        assert entry["path"].endswith(".jpg")
+        # Paths are absolute or relative to labeled root — the client
+        # only needs them to round-trip through /delete, so we check
+        # the file actually exists on disk where path says.
+        assert Path(entry["path"]).exists()
+
+
+def test_upload_train_rejects_unknown_class(client):
+    r = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "bogus"},
+        files=[("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r.status_code == 400
+
+
+def test_upload_test_returns_json(client, labeler_dirs):
+    _, holdout, _ = labeler_dirs
+    r = client.post(
+        "/rfcai/labeler/upload-test",
+        auth=("u", "p"),
+        data={"cls": "SMA-F"},
+        files=[("images", ("h.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["saved"]) == 1
+    assert body["saved"][0]["cls"] == "SMA-F"
+    assert Path(body["saved"][0]["path"]).exists()
+
+
+def test_upload_then_delete_roundtrip(client, labeler_dirs):
+    # The Undo flow on the client posts the path back to /delete.
+    # Pin that the path the upload returns is a valid delete target.
+    r1 = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "2.4mm-F"},
+        files=[("images", ("c.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    path = r1.json()["saved"][0]["path"]
+    assert Path(path).exists()
+
+    r2 = client.post(
+        "/rfcai/labeler/delete",
+        auth=("u", "p"),
+        data={"path": path},
+    )
+    assert r2.status_code == 200
+    assert not Path(path).exists()

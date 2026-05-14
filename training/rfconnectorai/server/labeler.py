@@ -470,7 +470,7 @@ def create_router() -> APIRouter:
                     pass
         return HTMLResponse(f"<div class='success'>Deleted {deleted} image(s).</div>")
 
-    @r.post("/upload-train", response_class=HTMLResponse)
+    @r.post("/upload-train")
     async def upload_train(
         cls: str = Form(...),
         images: list[UploadFile] = File(...),
@@ -478,25 +478,25 @@ def create_router() -> APIRouter:
     ):
         """Drop phone photos directly into the training set for a class.
 
-        Use this when you want to add a high-resolution photo as a training
-        sample (vs the video-extraction path which gives lower-res crops).
         Saved to data/labeled/embedder/<class>/photo_<stem><ext>.
-
-        Cache-bust the signal cache so the new photos appear in Review."""
+        Returns JSON {saved: [{cls, path}], errors: [str]} so the Flutter
+        Undo flow can stash the server-authoritative path."""
         if cls not in CANONICAL_CLASSES:
             raise HTTPException(400, f"unknown class {cls!r}")
         out_dir = _data_root() / cls
         out_dir.mkdir(parents=True, exist_ok=True)
-        saved = []
+        saved: list[dict] = []
+        errors: list[str] = []
         for image in images:
             if not image.filename:
+                errors.append("empty filename")
                 continue
             ext = Path(image.filename).suffix.lower()
             if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+                errors.append(f"bad ext {image.filename!r}")
                 continue
             stem = Path(image.filename).stem or f"upload_{int(time.time())}"
             stem = Path(stem).name
-            # photo_ prefix so these are easy to filter from Hough crops.
             dst = out_dir / f"photo_{stem}{ext}"
             n = 1
             while dst.exists():
@@ -504,19 +504,12 @@ def create_router() -> APIRouter:
                 n += 1
             data = await image.read()
             dst.write_bytes(data)
-            saved.append(dst.name)
+            saved.append({"cls": cls, "path": str(dst)})
         global _signals_cache
         _signals_cache = {}
-        if not saved:
-            return HTMLResponse(
-                "<div style='color:#f87171'>No valid images saved (jpg/png/webp only).</div>"
-            )
-        return HTMLResponse(
-            f"<div style='color:#4ade80'>Saved {len(saved)} training image(s) to "
-            f"<code>data/labeled/embedder/{cls}/</code>: {', '.join(saved)}</div>"
-        )
+        return {"saved": saved, "errors": errors}
 
-    @r.post("/upload-test", response_class=HTMLResponse)
+    @r.post("/upload-test")
     async def upload_test(
         cls: str = Form(...),
         images: list[UploadFile] = File(...),
@@ -526,15 +519,17 @@ def create_router() -> APIRouter:
             raise HTTPException(400, f"unknown class {cls!r}")
         out_dir = _test_holdout_root() / cls
         out_dir.mkdir(parents=True, exist_ok=True)
-        saved = []
+        saved: list[dict] = []
+        errors: list[str] = []
         for image in images:
             if not image.filename:
+                errors.append("empty filename")
                 continue
             ext = Path(image.filename).suffix.lower()
             if ext not in {".jpg", ".jpeg", ".png", ".webp"}:
+                errors.append(f"bad ext {image.filename!r}")
                 continue
             stem = Path(image.filename).stem or f"upload_{int(time.time())}"
-            # Strip any path components for safety.
             stem = Path(stem).name
             dst = out_dir / f"{stem}{ext}"
             n = 1
@@ -543,15 +538,8 @@ def create_router() -> APIRouter:
                 n += 1
             data = await image.read()
             dst.write_bytes(data)
-            saved.append(dst.name)
-        if not saved:
-            return HTMLResponse(
-                "<div style='color:#f87171'>No valid images saved (jpg/png/webp only).</div>"
-            )
-        return HTMLResponse(
-            f"<div style='color:#4ade80'>Saved {len(saved)} test image(s) to "
-            f"<code>data/test_holdout/{cls}/</code>: {', '.join(saved)}</div>"
-        )
+            saved.append({"cls": cls, "path": str(dst)})
+        return {"saved": saved, "errors": errors}
 
     @r.post("/upload-video", response_class=HTMLResponse)
     async def upload_video(
