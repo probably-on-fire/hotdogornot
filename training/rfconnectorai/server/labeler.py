@@ -307,6 +307,18 @@ def create_router() -> APIRouter:
     # so backend routes must include /rfcai/ to be reachable externally.
     r = APIRouter(prefix="/rfcai/labeler", tags=["labeler"])
 
+    @r.get("/stats")
+    def stats(_: str = Depends(_require_basic_auth)):
+        """
+        Per-class real-capture counts for the training set and the
+        held-out test set. Used by the Flutter Contribute screen to
+        show the user which classes are starved before they capture.
+        """
+        return {
+            "train": _real_capture_counts(_data_root()),
+            "holdout": _real_capture_counts(_test_holdout_root()),
+        }
+
     @r.get("/", response_class=HTMLResponse)
     def index(request: Request, _: str = Depends(_require_basic_auth)):
         counts = _class_counts()

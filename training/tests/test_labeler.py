@@ -62,3 +62,29 @@ def test_real_capture_counts_skips_synth_and_derived(labeler_dirs):
     counts = labeler._real_capture_counts(labeled)
     assert counts["2.4mm-M"] == 3
     assert counts["SMA-M"] == 0  # absent folders count as 0
+
+
+def test_stats_requires_auth(client):
+    r = client.get("/rfcai/labeler/stats")
+    assert r.status_code == 401
+
+
+def test_stats_returns_train_and_holdout_counts(client, labeler_dirs):
+    labeled, holdout, _ = labeler_dirs
+    _seed_class_dir(labeled, "2.4mm-M", ["photo_a.jpg", "photo_b.jpg"])
+    _seed_class_dir(labeled, "2.4mm-M", ["photo_a_clean.jpg"])  # skip
+    _seed_class_dir(holdout, "2.4mm-M", ["IMG_holdout.jpg"])
+
+    r = client.get("/rfcai/labeler/stats", auth=("u", "p"))
+    assert r.status_code == 200
+    body = r.json()
+
+    # All canonical classes present in both dicts, zero by default.
+    for cls in labeler.CANONICAL_CLASSES:
+        assert cls in body["train"]
+        assert cls in body["holdout"]
+
+    assert body["train"]["2.4mm-M"] == 2     # excludes _clean
+    assert body["holdout"]["2.4mm-M"] == 1
+    assert body["train"]["SMA-M"] == 0
+    assert body["holdout"]["SMA-F"] == 0
