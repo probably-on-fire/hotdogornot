@@ -238,6 +238,39 @@ def _class_counts() -> dict[str, int]:
     return out
 
 
+def _real_capture_counts(root: Path) -> dict[str, int]:
+    """
+    Count real human captures per class — excludes rembg-derived
+    variants (_clean / _bg* / _z* / _central) and pure synth files
+    (synth_*). Used by the stats endpoint to show the user the number
+    they're actually moving with each shutter tap, not the augmented
+    training-set size.
+    """
+    out: dict[str, int] = {}
+    for cls in CANONICAL_CLASSES:
+        d = root / cls
+        if not d.is_dir():
+            out[cls] = 0
+            continue
+        n = 0
+        for p in d.iterdir():
+            if not p.is_file():
+                continue
+            stem = p.stem
+            if stem.startswith("synth_"):
+                continue
+            if stem.endswith("_clean") or stem.endswith("_central"):
+                continue
+            # _bg<digits>, _z<digits> — derived augmentations.
+            if "_bg" in stem and stem.rsplit("_bg", 1)[1].isdigit():
+                continue
+            if "_z" in stem and stem.rsplit("_z", 1)[1].isdigit():
+                continue
+            n += 1
+        out[cls] = n
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
