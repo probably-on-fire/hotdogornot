@@ -44,16 +44,9 @@ class _AboutScreenState extends State<AboutScreen> {
   final _requestNotesCtl = TextEditingController();
   bool _requestSending = false;
 
-  // Advanced (dev-mode-gated) panel.
-  late TextEditingController _relayCtl;
-  late TextEditingController _tokenCtl;
-  String? _saveStatus;
-
   @override
   void initState() {
     super.initState();
-    _relayCtl = TextEditingController(text: widget.settings.relayBaseUrl);
-    _tokenCtl = TextEditingController(text: widget.settings.deviceToken);
     _loadVersion();
   }
 
@@ -62,8 +55,6 @@ class _AboutScreenState extends State<AboutScreen> {
     _devTapTimer?.cancel();
     _requestNameCtl.dispose();
     _requestNotesCtl.dispose();
-    _relayCtl.dispose();
-    _tokenCtl.dispose();
     super.dispose();
   }
 
@@ -200,17 +191,6 @@ class _AboutScreenState extends State<AboutScreen> {
     }
   }
 
-  Future<void> _saveAdvanced() async {
-    widget.settings
-      ..relayBaseUrl = _relayCtl.text.trim()
-      ..deviceToken = _tokenCtl.text.trim();
-    await widget.settings.save();
-    if (!mounted) return;
-    setState(() => _saveStatus = '✓ Saved');
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) setState(() => _saveStatus = null);
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -226,42 +206,12 @@ class _AboutScreenState extends State<AboutScreen> {
               Center(
                 child: Column(
                   children: [
-                    Container(
-                      width: 64,
-                      height: 64,
-                      decoration: BoxDecoration(
-                        // Accent blue matching the aired.com landing
-                        // page + labeler login brand mark.
-                        color: const Color(0xFF5B9EFF),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Center(
-                        // RF-connector cross-section: white ring with
-                        // a filled center dot. Matches the inline SVG
-                        // brand mark used everywhere else (see
-                        // aired_site/index.html and labeler login).
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.white,
-                              width: 2.5,
-                            ),
-                          ),
-                          child: Center(
-                            child: Container(
-                              width: 10,
-                              height: 10,
-                              decoration: const BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
+                    // The actual app icon (red AI Red brain mark),
+                    // matching the launcher icon and the aired.com logo.
+                    Image.asset(
+                      'assets/icon/icon.png',
+                      width: 72,
+                      height: 72,
                     ),
                     const SizedBox(height: 12),
                     const Text(
@@ -388,6 +338,15 @@ class _AboutScreenState extends State<AboutScreen> {
 
               const SizedBox(height: 24),
 
+              // ── On-device inference toggle (always visible now that
+              // logins replaced the env-style relay/token Advanced area) ──
+              _OnDeviceToggle(
+                settings: widget.settings,
+                onChanged: () => setState(() {}),
+              ),
+
+              const SizedBox(height: 24),
+
               // ── Small "Powered by aired.com" footer ──
               GestureDetector(
                 onTap: _openAired,
@@ -397,24 +356,10 @@ class _AboutScreenState extends State<AboutScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Container(
+                      Image.asset(
+                        'assets/icon/icon.png',
                         width: 16,
                         height: 16,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFE63946),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Center(
-                          child: Text(
-                            'ai',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                        ),
                       ),
                       const SizedBox(width: 8),
                       Text(
@@ -446,22 +391,6 @@ class _AboutScreenState extends State<AboutScreen> {
                   ),
                 ),
               ),
-
-              // Advanced section — only visible in dev mode.
-              if (widget.settings.devMode) ...[
-                const SizedBox(height: 28),
-                _OnDeviceToggle(
-                  settings: widget.settings,
-                  onChanged: () => setState(() {}),
-                ),
-                const SizedBox(height: 12),
-                _AdvancedSection(
-                  relayCtl: _relayCtl,
-                  tokenCtl: _tokenCtl,
-                  onSave: _saveAdvanced,
-                  status: _saveStatus,
-                ),
-              ],
             ],
           ),
         ),
@@ -590,82 +519,8 @@ class _PrivacySectionState extends State<_PrivacySection> {
   }
 }
 
-class _AdvancedSection extends StatelessWidget {
-  const _AdvancedSection({
-    required this.relayCtl,
-    required this.tokenCtl,
-    required this.onSave,
-    required this.status,
-  });
-  final TextEditingController relayCtl;
-  final TextEditingController tokenCtl;
-  final VoidCallback onSave;
-  final String? status;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: const [
-                Icon(Icons.developer_mode, size: 16, color: Color(0xFFE63946)),
-                SizedBox(width: 6),
-                Text(
-                  'ADVANCED',
-                  style: TextStyle(
-                    color: Color(0xFFE63946),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: relayCtl,
-              decoration: const InputDecoration(
-                labelText: 'Relay base URL',
-                hintText: 'https://aired.com/rfcai',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: tokenCtl,
-              decoration: const InputDecoration(
-                labelText: 'Device token',
-              ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: onSave,
-              child: const Text('Save'),
-            ),
-            if (status != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  status!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Color(0xFF4ADE80),
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Toggle for the on-device classifier path. Only shown in dev mode.
+/// Toggle for the on-device classifier path. Visible on About so users
+/// can flip between server inference and the bundled ONNX model.
 /// When on, /predict calls bypass aired.com and run the bundled
 /// ResNet-18 ONNX locally.
 class _OnDeviceToggle extends StatelessWidget {

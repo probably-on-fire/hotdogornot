@@ -55,11 +55,8 @@
     .brand-mark {
       flex-shrink: 0;
       width: 28px; height: 28px;
-      background: var(--accent);
-      border-radius: 7px;
-      display: flex; align-items: center; justify-content: center;
+      display: block;
     }
-    .brand-mark svg { display: block; }
     .brand-name {
       font-size: 15px; font-weight: 700; color: var(--text);
       white-space: nowrap;
@@ -100,23 +97,11 @@
       text-align: center;
       gap: 0;
     }
-    /* Large brand mark in hero */
+    /* Large brand mark in hero — actual AI Red logo */
     .hero-mark {
-      width: 72px; height: 72px;
-      background: var(--accent);
-      border-radius: 20px;
-      display: flex; align-items: center; justify-content: center;
+      width: 120px; height: 120px;
       margin-bottom: 28px;
-      box-shadow: 0 0 48px rgba(91,158,255,0.2), var(--shadow-lg);
-      position: relative;
-    }
-    @keyframes rf-pulse {
-      0%, 100% { opacity: 0.55; transform: scale(1); }
-      50%       { opacity: 1.0;  transform: scale(1.2); }
-    }
-    .hero-mark .inner-dot {
-      animation: rf-pulse 3s ease-in-out infinite;
-      transform-origin: center;
+      filter: drop-shadow(0 8px 32px rgba(0, 0, 0, 0.5));
     }
     .hero-eyebrow {
       font-size: 11px; font-weight: 700;
@@ -282,12 +267,8 @@
 
   <!-- ── Header ──────────────────────────────────────────────── -->
   <header>
-    <div class="brand-mark" aria-hidden="true">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="5.5" stroke="white" stroke-width="2"/>
-        <circle cx="8" cy="8" r="2" fill="white"/>
-      </svg>
-    </div>
+    <img class="brand-mark" src="/logo-transparent.webp" alt="AI Red logo"
+         width="28" height="28">
     <span class="brand-name">AI Red</span>
     <a href="/rfcai/labeler/login" class="header-signin">Sign in</a>
   </header>
@@ -296,12 +277,9 @@
 
     <!-- ── Hero ──────────────────────────────────────────────── -->
     <section class="hero">
-      <div class="hero-mark" aria-hidden="true">
-        <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
-          <circle cx="19" cy="19" r="13" stroke="white" stroke-width="2.5"/>
-          <circle class="inner-dot" cx="19" cy="19" r="5" fill="white"/>
-        </svg>
-      </div>
+      <img class="hero-mark" src="/logo-transparent.webp" alt="AI Red logo"
+           width="120" height="120">
+
       <p class="hero-eyebrow">Open project</p>
       <h1 class="hero-headline">RF Connector AI</h1>
       <p class="hero-tagline">
