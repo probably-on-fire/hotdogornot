@@ -36,12 +36,20 @@ def labeler_dirs(tmp_path, monkeypatch):
     monkeypatch.setenv("RFCAI_VIDEOS_DIR", str(videos))
     monkeypatch.setenv("LABELER_USER", "u")
     monkeypatch.setenv("LABELER_PASS", "p")
+    # Seed an admin user in a temp DB so write routes work in tests.
+    users_db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(users_db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(users_db)
+    _auth.create_user(users_db, "u", "p", role="admin")
     return labeled, holdout, videos
 
 
 @pytest.fixture
 def client(labeler_dirs):
+    from starlette.middleware.sessions import SessionMiddleware
     app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
     app.include_router(labeler.create_router())
     return TestClient(app)
 

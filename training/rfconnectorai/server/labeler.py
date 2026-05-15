@@ -574,7 +574,7 @@ def create_router() -> APIRouter:
         return RedirectResponse("/rfcai/labeler/", status_code=303)
 
     @r.post("/delete", response_class=HTMLResponse)
-    def delete(path: str = Form(...), _: str = Depends(_require_basic_auth)):
+    def delete(path: str = Form(...), user=Depends(require_admin)):
         p = _safe_path(path)
         if p.exists():
             try:
@@ -585,7 +585,7 @@ def create_router() -> APIRouter:
         return Response(content="", media_type="text/html")
 
     @r.post("/flip", response_class=HTMLResponse)
-    def flip(path: str = Form(...), _: str = Depends(_require_basic_auth)):
+    def flip(path: str = Form(...), user=Depends(require_admin)):
         p = _safe_path(path)
         if not p.exists():
             return Response(content="", media_type="text/html")
@@ -614,7 +614,7 @@ def create_router() -> APIRouter:
     def bulk_delete(
         request: Request,
         paths: list[str] = Form(...),
-        _: str = Depends(_require_basic_auth),
+        user=Depends(require_admin),
     ):
         deleted = 0
         for raw in paths:
@@ -635,7 +635,7 @@ def create_router() -> APIRouter:
         cls: str = Form(...),
         session: str = Form(""),
         images: list[UploadFile] = File(...),
-        _: str = Depends(_require_basic_auth),
+        user=Depends(require_admin),
     ):
         """Drop phone photos directly into the training set for a class.
 
@@ -676,7 +676,7 @@ def create_router() -> APIRouter:
         cls: str = Form(...),
         session: str = Form(""),
         images: list[UploadFile] = File(...),
-        _: str = Depends(_require_basic_auth),
+        user=Depends(require_admin),
     ):
         if cls not in CANONICAL_CLASSES:
             raise HTTPException(400, f"unknown class {cls!r}")
@@ -713,7 +713,7 @@ def create_router() -> APIRouter:
         sensitivity: float = Form(2.0),
         max_crops: int = Form(5),
         file: UploadFile = File(...),
-        _: str = Depends(_require_basic_auth),
+        user=Depends(require_admin),
     ):
         if family not in CANONICAL_FAMILIES:
             raise HTTPException(400, f"unknown family {family!r}")
