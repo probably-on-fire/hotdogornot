@@ -8,45 +8,76 @@
 
 {% block head_extra %}
   <style>
+    /* ── Header hint bar ─────────────────────────────────────────── */
     header .hint { color: var(--muted); font-size: 12px; }
+
+    /* ── Filter bar ──────────────────────────────────────────────── */
     .filters {
-      padding: 12px 20px;
+      padding: 10px 20px;
       background: var(--panel);
       border-bottom: 1px solid var(--border);
-      display: flex; flex-wrap: wrap; gap: 12px 20px;
+      display: flex; flex-wrap: wrap; gap: 10px 20px;
       align-items: flex-start;
     }
     .filter-group { display: flex; flex-direction: column; gap: 4px; min-width: 120px; }
     .filter-group label.title {
-      font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+      font-size: 11px; color: var(--muted);
+      font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
     }
-    .checkbox-row { display: flex; flex-wrap: wrap; gap: 6px; max-width: 380px; }
+
+    /* Filter chips — pill-shaped checkboxes */
+    .checkbox-row { display: flex; flex-wrap: wrap; gap: 5px; max-width: 400px; }
     .checkbox-row label {
-      background: var(--panel-2); padding: 4px 8px; border-radius: 4px;
-      border: 1px solid var(--border); cursor: pointer; font-size: 12px;
-      display: flex; align-items: center; gap: 6px;
+      background: var(--panel-2);
+      padding: 4px 10px; border-radius: 20px;
+      border: 1px solid var(--border);
+      cursor: pointer; font-size: 12px; font-weight: 500;
+      display: flex; align-items: center; gap: 5px;
+      transition: background 120ms, border-color 120ms, color 120ms;
     }
-    .checkbox-row input { margin: 0; }
-    .filter-flags { display: flex; flex-direction: column; gap: 4px; }
-    .filter-flags label { font-size: 12px; cursor: pointer; }
-    main { padding: 16px 20px; }
+    .checkbox-row label:hover {
+      background: var(--panel-3); border-color: var(--border-strong);
+    }
+    .checkbox-row input { margin: 0; accent-color: var(--accent); }
+    .checkbox-row input:checked + * { color: var(--accent-strong); }
+    .checkbox-row label:has(input:checked) {
+      background: var(--accent-tint);
+      border-color: rgba(91,158,255,0.35);
+      color: var(--accent-strong);
+    }
+
+    /* Flag checkboxes */
+    .filter-flags { display: flex; flex-direction: column; gap: 5px; }
+    .filter-flags label {
+      font-size: 12px; cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      color: var(--text);
+    }
+    .filter-flags input { accent-color: var(--accent); }
+
+    /* ── Grid ────────────────────────────────────────────────────── */
+    main { padding: 14px 20px; }
     .grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
       gap: 12px;
     }
     .tile {
-      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-      overflow: hidden; display: flex; flex-direction: column;
-      transition: opacity 0.2s, transform 0.2s;
-    }
-    .tile.gone { opacity: 0; transform: scale(0.9); pointer-events: none; }
-    .tile {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden;
+      display: flex; flex-direction: column;
+      transition: opacity 0.2s, transform 0.2s, box-shadow 0.15s;
       position: relative;
     }
+    .tile:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px -4px rgba(0,0,0,0.4);
+      border-color: var(--border-strong);
+    }
+    .tile.gone { opacity: 0; transform: scale(0.9); pointer-events: none; }
     .tile img {
       width: 100%; aspect-ratio: 1/1; object-fit: cover;
-      display: block; background: #0a0c11;
+      display: block; background: #080a0f;
       cursor: zoom-in;
     }
     .gender-badge {
@@ -61,26 +92,25 @@
       letter-spacing: 0;
     }
     .gender-badge.M {
-      background: rgba(79, 140, 255, 0.85);   /* blue */
+      background: rgba(79, 140, 255, 0.85);
       color: white;
       border: 2px solid rgba(255,255,255,0.6);
     }
     .gender-badge.F {
-      background: rgba(244, 114, 182, 0.85);  /* pink */
+      background: rgba(244, 114, 182, 0.85);
       color: white;
       border: 2px solid rgba(255,255,255,0.6);
     }
     .tile.focused { outline: 3px solid var(--accent); outline-offset: -3px; }
-    /* Subtle gender hint on tile border too, for peripheral awareness. */
-    .tile.gender-M { border-color: rgba(79, 140, 255, 0.4); }
-    .tile.gender-F { border-color: rgba(244, 114, 182, 0.4); }
+    .tile.gender-M { border-color: rgba(79, 140, 255, 0.35); }
+    .tile.gender-F { border-color: rgba(244, 114, 182, 0.35); }
+
+    /* ── Lightbox ────────────────────────────────────────────────── */
     .lightbox {
       position: fixed; inset: 0;
       background: rgba(0, 0, 0, 0.92);
       display: flex; align-items: center; justify-content: center;
-      z-index: 1000;
-      padding: 20px;
-      cursor: zoom-out;
+      z-index: 1000; padding: 20px; cursor: zoom-out;
     }
     .lightbox[hidden] { display: none; }
     .lightbox-img-wrap { position: relative; }
@@ -88,13 +118,11 @@
       max-width: 92vw; max-height: 86vh;
       object-fit: contain;
       box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-      border-radius: 4px;
-      display: block;
+      border-radius: 6px; display: block;
     }
     .lightbox .gender-badge {
       position: absolute; top: 12px; right: 12px;
-      width: 64px; height: 64px;
-      font-size: 36px;
+      width: 64px; height: 64px; font-size: 36px;
     }
     .lightbox-meta {
       position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -106,64 +134,103 @@
       position: absolute; top: 20px; right: 20px;
       color: var(--muted); font-size: 12px; pointer-events: none;
     }
-    .tile-meta { padding: 8px 10px; font-size: 12px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+
+    /* ── Tile body ───────────────────────────────────────────────── */
+    .tile-meta {
+      padding: 8px 10px; font-size: 12px; flex: 1;
+      display: flex; flex-direction: column; gap: 3px;
+    }
     .tile-meta code { color: var(--muted); font-size: 11px; }
     .tile-meta .cls { font-weight: 600; color: var(--accent); }
     .badges { display: flex; flex-wrap: wrap; gap: 4px; }
     .badge {
-      display: inline-block; padding: 1px 6px; border-radius: 3px;
-      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+      display: inline-block; padding: 1px 6px; border-radius: 20px;
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.3px;
     }
-    .badge.danger { background: rgba(248,113,113,0.15); color: var(--red); }
-    .badge.warn { background: rgba(251,146,60,0.15); color: var(--orange); }
-    .badge.muted { background: rgba(107,114,128,0.2); color: var(--gray); }
-    .badge.violet { background: rgba(167,139,250,0.15); color: var(--violet); }
+    .badge.danger { background: rgba(248,113,113,0.13); color: var(--red); }
+    .badge.warn   { background: rgba(251,146,60,0.13);  color: var(--orange); }
+    .badge.muted  { background: rgba(97,107,120,0.18);  color: var(--muted); }
+    .badge.violet { background: rgba(167,139,250,0.13); color: var(--violet); }
+
+    /* ── Tile action buttons ─────────────────────────────────────── */
     .actions { display: flex; gap: 4px; padding: 6px 8px 8px; }
     .actions button {
       flex: 1; padding: 6px 8px; font-size: 12px; font-weight: 600;
-      border-radius: 4px; border: 1px solid var(--border); cursor: pointer;
-      background: var(--panel-2); color: var(--text); transition: background 0.1s;
+      border-radius: 5px; border: 1px solid var(--border); cursor: pointer;
+      background: var(--panel-2); color: var(--text);
+      transition: background 120ms, border-color 120ms;
     }
-    .actions button:hover { background: #2a313e; }
-    .actions button.danger { border-color: rgba(248,113,113,0.4); color: var(--red); }
-    .actions button.danger:hover { background: rgba(248,113,113,0.15); }
-    .actions button.flip { border-color: rgba(79,140,255,0.4); color: var(--accent); }
-    .actions button.flip:hover { background: rgba(79,140,255,0.15); }
+    .actions button:hover { background: var(--panel-3); border-color: var(--border-strong); }
+    .actions button.danger {
+      border-color: rgba(248,113,113,0.35); color: var(--red);
+    }
+    .actions button.danger:hover {
+      background: rgba(248,113,113,0.13); border-color: rgba(248,113,113,0.6);
+    }
+    .actions button.flip {
+      border-color: rgba(91,158,255,0.35); color: var(--accent);
+    }
+    .actions button.flip:hover {
+      background: rgba(91,158,255,0.12); border-color: rgba(91,158,255,0.6);
+    }
+
+    /* ── Stats bar ───────────────────────────────────────────────── */
     .stats {
-      padding: 8px 0; color: var(--muted); font-size: 13px;
-      display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+      padding: 8px 0; display: flex; gap: 18px;
+      flex-wrap: wrap; align-items: center;
     }
-    .stats .accent { color: var(--text); font-weight: 600; }
+    .stats-item { display: flex; align-items: baseline; gap: 5px; }
+    .stats-value { font-size: 15px; font-weight: 700; color: var(--text); }
+    .stats-label { font-size: 12px; color: var(--muted); }
+    .stats-divider { color: var(--subtle); }
+
+    /* ── Sentinel / empty state ──────────────────────────────────── */
     .sentinel {
       grid-column: 1 / -1;
-      padding: 32px 0; text-align: center; color: var(--muted); font-size: 13px;
+      padding: 48px 0; text-align: center; color: var(--muted); font-size: 13px;
+    }
+    .sentinel-icon {
+      display: block; margin: 0 auto 12px;
+      opacity: 0.35;
     }
     .sentinel-spinner::before {
       content: "⟳"; display: inline-block; margin-right: 6px;
       animation: spin 1.2s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Bulk row ────────────────────────────────────────────────── */
     .bulk-row {
       padding: 12px 0; display: flex; gap: 12px; align-items: center;
       border-top: 1px solid var(--border); margin-top: 12px;
     }
     .bulk-row button {
       padding: 8px 14px; font-size: 13px; font-weight: 600;
-      border-radius: 4px; cursor: pointer; background: var(--red); color: white;
-      border: none;
+      border-radius: 5px; cursor: pointer;
+      background: var(--red); color: white; border: none;
+      transition: background 120ms;
     }
-    .bulk-row button:disabled { background: var(--panel-2); color: var(--muted); cursor: not-allowed; }
+    .bulk-row button:hover { background: #fb8888; }
+    .bulk-row button:disabled {
+      background: var(--panel-2); color: var(--muted); cursor: not-allowed;
+    }
+
+    /* ── Help banner ─────────────────────────────────────────────── */
     .help-banner {
-      background: var(--panel-2); padding: 8px 12px; border-radius: 4px;
+      background: var(--panel-2); padding: 8px 12px; border-radius: 6px;
       color: var(--muted); font-size: 12px; margin-bottom: 12px;
     }
+
+    /* ── Upload accordion ────────────────────────────────────────── */
     details.uploads {
-      margin: 0 20px 0 20px; background: var(--panel); border: 1px solid var(--border);
-      border-radius: 6px;
+      margin: 0 20px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px;
     }
     details.uploads > summary {
       padding: 10px 16px; cursor: pointer; user-select: none;
-      font-size: 13px; color: var(--text); list-style: revert;
+      font-size: 13px; font-weight: 500; color: var(--text); list-style: revert;
     }
     details.uploads[open] > summary { border-bottom: 1px solid var(--border); }
     .upload-grid {
@@ -172,33 +239,44 @@
     }
     .upload-grid > form {
       display: flex; flex-direction: column; gap: 8px;
-      background: var(--panel-2); padding: 12px; border-radius: 4px;
+      background: var(--panel-2); padding: 14px; border-radius: 6px;
       border: 1px solid var(--border);
     }
     .upload-grid > form > .label {
-      font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px;
+      font-size: 11px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
       font-weight: 700; margin-bottom: 4px;
     }
     .upload-grid label { font-size: 12px; }
     .upload-grid input, .upload-grid select { font-size: 12px; }
     .upload-grid button {
       padding: 8px 12px; background: var(--accent); color: white; border: none;
-      border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600;
+      border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: 600;
+      transition: background 120ms;
     }
-    .upload-grid button:hover { filter: brightness(1.1); }
+    .upload-grid button:hover { background: var(--accent-strong); }
     #upload-status { padding: 0 16px 16px; font-size: 13px; }
+
+    /* ── Keyboard hint ───────────────────────────────────────────── */
     .kbd {
-      display: inline-block; padding: 1px 6px; border-radius: 3px;
-      background: var(--panel); border: 1px solid var(--border); font-size: 11px;
-      font-family: ui-monospace, monospace; color: var(--text);
+      display: inline-block; padding: 1px 6px; border-radius: 4px;
+      background: var(--panel-2); border: 1px solid var(--border-strong);
+      font-size: 11px;
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      color: var(--text);
     }
+
     #grid-loading { color: var(--muted); padding: 20px 0; text-align: center; font-size: 13px; }
     .htmx-request #grid-loading { display: block; }
     .htmx-request .grid { opacity: 0.5; }
   </style>
 {% endblock %}
 
-{% block page_title %}RFCAI Labeler — training data cleanup{% endblock %}
+{% block page_title %}
+  <span class="project">RF Connector AI</span>
+  <span class="sep">·</span>
+  <span class="app">Labeler</span>
+{% endblock %}
 
 {% block header_nav %}
   <div class="hint">
@@ -334,10 +412,8 @@
     </div>
     <div class="filter-group">
       <label class="title">&nbsp;</label>
-      <button type="button" id="load-all"
-              style="padding: 6px 12px; background: var(--panel-2); color: var(--text);
-                     border: 1px solid var(--border); border-radius: 4px; cursor: pointer;
-                     font-size: 12px;">
+      <button type="button" id="load-all" class="btn btn-secondary"
+              style="padding: 6px 12px; font-size: 12px;">
         Load all
       </button>
     </div>

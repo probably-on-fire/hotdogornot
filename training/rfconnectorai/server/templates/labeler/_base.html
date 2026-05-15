@@ -7,87 +7,257 @@
   {% block htmx_script %}{% endblock %}
   <style>
     :root {
-      --bg: #0f1115;
-      --panel: #161a22;
-      --panel-2: #1d222c;
-      --border: #2a313e;
-      --text: #d6dde8;
-      --muted: #8a93a3;
-      --accent: #4f8cff;
-      --green: #4ade80;
-      --red: #f87171;
-      --orange: #fb923c;
-      --violet: #a78bfa;
-      --gray: #6b7280;
+      --bg:           #0a0d12;
+      --panel:        #131720;
+      --panel-2:      #1b202c;
+      --panel-3:      #232938;
+      --border:       #2b3344;
+      --border-strong:#3a4458;
+      --text:         #e6ecf5;
+      --muted:        #97a0b0;
+      --subtle:       #5d6478;
+      --accent:       #5b9eff;
+      --accent-strong:#80b5ff;
+      --accent-tint:  rgba(91,158,255,0.12);
+      --green:        #4ade80;
+      --red:          #f87171;
+      --orange:       #fb923c;
+      --violet:       #a78bfa;
+      --shadow-lg:    0 8px 24px -8px rgba(0,0,0,0.5),
+                      0 1px 0 rgba(255,255,255,0.04) inset;
     }
+
     * { box-sizing: border-box; }
     html, body {
       margin: 0; padding: 0;
       background: var(--bg); color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+                   "Segoe UI Variable Text", "Segoe UI", sans-serif;
       font-size: 14px;
+      font-feature-settings: "ss01", "cv11";
+      -webkit-font-smoothing: antialiased;
     }
-    main.centered-page {
-      padding: 0;
-      min-height: calc(100vh - 45px);
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      padding: 0 20px;
+      height: 48px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(19,23,32,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: flex; align-items: center; gap: 12px;
+    }
+
+    /* Brand mark — SVG square with accent rounding */
+    .brand-mark {
+      flex-shrink: 0;
+      width: 26px; height: 26px;
+      background: var(--accent);
+      border-radius: 6px;
       display: flex; align-items: center; justify-content: center;
     }
-    header {
-      padding: 12px 20px;
-      border-bottom: 1px solid var(--border);
-      background: var(--panel);
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 16px;
+    .brand-mark svg { display: block; }
+
+    .brand-title {
+      font-size: 15px; font-weight: 400; margin: 0;
+      color: var(--muted);
+      white-space: nowrap;
+      display: flex; align-items: baseline; gap: 0;
     }
-    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    .brand-title .project { font-weight: 400; color: var(--muted); }
+    .brand-title .sep     { margin: 0 6px; color: var(--subtle); }
+    .brand-title .app     { font-weight: 700; color: var(--text); }
+
+    /* Auth cluster on the right */
+    .header-auth {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 10px;
+      font-size: 12px;
+    }
+    .avatar {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: var(--panel-3);
+      border: 1px solid var(--border-strong);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; color: var(--accent-strong);
+      flex-shrink: 0; letter-spacing: 0;
+    }
+    .header-username { color: var(--text); font-weight: 500; }
+    .header-admin-link {
+      color: var(--accent); text-decoration: none; font-weight: 500;
+    }
+    .header-admin-link:hover { color: var(--accent-strong); }
+
+    /* ── Shared layout ───────────────────────────────────────────────── */
     main { padding: 16px 20px; }
-    /* Common form / input styles */
+    main.centered-page {
+      padding: 0;
+      min-height: calc(100vh - 48px);
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ── Typography helpers ──────────────────────────────────────────── */
+    .muted  { color: var(--muted); }
+    .subtle { color: var(--subtle); }
+    .section-title {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.6px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    /* ── Card ────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 28px 32px;
+      width: 100%;
+      max-width: 360px;
+      box-shadow: var(--shadow-lg);
+    }
+    .card-headline {
+      font-size: 18px; font-weight: 700; margin: 0 0 4px;
+      color: var(--text);
+    }
+    .card-sub {
+      font-size: 13px; color: var(--muted); margin: 0 0 24px;
+    }
+
+    /* ── Buttons ─────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 8px 14px; border-radius: 6px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; border: 1px solid transparent;
+      transition: background 120ms, color 120ms, border-color 120ms;
+      text-decoration: none; white-space: nowrap;
+    }
+    .btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .btn-primary {
+      background: var(--accent); color: #fff; border-color: var(--accent);
+    }
+    .btn-primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+    .btn-secondary {
+      background: var(--panel-2); color: var(--text); border-color: var(--border);
+    }
+    .btn-secondary:hover { background: var(--panel-3); border-color: var(--border-strong); }
+    .btn-danger {
+      background: transparent; color: var(--red);
+      border-color: rgba(248,113,113,0.4);
+    }
+    .btn-danger:hover { background: rgba(248,113,113,0.15); border-color: rgba(248,113,113,0.7); }
+    .btn-ghost {
+      background: transparent; color: var(--muted); border-color: transparent;
+    }
+    .btn-ghost:hover { background: var(--panel-2); color: var(--text); }
+    .btn-full { width: 100%; }
+
+    /* ── Form fields ─────────────────────────────────────────────────── */
+    .field { display: flex; flex-direction: column; gap: 5px; }
+    .field label {
+      display: block;
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--muted);
+    }
+    .field input, .field select {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 14px; outline: none;
+      transition: border-color 120ms, box-shadow 120ms;
+    }
+    .field input:focus, .field select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-tint);
+    }
+
+    /* Bare global inputs (for pages that use them outside .field) */
     label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
     input[type="text"], input[type="password"] {
-      width: 100%; padding: 8px 10px;
+      width: 100%; padding: 10px 12px;
       background: var(--panel-2); color: var(--text);
-      border: 1px solid var(--border); border-radius: 4px;
+      border: 1px solid var(--border); border-radius: 6px;
       font-size: 14px; margin-bottom: 16px; outline: none;
+      transition: border-color 120ms, box-shadow 120ms;
     }
     input[type="text"]:focus, input[type="password"]:focus {
       border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-tint);
     }
     input[type="number"] {
       background: var(--panel-2); color: var(--text);
       border: 1px solid var(--border); border-radius: 4px;
       padding: 4px 6px; width: 80px; font-size: 12px;
+      outline: none;
+    }
+    input[type="number"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-tint);
     }
     select {
       background: var(--panel-2); color: var(--text);
       border: 1px solid var(--border); border-radius: 4px;
-      padding: 4px 6px; font-size: 12px;
+      padding: 4px 6px; font-size: 12px; outline: none;
     }
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-tint);
+    }
+
+    /* Legacy submit button — pages should prefer .btn.btn-primary */
     button[type="submit"] {
       width: 100%; padding: 10px; background: var(--accent); color: white;
-      border: none; border-radius: 4px; font-size: 14px; font-weight: 600;
-      cursor: pointer;
+      border: none; border-radius: 6px; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: background 120ms;
     }
-    button[type="submit"]:hover { filter: brightness(1.1); }
+    button[type="submit"]:hover { background: var(--accent-strong); }
+    button[type="submit"]:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 2px;
+    }
+
     .error { color: var(--red); font-size: 12px; margin-bottom: 14px; }
-    /* Login / generic card */
-    .card {
-      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-      padding: 32px 28px; width: 100%; max-width: 340px;
-    }
-    .card h1 { font-size: 16px; margin: 0 0 24px; font-weight: 600; }
   </style>
   {% block head_extra %}{% endblock %}
 </head>
 <body>
   <header>
-    <h1>{% block page_title %}RFCAI Labeler{% endblock %}</h1>
+    <!-- Brand mark: filled rounded square with an RF connector icon -->
+    <div class="brand-mark" aria-hidden="true">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="7" cy="7" r="4.5" stroke="white" stroke-width="1.5"/>
+        <circle cx="7" cy="7" r="1.5" fill="white"/>
+      </svg>
+    </div>
+
+    <h1 class="brand-title" style="margin:0;">
+      {% block page_title %}
+        <span class="project">RF Connector AI</span>
+        <span class="sep">·</span>
+        <span class="app">Labeler</span>
+      {% endblock %}
+    </h1>
+
     {% block header_nav %}{% endblock %}
+
     {% if request.session.get('user_id') %}
-    <div style="margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px;">
-      <span>{{ request.session.get('username', '') }}</span>
-      <a href="/rfcai/labeler/admin/users" style="color: var(--accent); text-decoration: none;">Admin</a>
-      <form method="post" action="/rfcai/labeler/logout" style="display:inline; margin:0;">
-        <button type="submit" style="background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0;">Sign out</button>
+    <div class="header-auth">
+      <a href="/rfcai/labeler/admin/users" class="header-admin-link">Admin</a>
+      <div class="avatar" title="{{ request.session.get('username', '') }}">
+        {{ request.session.get('username', '?')[:1] | upper }}
+      </div>
+      <span class="header-username">{{ request.session.get('username', '') }}</span>
+      <form method="post" action="/rfcai/labeler/logout" style="display:inline;margin:0;">
+        <button type="button" class="btn btn-ghost"
+                style="padding: 4px 10px; font-size: 12px;"
+                onclick="this.closest('form').submit()">Sign out</button>
       </form>
     </div>
     {% endif %}

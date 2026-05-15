@@ -2,66 +2,119 @@
 
 {% block title %}RFCAI Labeler — Admin / Users{% endblock %}
 
-{% block page_title %}RFCAI Labeler — Admin{% endblock %}
+{% block page_title %}
+  <span class="project">RF Connector AI</span>
+  <span class="sep">·</span>
+  <span class="app">Admin</span>
+{% endblock %}
 
 {% block header_nav %}
-  <a href="/rfcai/labeler/" style="color: var(--accent); font-size: 13px; text-decoration: none;">&larr; Back to labeler</a>
-  <span style="color: var(--muted); font-size: 13px;">/ Users</span>
+  <a href="/rfcai/labeler/" style="color:var(--accent); font-size:13px;
+     text-decoration:none; font-weight:500;">&larr; Labeler</a>
+  <span style="color:var(--subtle); font-size:13px;">/ Users</span>
 {% endblock %}
 
 {% block head_extra %}
   <style>
-    main { padding: 24px 28px; max-width: 860px; }
+    main { padding: 28px 32px; max-width: 900px; }
+
+    /* ── Banner ─────────────────────────────────────────────────── */
     .banner {
-      padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 13px;
+      padding: 10px 16px; border-radius: 8px;
+      margin-bottom: 20px; font-size: 13px;
+      display: flex; flex-direction: column; gap: 6px;
     }
-    .banner.error { background: rgba(248,113,113,0.12); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
-    .banner.success { background: rgba(74,222,128,0.10); color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+    .banner.error {
+      background: rgba(248,113,113,0.08); color: var(--red);
+      border: 1px solid rgba(248,113,113,0.25);
+    }
+    .banner.success {
+      background: rgba(74,222,128,0.07); color: var(--green);
+      border: 1px solid rgba(74,222,128,0.2);
+    }
     .pw-block {
-      margin-top: 8px; padding: 8px 12px;
-      background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px;
-      font-family: ui-monospace, monospace; font-size: 13px; color: var(--text);
-      user-select: all;
+      display: flex; align-items: center; gap: 8px;
+      margin-top: 4px;
     }
-    .pw-note { font-size: 11px; color: var(--muted); margin-top: 4px; font-family: inherit; }
-    table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 32px; }
+    .pw-mono {
+      flex: 1;
+      padding: 7px 12px;
+      background: var(--panel-2); border: 1px solid var(--border);
+      border-radius: 6px;
+      font-family: ui-monospace, "Cascadia Code", "Fira Mono", monospace;
+      font-size: 13px; color: var(--text);
+      user-select: all; letter-spacing: 0.03em;
+    }
+    .pw-note { font-size: 11px; color: var(--muted); }
+
+    /* ── Users table ─────────────────────────────────────────────── */
+    .users-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 32px;
+      box-shadow: var(--shadow-lg);
+    }
+    table {
+      width: 100%; border-collapse: collapse;
+      font-size: 13px;
+    }
     th {
-      text-align: left; padding: 7px 12px;
-      border-bottom: 1px solid var(--border); color: var(--muted);
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+      text-align: left; padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.5px;
     }
-    td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    td {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
     tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: var(--panel-2); }
+
+    /* Role badge */
     .role-badge {
-      display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px;
-      font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
-      background: rgba(79,140,255,0.15); color: var(--accent);
+      display: inline-flex; align-items: center;
+      padding: 2px 9px; border-radius: 20px;
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.4px;
     }
+    .role-badge.admin {
+      background: rgba(91,158,255,0.15); color: var(--accent-strong);
+      border: 1px solid rgba(91,158,255,0.25);
+    }
+    .role-badge.labeler {
+      background: rgba(167,139,250,0.15); color: var(--violet);
+      border: 1px solid rgba(167,139,250,0.25);
+    }
+    /* Fallback for unknown roles */
+    .role-badge:not(.admin):not(.labeler) {
+      background: rgba(97,107,120,0.2); color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
     .delete-form { display: inline; }
-    .delete-btn {
-      padding: 4px 10px; font-size: 12px; font-weight: 600;
-      border-radius: 4px; border: 1px solid rgba(248,113,113,0.4);
-      color: var(--red); background: transparent; cursor: pointer;
+
+    /* ── Add-user panel ──────────────────────────────────────────── */
+    .add-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 28px;
+      box-shadow: var(--shadow-lg);
     }
-    .delete-btn:hover { background: rgba(248,113,113,0.12); }
-    .section-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
-    .add-form {
-      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-      padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+    .add-form-row {
+      display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end;
+      margin-top: 14px;
     }
-    .field { display: flex; flex-direction: column; gap: 4px; }
-    .field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
-    .field input {
-      padding: 7px 10px; background: var(--panel-2); color: var(--text);
-      border: 1px solid var(--border); border-radius: 4px; font-size: 13px; outline: none;
-      min-width: 180px;
+    .add-form-row .field { min-width: 180px; }
+    .add-form-row .field input {
+      /* override the field-level margin-bottom from global */
+      margin-bottom: 0;
     }
-    .field input:focus { border-color: var(--accent); }
-    .add-form button[type="submit"] {
-      padding: 8px 18px; background: var(--accent); color: white;
-      border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer;
-    }
-    .add-form button[type="submit"]:hover { filter: brightness(1.1); }
   </style>
 {% endblock %}
 
@@ -70,63 +123,95 @@
     {% if error %}
     <div class="banner error">{{ error }}</div>
     {% endif %}
+
     {% if created %}
     <div class="banner success">
       Created user <strong>{{ created }}</strong>.
       {% if new_password %}
-      <div class="pw-block">{{ new_password }}</div>
+      <div class="pw-block">
+        <span class="pw-mono">{{ new_password }}</span>
+        <button type="button" class="btn btn-ghost copy-btn"
+                style="padding:5px 10px; font-size:12px; flex-shrink:0;"
+                data-copy="{{ new_password }}">Copy</button>
+      </div>
       <div class="pw-note">Save this — it will not be shown again.</div>
       {% endif %}
     </div>
+    <script>
+      document.querySelectorAll('.copy-btn').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          await navigator.clipboard.writeText(btn.dataset.copy);
+          var orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(function() { btn.textContent = orig; }, 1500);
+        });
+      });
+    </script>
     {% endif %}
+
     {% if deleted %}
     <div class="banner success">Deleted user <strong>{{ deleted }}</strong>.</div>
     {% endif %}
 
-    <table>
-      <thead>
-        <tr>
-          <th>Username</th>
-          <th>Role</th>
-          <th>Created at</th>
-          <th>Last login</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for u in users %}
-        <tr>
-          <td>{{ u.username }}</td>
-          <td><span class="role-badge">{{ u.role }}</span></td>
-          <td style="color: var(--muted);">{{ u.created_at }}</td>
-          <td style="color: var(--muted);">{{ u.last_login_at or '—' }}</td>
-          <td>
-            {% if u.id != current_user.id %}
-            <form class="delete-form" method="post" action="/rfcai/labeler/admin/users/{{ u.id }}/delete">
-              <button class="delete-btn" type="submit"
-                      onclick="return confirm('Delete user {{ u.username }}?')">Delete</button>
-            </form>
-            {% else %}
-            <span style="color: var(--muted); font-size: 12px;">you</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+    <div class="section-title" style="margin-bottom:10px;">Users</div>
+    <div class="users-panel">
+      <table>
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Created at</th>
+            <th>Last login</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td style="font-weight:500;">{{ u.username }}</td>
+            <td>
+              <span class="role-badge {{ u.role }}">{{ u.role }}</span>
+            </td>
+            <td class="muted">{{ u.created_at }}</td>
+            <td class="muted">{{ u.last_login_at or '—' }}</td>
+            <td>
+              {% if u.id != current_user.id %}
+              <form class="delete-form" method="post"
+                    action="/rfcai/labeler/admin/users/{{ u.id }}/delete">
+                <button class="btn btn-danger"
+                        style="padding:4px 10px; font-size:12px;"
+                        type="submit"
+                        onclick="return confirm('Delete user {{ u.username }}?')">Delete</button>
+              </form>
+              {% else %}
+              <span class="subtle" style="font-size:12px;">you</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
 
-    <div class="section-title">Add user</div>
-    <form class="add-form" method="post" action="/rfcai/labeler/admin/users">
-      <div class="field">
-        <label for="new-username">Username</label>
-        <input type="text" id="new-username" name="username" required autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="new-password">Password</label>
-        <input type="password" id="new-password" name="password"
-               placeholder="leave blank to auto-generate" autocomplete="new-password">
-      </div>
-      <button type="submit">Create</button>
-    </form>
+    <div class="add-panel">
+      <div class="section-title">Add user</div>
+      <form method="post" action="/rfcai/labeler/admin/users">
+        <div class="add-form-row">
+          <div class="field">
+            <label for="new-username">Username</label>
+            <input type="text" id="new-username" name="username"
+                   required autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="new-password">Password</label>
+            <input type="password" id="new-password" name="password"
+                   placeholder="leave blank to auto-generate"
+                   autocomplete="new-password">
+          </div>
+          <button type="submit" class="btn btn-primary"
+                  style="padding:10px 20px; align-self:flex-end;">Create</button>
+        </div>
+      </form>
+    </div>
   </main>
 {% endblock %}

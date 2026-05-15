@@ -2,19 +2,55 @@
 
 {% block title %}RFCAI Labeler — Sign in{% endblock %}
 
-{% block page_title %}Sign in{% endblock %}
+{% block page_title %}
+  <span class="project">RF Connector AI</span>
+  <span class="sep">·</span>
+  <span class="app">Labeler</span>
+{% endblock %}
 
 {% block content %}
   <main class="centered-page">
     <div class="card">
-      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+      <!-- Mini brand mark inside the card -->
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
+        <div class="brand-mark" aria-hidden="true" style="width:32px;height:32px;border-radius:8px;">
+          <svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="7" cy="7" r="4.5" stroke="white" stroke-width="1.5"/>
+            <circle cx="7" cy="7" r="1.5" fill="white"/>
+          </svg>
+        </div>
+        <span style="font-size:12px; font-weight:700; text-transform:uppercase;
+                     letter-spacing:0.8px; color:var(--muted);">RFCAI</span>
+      </div>
+
+      <p class="card-headline">Welcome to RFCAI Labeler</p>
+      <p class="card-sub">Sign in to manage training data.</p>
+
+      {% if error %}
+      <div class="error" style="
+        background: rgba(248,113,113,0.08);
+        border: 1px solid rgba(248,113,113,0.3);
+        border-radius: 6px;
+        padding: 8px 12px;
+        margin-bottom: 20px;
+        font-size: 13px;
+      ">{{ error }}</div>
+      {% endif %}
+
       <form method="post" action="/rfcai/labeler/login">
         <input type="hidden" name="next" value="{{ next }}">
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" required autofocus autocomplete="username">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" required autocomplete="current-password">
-        <button type="submit">Sign in</button>
+        <div class="field" style="margin-bottom:14px;">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username"
+                 required autofocus autocomplete="username">
+        </div>
+        <div class="field" style="margin-bottom:20px;">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password"
+                 required autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-full"
+                style="padding:11px 14px; font-size:14px;">Sign in</button>
       </form>
     </div>
   </main>
