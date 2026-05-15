@@ -260,6 +260,11 @@
                 onclick="this.closest('form').submit()">Sign out</button>
       </form>
     </div>
+    {% elif request.url.path != '/rfcai/labeler/login' %}
+    <div class="header-auth">
+      <a href="/rfcai/labeler/login" class="btn btn-secondary"
+         style="padding: 5px 12px; font-size: 12px; text-decoration: none;">Sign in</a>
+    </div>
     {% endif %}
   </header>
   {% block content %}{% endblock %}
