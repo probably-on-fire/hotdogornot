@@ -101,6 +101,21 @@ def _users_db_path() -> Path:
     )).resolve()
 
 
+def _source_backup_root() -> Path:
+    """Immutable backup of source images uploaded via /upload-train and
+    /upload-test. Every saved file is hardlinked here; deleting the
+    working copy in _data_root() / _test_holdout_root() leaves the
+    backup intact. Hardlinks add zero disk cost (same inode).
+
+    Not exposed via any read route — invisible to /grid, /img,
+    /snapshots. Operators can tar it for offsite backup.
+    """
+    return Path(os.environ.get(
+        "RFCAI_SOURCE_BACKUP_DIR",
+        "/opt/rfcai/repo/training/data/source_backup",
+    )).resolve()
+
+
 CANONICAL_FAMILIES = ["SMA", "3.5mm", "2.92mm", "2.4mm", "1.85mm"]
 
 
@@ -386,6 +401,31 @@ def require_admin(request: Request) -> _auth.User:
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+
+def _backup_hardlink(src: Path, cls: str, backup_root: Path) -> None:
+    """Create an immutable hardlink of `src` under `backup_root/<cls>/`.
+
+    Idempotent — re-running on an existing backup path is a no-op (the
+    FileExistsError is swallowed). Failures are not raised: we'd rather
+    keep the upload's 200 OK than fail the request because the backup
+    filesystem hiccupped. (Hardlink-across-filesystems is the most
+    common failure mode and we log it for surface visibility.)
+    """
+    import logging
+    try:
+        target_dir = backup_root / cls
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / src.name
+        try:
+            os.link(src, target)
+        except FileExistsError:
+            pass  # idempotent
+    except OSError as e:
+        logging.getLogger("rfcai.labeler").warning(
+            "source backup hardlink failed for %s -> %s/%s: %s",
+            src, backup_root, cls, e,
+        )
 
 
 def create_router() -> APIRouter:
@@ -748,6 +788,7 @@ def create_router() -> APIRouter:
             data = await image.read()
             dst.write_bytes(data)
             saved.append({"cls": cls, "path": str(dst)})
+            _backup_hardlink(dst, cls, _source_backup_root())
         global _signals_cache
         _signals_cache = {}
         return {"saved": saved, "errors": errors}
@@ -784,6 +825,7 @@ def create_router() -> APIRouter:
             data = await image.read()
             dst.write_bytes(data)
             saved.append({"cls": cls, "path": str(dst)})
+            _backup_hardlink(dst, cls, _source_backup_root())
         return {"saved": saved, "errors": errors}
 
     @r.post("/upload-video", response_class=HTMLResponse)

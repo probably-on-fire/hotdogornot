@@ -667,3 +667,109 @@ def test_admin_users_cannot_delete_self(tmp_path, monkeypatch):
     assert r.status_code == 303
     assert "error=" in r.headers["location"]
     assert _auth.get_user_by_username(db, "alice") is not None
+
+
+def test_upload_train_creates_backup_hardlink(client, labeler_dirs, tmp_path, monkeypatch):
+    labeled, _, _ = labeler_dirs
+    backup = tmp_path / "source_backup"
+    monkeypatch.setenv("RFCAI_SOURCE_BACKUP_DIR", str(backup))
+
+    r = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "2.4mm-M"},
+        files=[("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r.status_code == 200
+    working_path = Path(r.json()["saved"][0]["path"])
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    backup_path = backup / "2.4mm-M" / f"photo_{today}_a.jpg"
+
+    assert working_path.exists()
+    assert backup_path.exists()
+    # Hardlinks share inode: stat().st_ino matches.
+    assert working_path.stat().st_ino == backup_path.stat().st_ino
+
+
+def test_backup_survives_working_copy_deletion(client, labeler_dirs, tmp_path, monkeypatch):
+    labeled, _, _ = labeler_dirs
+    backup = tmp_path / "source_backup"
+    monkeypatch.setenv("RFCAI_SOURCE_BACKUP_DIR", str(backup))
+
+    r = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "SMA-F"},
+        files=[("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    working_path = Path(r.json()["saved"][0]["path"])
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    backup_path = backup / "SMA-F" / f"photo_{today}_a.jpg"
+
+    # Delete via the /delete route (the labeler UI's path).
+    r2 = client.post(
+        "/rfcai/labeler/delete",
+        auth=("u", "p"),
+        data={"path": str(working_path)},
+    )
+    assert r2.status_code == 200
+    assert not working_path.exists()
+    # Backup survives.
+    assert backup_path.exists()
+    assert backup_path.read_bytes() == b"\xff\xd8\xff\xd9"
+
+
+def test_upload_test_creates_backup_hardlink(client, labeler_dirs, tmp_path, monkeypatch):
+    _, holdout, _ = labeler_dirs
+    backup = tmp_path / "source_backup"
+    monkeypatch.setenv("RFCAI_SOURCE_BACKUP_DIR", str(backup))
+
+    r = client.post(
+        "/rfcai/labeler/upload-test",
+        auth=("u", "p"),
+        data={"cls": "2.4mm-F"},
+        files=[("images", ("h.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r.status_code == 200
+    working_path = Path(r.json()["saved"][0]["path"])
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Holdout filenames don't carry the photo_ prefix.
+    backup_path = backup / "2.4mm-F" / f"{today}_h.jpg"
+
+    assert working_path.exists()
+    assert backup_path.exists()
+    assert working_path.stat().st_ino == backup_path.stat().st_ino
+
+
+def test_backup_hardlink_idempotent_on_dup_rename(client, labeler_dirs, tmp_path, monkeypatch):
+    """The upload-train dup rename appends _dup<N>. The backup hardlink
+    should also use the unique server-side filename, so a re-upload of
+    the same content doesn't collide in the backup root."""
+    labeled, _, _ = labeler_dirs
+    backup = tmp_path / "source_backup"
+    monkeypatch.setenv("RFCAI_SOURCE_BACKUP_DIR", str(backup))
+
+    # First upload.
+    r1 = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "1.85mm-M"},
+        files=[("images", ("dup.jpg", b"\xff\xd8\xff\xd9A", "image/jpeg"))],
+    )
+    assert r1.status_code == 200
+    # Second upload with same filename — server renames to _dup1.
+    r2 = client.post(
+        "/rfcai/labeler/upload-train",
+        auth=("u", "p"),
+        data={"cls": "1.85mm-M"},
+        files=[("images", ("dup.jpg", b"\xff\xd8\xff\xd9B", "image/jpeg"))],
+    )
+    assert r2.status_code == 200
+    p1 = Path(r1.json()["saved"][0]["path"])
+    p2 = Path(r2.json()["saved"][0]["path"])
+    assert p1.name != p2.name  # server should have renamed one
+    # Both backup hardlinks exist with distinct names.
+    backup_p1 = backup / "1.85mm-M" / p1.name
+    backup_p2 = backup / "1.85mm-M" / p2.name
+    assert backup_p1.exists()
+    assert backup_p2.exists()
