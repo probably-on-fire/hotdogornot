@@ -82,6 +82,15 @@ def _videos_root() -> Path:
     )).resolve()
 
 
+def _snapshot_root() -> Path:
+    """Directory holding pre-built tarball snapshots of training data.
+    Public-readable downloads for forks/collaborators (see /snapshots route)."""
+    return Path(os.environ.get(
+        "RFCAI_SNAPSHOT_DIR",
+        "/opt/rfcai/repo/training/data/snapshots",
+    )).resolve()
+
+
 CANONICAL_FAMILIES = ["SMA", "3.5mm", "2.92mm", "2.4mm", "1.85mm"]
 
 
@@ -436,6 +445,44 @@ def create_router() -> APIRouter:
         if not p.exists():
             raise HTTPException(404, "not found")
         return FileResponse(str(p))
+
+    @r.get("/snapshots")
+    def list_snapshots():
+        """List downloadable dataset snapshots. Public — same posture as
+        the rest of the read API."""
+        root = _snapshot_root()
+        if not root.is_dir():
+            return {"snapshots": []}
+        out: list[dict] = []
+        for p in sorted(root.iterdir()):
+            if not p.is_file():
+                continue
+            if p.suffix not in (".gz", ".zip", ".tar"):
+                continue
+            out.append({
+                "name": p.name,
+                "size_bytes": p.stat().st_size,
+                "url": f"/rfcai/labeler/snapshots/{p.name}",
+            })
+        return {"snapshots": out}
+
+    @r.get("/snapshots/{name}")
+    def serve_snapshot(name: str):
+        """Stream a dataset snapshot to the caller. Public download —
+        anyone with the URL can grab it. Filenames are constrained to
+        the snapshot root; no path traversal possible."""
+        if "/" in name or ".." in name or name.startswith("."):
+            raise HTTPException(400, "invalid snapshot name")
+        root = _snapshot_root()
+        path = root / name
+        try:
+            path.resolve().relative_to(root)
+        except ValueError:
+            raise HTTPException(400, "invalid path")
+        if not path.is_file():
+            raise HTTPException(404, "snapshot not found")
+        media = "application/gzip" if name.endswith(".gz") else "application/octet-stream"
+        return FileResponse(path, media_type=media, filename=name)
 
     @r.post("/delete", response_class=HTMLResponse)
     def delete(path: str = Form(...), _: str = Depends(_require_basic_auth)):

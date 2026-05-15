@@ -293,3 +293,44 @@ def test_upload_test_default_session_is_today(client, labeler_dirs):
     assert f"{today}_h.jpg" in path
     # Holdout filenames don't carry the "photo_" prefix.
     assert "photo_" not in Path(path).name
+
+
+def test_snapshots_lists_tarballs(tmp_path, monkeypatch):
+    snap = tmp_path / "snapshots"
+    snap.mkdir()
+    (snap / "rfcai_session_2026-05-14.tar.gz").write_bytes(b"\x1f\x8b\x08\x00" + b"\x00" * 8)
+    (snap / "ignored_readme.txt").write_bytes(b"not a tarball")
+    monkeypatch.setenv("RFCAI_SNAPSHOT_DIR", str(snap))
+    monkeypatch.setenv("LABELER_USER", "u")
+    monkeypatch.setenv("LABELER_PASS", "p")
+    app = FastAPI()
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+    r = c.get("/rfcai/labeler/snapshots")
+    assert r.status_code == 200
+    body = r.json()
+    names = [s["name"] for s in body["snapshots"]]
+    assert "rfcai_session_2026-05-14.tar.gz" in names
+    assert "ignored_readme.txt" not in names  # only tar/gz/zip
+
+
+def test_snapshot_download_and_path_traversal_rejected(tmp_path, monkeypatch):
+    snap = tmp_path / "snapshots"
+    snap.mkdir()
+    (snap / "ok.tar.gz").write_bytes(b"\x1f\x8b\x08\x00contents")
+    monkeypatch.setenv("RFCAI_SNAPSHOT_DIR", str(snap))
+    monkeypatch.setenv("LABELER_USER", "u")
+    monkeypatch.setenv("LABELER_PASS", "p")
+    app = FastAPI()
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+    # Happy path: download the file.
+    r = c.get("/rfcai/labeler/snapshots/ok.tar.gz")
+    assert r.status_code == 200
+    assert r.content.startswith(b"\x1f\x8b")
+    # Traversal: dotdot must be rejected.
+    r = c.get("/rfcai/labeler/snapshots/..%2Fetc%2Fpasswd")
+    assert r.status_code in (400, 404)
+    # Missing file → 404.
+    r = c.get("/rfcai/labeler/snapshots/nope.tar.gz")
+    assert r.status_code == 404
