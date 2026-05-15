@@ -373,6 +373,14 @@ def require_admin(request: Request) -> _auth.User:
         # Stale session — clear it.
         request.session.clear()
 
+    # Try Bearer token next.
+    auth_header_lower = (request.headers.get("authorization") or "").lower()
+    if auth_header_lower.startswith("bearer "):
+        token = request.headers["authorization"].split(None, 1)[1].strip()
+        user = _auth.authenticate_token(db_path, token)
+        if user is not None:
+            return user
+
     # Fall back to HTTP Basic.
     auth_header = request.headers.get("authorization", "")
     if auth_header.lower().startswith("basic "):
@@ -919,6 +927,40 @@ def create_router() -> APIRouter:
             f"from {saved_video.name} into <code>{target_cls}/</code> "
             f"({len(frames)} frames at {fps} fps). Refresh the grid to see them.</div>"
         )
+
+    @r.post("/api-tokens/exchange")
+    def api_tokens_exchange(
+        username: str = Form(...),
+        password: str = Form(...),
+        name: str = Form("API client"),
+    ):
+        """Exchange username+password for a long-lived API token.
+
+        Returns the plaintext token exactly once — the caller stores it
+        and sends it as `Authorization: Bearer <token>` on subsequent
+        requests. The server stores only the scrypt hash.
+
+        Public route. Rate limiting is delegated to nginx; if abuse
+        becomes a concern we can add per-IP throttling here.
+        """
+        db_path = _users_db_path()
+        user = _auth.authenticate(db_path, username, password)
+        if user is None:
+            raise HTTPException(401, "invalid credentials")
+        # Cap name length so admins listing tokens see something sensible.
+        token_name = (name or "API client")[:64].strip() or "API client"
+        _record, plaintext = _auth.create_token(
+            db_path, user.id, name=token_name,
+        )
+        return {
+            "token": plaintext,
+            "name": token_name,
+            "user": {
+                "id": user.id,
+                "username": user.username,
+                "role": user.role,
+            },
+        }
 
     return r
 

@@ -13,6 +13,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+
+# ---------------------------------------------------------------------------
+# DB connection helper (enables FK enforcement on every connection)
+# ---------------------------------------------------------------------------
+
+
+def _connect(db_path: Path) -> sqlite3.Connection:
+    """Open a sqlite3 connection with PRAGMA foreign_keys = ON."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
 # ---------------------------------------------------------------------------
 # Exceptions
 # ---------------------------------------------------------------------------
@@ -37,11 +49,20 @@ class User:
     last_login_at: Optional[str]
 
 
+@dataclass
+class ApiToken:
+    id: int
+    user_id: int
+    name: str
+    created_at: str
+    last_used_at: Optional[str]
+
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
 
-_CREATE_TABLE_SQL = """
+_CREATE_USERS_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     username       TEXT    UNIQUE NOT NULL,
@@ -52,11 +73,23 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """
 
+_CREATE_API_TOKENS_SQL = """
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT    NOT NULL,
+    token_hash   TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT
+)
+"""
+
 
 def init_db(db_path: Path) -> None:
-    """Create the users table if it does not already exist. Idempotent."""
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(_CREATE_TABLE_SQL)
+    """Create the users and api_tokens tables if they do not already exist. Idempotent."""
+    with _connect(db_path) as conn:
+        conn.execute(_CREATE_USERS_SQL)
+        conn.execute(_CREATE_API_TOKENS_SQL)
         conn.commit()
 
 
@@ -70,6 +103,11 @@ def _row_to_user(row: tuple) -> User:
         created_at=created_at,
         last_login_at=last_login_at,
     )
+
+
+def _row_to_token(row: tuple) -> ApiToken:
+    return ApiToken(id=row[0], user_id=row[1], name=row[2],
+                    created_at=row[3], last_used_at=row[4])
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +180,7 @@ def create_user(
     """
     password_hash = hash_password(password)
     try:
-        with sqlite3.connect(db_path) as conn:
+        with _connect(db_path) as conn:
             cursor = conn.execute(
                 "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
                 (username, password_hash, role),
@@ -160,7 +198,7 @@ def create_user(
 
 
 def _fetch_row_by_id(db_path: Path, user_id: int) -> Optional[tuple]:
-    with sqlite3.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         return conn.execute(
             "SELECT id, username, password_hash, role, created_at, last_login_at "
             "FROM users WHERE id = ?",
@@ -170,7 +208,7 @@ def _fetch_row_by_id(db_path: Path, user_id: int) -> Optional[tuple]:
 
 def get_user_by_username(db_path: Path, username: str) -> Optional[User]:
     """Return the User for *username*, or None if not found."""
-    with sqlite3.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         row = conn.execute(
             "SELECT id, username, password_hash, role, created_at, last_login_at "
             "FROM users WHERE username = ?",
@@ -193,7 +231,7 @@ def authenticate(db_path: Path, username: str, password: str) -> Optional[User]:
     if not verify_password(password, user.password_hash):
         return None
     # Update last_login_at
-    with sqlite3.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         conn.execute(
             "UPDATE users SET last_login_at = datetime('now') WHERE id = ?",
             (user.id,),
@@ -206,7 +244,7 @@ def authenticate(db_path: Path, username: str, password: str) -> Optional[User]:
 
 def list_users(db_path: Path) -> list[User]:
     """Return all users ordered by id."""
-    with sqlite3.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         rows = conn.execute(
             "SELECT id, username, password_hash, role, created_at, last_login_at "
             "FROM users ORDER BY id"
@@ -216,7 +254,7 @@ def list_users(db_path: Path) -> list[User]:
 
 def delete_user(db_path: Path, user_id: int) -> None:
     """Delete the user with *user_id*. No-op if not found."""
-    with sqlite3.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
 
@@ -228,9 +266,80 @@ def update_last_login(db_path: Path, user_id: int) -> None:
     User object and don't need to re-authenticate (e.g. session resume).
     ``authenticate()`` already calls this internally on success.
     """
-    with sqlite3.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         conn.execute(
             "UPDATE users SET last_login_at = datetime('now') WHERE id = ?",
             (user_id,),
         )
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# API token helpers
+# ---------------------------------------------------------------------------
+
+
+def create_token(db_path: Path, user_id: int, name: str) -> tuple[ApiToken, str]:
+    """Generate a new API token for `user_id`.
+
+    Returns (record, plaintext). The plaintext is shown to the caller
+    exactly once — only the hash is stored. Subsequent verification
+    uses verify_password() against the hash.
+    """
+    plaintext = secrets.token_urlsafe(32)
+    token_hash = hash_password(plaintext)
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO api_tokens (user_id, name, token_hash) VALUES (?, ?, ?)",
+            (user_id, name, token_hash),
+        )
+        token_id = cur.lastrowid
+        row = conn.execute(
+            "SELECT id, user_id, name, created_at, last_used_at FROM api_tokens WHERE id = ?",
+            (token_id,),
+        ).fetchone()
+    return _row_to_token(row), plaintext
+
+
+def authenticate_token(db_path: Path, plaintext_token: str) -> Optional[User]:
+    """Look up a token across all rows; if any hash matches, update
+    last_used_at and return the associated user. Returns None on
+    mismatch, missing user, or malformed input."""
+    if not plaintext_token:
+        return None
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, token_hash FROM api_tokens"
+        ).fetchall()
+    for tok_id, user_id, token_hash in rows:
+        if verify_password(plaintext_token, token_hash):
+            # Update last_used_at + look up the user atomically.
+            with _connect(db_path) as conn:
+                conn.execute(
+                    "UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?",
+                    (tok_id,),
+                )
+                urow = conn.execute(
+                    "SELECT id, username, password_hash, role, created_at, last_login_at "
+                    "FROM users WHERE id = ?",
+                    (user_id,),
+                ).fetchone()
+            if urow is None:
+                return None  # user was deleted; token is orphaned
+            return User(*urow)
+    return None
+
+
+def list_tokens_for_user(db_path: Path, user_id: int) -> list[ApiToken]:
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, name, created_at, last_used_at "
+            "FROM api_tokens WHERE user_id = ? ORDER BY id",
+            (user_id,),
+        ).fetchall()
+    return [_row_to_token(r) for r in rows]
+
+
+def delete_token(db_path: Path, token_id: int) -> None:
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM api_tokens WHERE id = ?", (token_id,))

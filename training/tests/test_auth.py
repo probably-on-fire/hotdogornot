@@ -108,3 +108,52 @@ def test_init_db_is_idempotent(db_path):
     auth.create_user(db_path, "alice", "pw", role="admin")
     auth.init_db(db_path)  # third call must not nuke data
     assert auth.get_user_by_username(db_path, "alice") is not None
+
+
+def test_create_token_returns_plaintext_only_once(db_path):
+    auth.init_db(db_path)
+    user = auth.create_user(db_path, "alice", "pw", role="admin")
+    tok, plaintext = auth.create_token(db_path, user.id, name="iPhone")
+    assert plaintext
+    assert tok.user_id == user.id
+    assert tok.name == "iPhone"
+    # Plaintext not retrievable via list — only the hash is stored.
+    tokens = auth.list_tokens_for_user(db_path, user.id)
+    assert len(tokens) == 1
+    assert plaintext not in repr(tokens[0])  # ApiToken has no token_hash field
+
+
+def test_authenticate_token_returns_user_on_match(db_path):
+    auth.init_db(db_path)
+    user = auth.create_user(db_path, "alice", "pw", role="admin")
+    _, plaintext = auth.create_token(db_path, user.id, name="iPhone")
+    matched = auth.authenticate_token(db_path, plaintext)
+    assert matched is not None
+    assert matched.username == "alice"
+    assert matched.id == user.id
+
+
+def test_authenticate_token_returns_none_for_invalid(db_path):
+    auth.init_db(db_path)
+    user = auth.create_user(db_path, "alice", "pw", role="admin")
+    auth.create_token(db_path, user.id, name="iPhone")
+    assert auth.authenticate_token(db_path, "nope") is None
+    assert auth.authenticate_token(db_path, "") is None
+
+
+def test_delete_token_stops_authenticating(db_path):
+    auth.init_db(db_path)
+    user = auth.create_user(db_path, "alice", "pw", role="admin")
+    tok, plaintext = auth.create_token(db_path, user.id, name="iPhone")
+    assert auth.authenticate_token(db_path, plaintext) is not None
+    auth.delete_token(db_path, tok.id)
+    assert auth.authenticate_token(db_path, plaintext) is None
+
+
+def test_token_orphaned_by_user_deletion(db_path):
+    auth.init_db(db_path)
+    user = auth.create_user(db_path, "alice", "pw", role="admin")
+    _, plaintext = auth.create_token(db_path, user.id, name="iPhone")
+    # Cascade should delete the token, so authentication returns None.
+    auth.delete_user(db_path, user.id)
+    assert auth.authenticate_token(db_path, plaintext) is None

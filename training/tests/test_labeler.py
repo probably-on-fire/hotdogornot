@@ -741,6 +741,103 @@ def test_upload_test_creates_backup_hardlink(client, labeler_dirs, tmp_path, mon
     assert working_path.stat().st_ino == backup_path.stat().st_ino
 
 
+def _build_app_with_session():
+    from fastapi import FastAPI
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    return app
+
+
+def test_api_tokens_exchange_returns_plaintext(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    c = TestClient(_build_app_with_session())
+    r = c.post(
+        "/rfcai/labeler/api-tokens/exchange",
+        data={"username": "alice", "password": "pw", "name": "iPhone"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "token" in body
+    assert len(body["token"]) > 20
+    assert body["user"]["username"] == "alice"
+    assert body["name"] == "iPhone"
+
+
+def test_api_tokens_exchange_rejects_bad_password(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    c = TestClient(_build_app_with_session())
+    r = c.post(
+        "/rfcai/labeler/api-tokens/exchange",
+        data={"username": "alice", "password": "wrong", "name": "iPhone"},
+    )
+    assert r.status_code == 401
+
+
+def test_bearer_token_auth_works_on_write_routes(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    monkeypatch.setenv("RFCAI_LABELED_DIR", str(tmp_path / "labeled"))
+    (tmp_path / "labeled").mkdir()
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    c = TestClient(_build_app_with_session())
+    # Exchange.
+    r = c.post(
+        "/rfcai/labeler/api-tokens/exchange",
+        data={"username": "alice", "password": "pw", "name": "iPhone"},
+    )
+    assert r.status_code == 200
+    token = r.json()["token"]
+
+    # Now hit a write route with the Bearer token (no cookie, no Basic).
+    r2 = c.post(
+        "/rfcai/labeler/upload-train",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"cls": "2.4mm-M"},
+        files=[("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
+    assert r2.status_code == 200
+
+
+def test_bearer_token_rejected_after_deletion(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    c = TestClient(_build_app_with_session())
+    r = c.post(
+        "/rfcai/labeler/api-tokens/exchange",
+        data={"username": "alice", "password": "pw", "name": "iPhone"},
+    )
+    token = r.json()["token"]
+    # Now nuke the user.
+    user = _auth.get_user_by_username(db, "alice")
+    _auth.delete_user(db, user.id)
+    # Bearer must now 401 (token orphaned by cascade).
+    r2 = c.post(
+        "/rfcai/labeler/delete",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"path": "/dev/null"},
+    )
+    assert r2.status_code == 401
+
+
 def test_backup_hardlink_idempotent_on_dup_rename(client, labeler_dirs, tmp_path, monkeypatch):
     """The upload-train dup rename appends _dup<N>. The backup hardlink
     should also use the unique server-side filename, so a re-upload of
