@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RFCAI Labeler — Admin / Users</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #161a22;
+      --panel-2: #1d222c;
+      --border: #2a313e;
+      --text: #d6dde8;
+      --muted: #8a93a3;
+      --accent: #4f8cff;
+      --red: #f87171;
+      --green: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 14px;
+    }
+    header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex; align-items: center; gap: 12px;
+    }
+    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+    header a { color: var(--accent); font-size: 13px; text-decoration: none; }
+    header a:hover { text-decoration: underline; }
+    main { padding: 24px 28px; max-width: 860px; }
+    .banner {
+      padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 13px;
+    }
+    .banner.error { background: rgba(248,113,113,0.12); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+    .banner.success { background: rgba(74,222,128,0.10); color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+    .pw-block {
+      margin-top: 8px; padding: 8px 12px;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px;
+      font-family: ui-monospace, monospace; font-size: 13px; color: var(--text);
+      user-select: all;
+    }
+    .pw-note { font-size: 11px; color: var(--muted); margin-top: 4px; font-family: inherit; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 32px; }
+    th {
+      text-align: left; padding: 7px 12px;
+      border-bottom: 1px solid var(--border); color: var(--muted);
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; font-weight: 600;
+    }
+    td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    .role-badge {
+      display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px;
+      font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+      background: rgba(79,140,255,0.15); color: var(--accent);
+    }
+    .delete-form { display: inline; }
+    .delete-btn {
+      padding: 4px 10px; font-size: 12px; font-weight: 600;
+      border-radius: 4px; border: 1px solid rgba(248,113,113,0.4);
+      color: var(--red); background: transparent; cursor: pointer;
+    }
+    .delete-btn:hover { background: rgba(248,113,113,0.12); }
+    .section-title { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text); }
+    .add-form {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+      padding: 18px 20px; display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+    }
+    .field { display: flex; flex-direction: column; gap: 4px; }
+    .field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+    .field input {
+      padding: 7px 10px; background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px; font-size: 13px; outline: none;
+      min-width: 180px;
+    }
+    .field input:focus { border-color: var(--accent); }
+    .add-form button[type="submit"] {
+      padding: 8px 18px; background: var(--accent); color: white;
+      border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .add-form button[type="submit"]:hover { filter: brightness(1.1); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Labeler — Admin / Users</h1>
+    <a href="/rfcai/labeler/">&larr; Back to labeler</a>
+  </header>
+  <main>
+    {% if error %}
+    <div class="banner error">{{ error }}</div>
+    {% endif %}
+    {% if created %}
+    <div class="banner success">
+      Created user <strong>{{ created }}</strong>.
+      {% if new_password %}
+      <div class="pw-block">{{ new_password }}</div>
+      <div class="pw-note">Save this — it will not be shown again.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if deleted %}
+    <div class="banner success">Deleted user <strong>{{ deleted }}</strong>.</div>
+    {% endif %}
+
+    <table>
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Role</th>
+          <th>Created at</th>
+          <th>Last login</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.username }}</td>
+          <td><span class="role-badge">{{ u.role }}</span></td>
+          <td style="color: var(--muted);">{{ u.created_at }}</td>
+          <td style="color: var(--muted);">{{ u.last_login_at or '—' }}</td>
+          <td>
+            {% if u.id != current_user.id %}
+            <form class="delete-form" method="post" action="/rfcai/labeler/admin/users/{{ u.id }}/delete">
+              <button class="delete-btn" type="submit"
+                      onclick="return confirm('Delete user {{ u.username }}?')">Delete</button>
+            </form>
+            {% else %}
+            <span style="color: var(--muted); font-size: 12px;">you</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <div class="section-title">Add user</div>
+    <form class="add-form" method="post" action="/rfcai/labeler/admin/users">
+      <div class="field">
+        <label for="new-username">Username</label>
+        <input type="text" id="new-username" name="username" required autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="new-password">Password</label>
+        <input type="password" id="new-password" name="password"
+               placeholder="leave blank to auto-generate" autocomplete="new-password">
+      </div>
+      <button type="submit">Create</button>
+    </form>
+  </main>
+</body>
+</html>

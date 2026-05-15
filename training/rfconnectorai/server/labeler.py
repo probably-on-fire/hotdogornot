@@ -573,6 +573,87 @@ def create_router() -> APIRouter:
         request.session.clear()
         return RedirectResponse("/rfcai/labeler/", status_code=303)
 
+    @r.get("/admin/users", response_class=HTMLResponse)
+    def admin_users_page(
+        request: Request,
+        user=Depends(require_admin),
+        created: str = "",
+        deleted: str = "",
+        error: str = "",
+        password: str = "",
+    ):
+        users = _auth.list_users(_users_db_path())
+        return templates.TemplateResponse(
+            request,
+            "labeler/admin_users.html",
+            {
+                "users": users,
+                "current_user": user,
+                "created": created,
+                "deleted": deleted,
+                "error": error,
+                "new_password": password,
+            },
+        )
+
+    @r.post("/admin/users")
+    def admin_users_create(
+        request: Request,
+        user=Depends(require_admin),
+        username: str = Form(...),
+        password: str = Form(""),
+    ):
+        from fastapi.responses import RedirectResponse
+        username = username.strip()
+        if not username or not username.replace("_", "").replace("-", "").isalnum():
+            qs = urllib.parse.urlencode({
+                "error": f"invalid username {username!r} (use letters, digits, _ or -)",
+            })
+            return RedirectResponse(f"/rfcai/labeler/admin/users?{qs}", status_code=303)
+
+        # Empty password -> generate one and surface in the redirect.
+        gen_password = ""
+        if not password:
+            password = secrets.token_urlsafe(18)
+            gen_password = password
+
+        try:
+            new_user = _auth.create_user(
+                _users_db_path(), username, password, role="admin",
+            )
+        except _auth.UserExists:
+            qs = urllib.parse.urlencode({
+                "error": f"username {username!r} already exists",
+            })
+            return RedirectResponse(f"/rfcai/labeler/admin/users?{qs}", status_code=303)
+
+        qs = urllib.parse.urlencode({
+            "created": new_user.username,
+            "password": gen_password,  # empty if admin supplied one
+        })
+        return RedirectResponse(f"/rfcai/labeler/admin/users?{qs}", status_code=303)
+
+    @r.post("/admin/users/{user_id}/delete")
+    def admin_users_delete(
+        user_id: int,
+        user=Depends(require_admin),
+    ):
+        from fastapi.responses import RedirectResponse
+        if user_id == user.id:
+            qs = urllib.parse.urlencode({
+                "error": "you cannot delete your own account",
+            })
+            return RedirectResponse(f"/rfcai/labeler/admin/users?{qs}", status_code=303)
+        target = None
+        for u in _auth.list_users(_users_db_path()):
+            if u.id == user_id:
+                target = u
+                break
+        _auth.delete_user(_users_db_path(), user_id)
+        deleted_name = target.username if target else f"id-{user_id}"
+        qs = urllib.parse.urlencode({"deleted": deleted_name})
+        return RedirectResponse(f"/rfcai/labeler/admin/users?{qs}", status_code=303)
+
     @r.post("/delete", response_class=HTMLResponse)
     def delete(path: str = Form(...), user=Depends(require_admin)):
         p = _safe_path(path)

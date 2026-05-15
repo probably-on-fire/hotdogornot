@@ -492,3 +492,178 @@ def test_require_admin_accepts_session_cookie(tmp_path, monkeypatch):
     r = c.get("/protected")
     assert r.status_code == 200
     assert r.json()["username"] == "alice"
+
+
+def test_admin_users_requires_admin(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    # No auth -> 401.
+    r = c.get("/rfcai/labeler/admin/users")
+    assert r.status_code == 401
+
+
+def test_admin_users_lists_users_when_logged_in(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+    _auth.create_user(db, "bob", "pw", role="admin")
+
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    c.post(
+        "/rfcai/labeler/login",
+        data={"username": "alice", "password": "pw"},
+        follow_redirects=False,
+    )
+    r = c.get("/rfcai/labeler/admin/users")
+    assert r.status_code == 200
+    assert b"alice" in r.content
+    assert b"bob" in r.content
+
+
+def test_admin_users_create_with_blank_password_generates_one(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    c.post("/rfcai/labeler/login",
+           data={"username": "alice", "password": "pw"},
+           follow_redirects=False)
+    r = c.post(
+        "/rfcai/labeler/admin/users",
+        data={"username": "carol", "password": ""},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    # The redirect location should include the new password in the query string.
+    loc = r.headers["location"]
+    assert "created=carol" in loc
+    assert "password=" in loc
+
+    # Verify the user exists in the DB.
+    fetched = _auth.get_user_by_username(db, "carol")
+    assert fetched is not None
+
+
+def test_admin_users_create_rejects_duplicate(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    c.post("/rfcai/labeler/login",
+           data={"username": "alice", "password": "pw"},
+           follow_redirects=False)
+    r = c.post(
+        "/rfcai/labeler/admin/users",
+        data={"username": "alice", "password": "newpw"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "error=" in r.headers["location"]
+
+
+def test_admin_users_create_rejects_invalid_username(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    c.post("/rfcai/labeler/login",
+           data={"username": "alice", "password": "pw"},
+           follow_redirects=False)
+    r = c.post(
+        "/rfcai/labeler/admin/users",
+        data={"username": "../../etc/passwd", "password": "pw"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "error=" in r.headers["location"]
+
+
+def test_admin_users_delete_other_user(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    alice = _auth.create_user(db, "alice", "pw", role="admin")
+    bob = _auth.create_user(db, "bob", "pw", role="admin")
+
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    c.post("/rfcai/labeler/login",
+           data={"username": "alice", "password": "pw"},
+           follow_redirects=False)
+    r = c.post(
+        f"/rfcai/labeler/admin/users/{bob.id}/delete",
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "deleted=bob" in r.headers["location"]
+    assert _auth.get_user_by_username(db, "bob") is None
+
+
+def test_admin_users_cannot_delete_self(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    alice = _auth.create_user(db, "alice", "pw", role="admin")
+
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    c.post("/rfcai/labeler/login",
+           data={"username": "alice", "password": "pw"},
+           follow_redirects=False)
+    r = c.post(
+        f"/rfcai/labeler/admin/users/{alice.id}/delete",
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "error=" in r.headers["location"]
+    assert _auth.get_user_by_username(db, "alice") is not None

@@ -243,6 +243,17 @@
       <span class="kbd">J</span> next &nbsp;
       <span class="kbd">K</span> prev
     </div>
+    <div style="margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px;">
+      {% if request.session.get('user_id') %}
+        <span>{{ request.session.get('username', '') }}</span>
+        <a href="/rfcai/labeler/admin/users" style="color: var(--accent); text-decoration: none;">Admin</a>
+        <form method="post" action="/rfcai/labeler/logout" style="display:inline; margin:0;">
+          <button type="submit" style="background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0;">Sign out</button>
+        </form>
+      {% else %}
+        <a href="/rfcai/labeler/login" style="color: var(--accent); text-decoration: none;">Sign in</a>
+      {% endif %}
+    </div>
   </header>
 
   <details class="uploads">
