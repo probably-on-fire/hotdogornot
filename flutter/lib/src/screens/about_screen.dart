@@ -13,7 +13,7 @@ import '../settings.dart';
 /// to a small "Powered by aired.com" footer beneath. The version
 /// string also doubles as the dev-mode unlock: 7 taps in quick
 /// succession flips dev mode, which reveals the Contribute tab and
-/// the Advanced (relay/token/labeler) panel.
+/// the Advanced (relay/token) panel.
 class AboutScreen extends StatefulWidget {
   const AboutScreen({
     super.key,
@@ -47,8 +47,6 @@ class _AboutScreenState extends State<AboutScreen> {
   // Advanced (dev-mode-gated) panel.
   late TextEditingController _relayCtl;
   late TextEditingController _tokenCtl;
-  late TextEditingController _userCtl;
-  late TextEditingController _passCtl;
   String? _saveStatus;
 
   @override
@@ -56,8 +54,6 @@ class _AboutScreenState extends State<AboutScreen> {
     super.initState();
     _relayCtl = TextEditingController(text: widget.settings.relayBaseUrl);
     _tokenCtl = TextEditingController(text: widget.settings.deviceToken);
-    _userCtl = TextEditingController(text: widget.settings.labelerUser);
-    _passCtl = TextEditingController(text: widget.settings.labelerPass);
     _loadVersion();
   }
 
@@ -68,8 +64,6 @@ class _AboutScreenState extends State<AboutScreen> {
     _requestNotesCtl.dispose();
     _relayCtl.dispose();
     _tokenCtl.dispose();
-    _userCtl.dispose();
-    _passCtl.dispose();
     super.dispose();
   }
 
@@ -209,9 +203,7 @@ class _AboutScreenState extends State<AboutScreen> {
   Future<void> _saveAdvanced() async {
     widget.settings
       ..relayBaseUrl = _relayCtl.text.trim()
-      ..deviceToken = _tokenCtl.text.trim()
-      ..labelerUser = _userCtl.text.trim()
-      ..labelerPass = _passCtl.text.trim();
+      ..deviceToken = _tokenCtl.text.trim();
     await widget.settings.save();
     if (!mounted) return;
     setState(() => _saveStatus = '✓ Saved');
@@ -448,8 +440,6 @@ class _AboutScreenState extends State<AboutScreen> {
                 _AdvancedSection(
                   relayCtl: _relayCtl,
                   tokenCtl: _tokenCtl,
-                  userCtl: _userCtl,
-                  passCtl: _passCtl,
                   onSave: _saveAdvanced,
                   status: _saveStatus,
                 ),
@@ -586,15 +576,11 @@ class _AdvancedSection extends StatelessWidget {
   const _AdvancedSection({
     required this.relayCtl,
     required this.tokenCtl,
-    required this.userCtl,
-    required this.passCtl,
     required this.onSave,
     required this.status,
   });
   final TextEditingController relayCtl;
   final TextEditingController tokenCtl;
-  final TextEditingController userCtl;
-  final TextEditingController passCtl;
   final VoidCallback onSave;
   final String? status;
 
@@ -634,21 +620,6 @@ class _AdvancedSection extends StatelessWidget {
               controller: tokenCtl,
               decoration: const InputDecoration(
                 labelText: 'Device token',
-              ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: userCtl,
-              decoration: const InputDecoration(
-                labelText: 'Labeler user',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: passCtl,
-              decoration: const InputDecoration(
-                labelText: 'Labeler password',
               ),
               obscureText: true,
             ),
@@ -708,4 +679,3 @@ class _OnDeviceToggle extends StatelessWidget {
     );
   }
 }
-

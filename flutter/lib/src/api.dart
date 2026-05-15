@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'auth.dart';
 import 'settings.dart';
 
 /// One file the server saved. The `path` round-trips through
@@ -138,9 +139,22 @@ class PredictResponse {
   }
 }
 
+/// Thrown when the labeler API returns 401. The Contribute screen
+/// catches this to show the sign-in card.
+class UnauthorizedException implements Exception {
+  const UnauthorizedException();
+  @override
+  String toString() => 'not signed in';
+}
+
 class ApiClient {
-  ApiClient(this.settings);
+  /// [auth] is optional — predict endpoints are anonymous. Pass an
+  /// [AuthService] for any labeler write endpoints that require a token.
+  ApiClient(this.settings, [this.auth]);
   final Settings settings;
+  final AuthService? auth;
+
+  Map<String, String> get _authHeaders => auth?.authHeaders ?? const {};
 
   /// POST a JPEG to the /predict endpoint and return parsed predictions.
   /// Native path — uses on-disk file, avoids reading bytes into memory.
@@ -289,12 +303,10 @@ class ApiClient {
   /// GET /labeler/stats — per-class real-capture counts.
   Future<LabelerStats> fetchLabelerStats() async {
     final req = http.Request('GET', Uri.parse(settings.labelerStatsUrl()));
-    final basic = base64Encode(utf8.encode(
-      '${settings.labelerUser}:${settings.labelerPass}',
-    ));
-    req.headers['Authorization'] = 'Basic $basic';
+    req.headers.addAll(_authHeaders);
     final streamed = await req.send().timeout(const Duration(seconds: 30));
     final resp = await http.Response.fromStream(streamed);
+    if (resp.statusCode == 401) throw const UnauthorizedException();
     if (resp.statusCode != 200) {
       throw _ApiError(resp.statusCode, resp.body);
     }
@@ -307,13 +319,11 @@ class ApiClient {
     final req = http.MultipartRequest(
       'POST', Uri.parse(settings.labelerDeleteUrl()),
     );
-    final basic = base64Encode(utf8.encode(
-      '${settings.labelerUser}:${settings.labelerPass}',
-    ));
-    req.headers['Authorization'] = 'Basic $basic';
+    req.headers.addAll(_authHeaders);
     req.fields['path'] = path;
     final streamed = await req.send().timeout(const Duration(seconds: 15));
     final resp = await http.Response.fromStream(streamed);
+    if (resp.statusCode == 401) throw const UnauthorizedException();
     if (resp.statusCode != 200) {
       throw _ApiError(resp.statusCode, resp.body);
     }
@@ -344,14 +354,12 @@ class ApiClient {
     required String filename,
   }) async {
     final req = http.MultipartRequest('POST', Uri.parse(url));
-    final basic = base64Encode(utf8.encode(
-      '${settings.labelerUser}:${settings.labelerPass}',
-    ));
-    req.headers['Authorization'] = 'Basic $basic';
+    req.headers.addAll(_authHeaders);
     req.fields.addAll(fields);
     req.files.add(http.MultipartFile.fromBytes(fileField, bytes, filename: filename));
     final streamed = await req.send().timeout(const Duration(seconds: 120));
     final resp = await http.Response.fromStream(streamed);
+    if (resp.statusCode == 401) throw const UnauthorizedException();
     if (resp.statusCode != 200) {
       throw _ApiError(resp.statusCode, resp.body);
     }

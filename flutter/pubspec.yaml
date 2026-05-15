@@ -56,6 +56,10 @@ dependencies:
   # Open https://aired.com from the About screen.
   url_launcher: ^6.3.0
 
+  # Encrypted on-device storage for the labeler API token (Keychain on
+  # iOS, EncryptedSharedPreferences on Android).
+  flutter_secure_storage: ^9.2.2
+
   # On-device ResNet-18 inference for the standalone-on-phone path.
   # Wraps ONNX Runtime for iOS and Android; the same .onnx file that
   # serves on aired.com is bundled in assets/models/ and loaded

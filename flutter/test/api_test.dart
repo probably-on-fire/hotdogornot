@@ -1,6 +1,6 @@
 // Tests for the Prediction / PredictResponse JSON parsers + helpers.
 // The data-hygiene audit flagged that direct `as String` / `as num`
-// casts in `fromJson` will throw uncaught TypeError on malformed
+// casts in `fromJson` in `fromJson` will throw uncaught TypeError on malformed
 // responses — these tests pin the happy path and the obvious
 // failure modes.
 

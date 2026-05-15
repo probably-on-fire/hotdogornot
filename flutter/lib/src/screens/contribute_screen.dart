@@ -10,6 +10,7 @@ import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
+import '../auth.dart';
 import '../ondevice/classifier.dart';
 import '../settings.dart';
 
@@ -25,13 +26,18 @@ class _SessionRecord {
 /// Camera-first capture screen. Set the class via chips, tap shutter,
 /// upload happens in the background while the camera stays live so the
 /// next shot is one tap away. No predict round-trip.
+///
+/// Gated on [AuthService.isSignedIn] — anonymous users see a Sign In
+/// card first.
 class ContributeScreen extends StatefulWidget {
   const ContributeScreen({
     super.key,
     required this.settings,
+    required this.auth,
     this.isActive = true,
   });
   final Settings settings;
+  final AuthService auth;
   // False when sitting in an IndexedStack but on a non-selected tab.
   // We tear the camera down so Identify can have it.
   final bool isActive;
@@ -81,11 +87,13 @@ class _ContributeScreenState extends State<ContributeScreen>
   bool _toastIsError = false;
   Timer? _toastTimer;
 
+  bool get _isSignedIn => widget.auth.isSignedIn;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    if (widget.isActive) _initCamera();
+    if (widget.isActive && _isSignedIn) _initCamera();
   }
 
   @override
@@ -98,6 +106,11 @@ class _ContributeScreenState extends State<ContributeScreen>
         _cam = null;
       }
     } else if (!oldWidget.isActive && widget.isActive) {
+      if (_cam == null && !_camInitInFlight && _isSignedIn) _initCamera();
+    }
+    // If auth state just flipped to signed-in and the tab is active,
+    // start the camera.
+    if (!oldWidget.auth.isSignedIn && widget.auth.isSignedIn && widget.isActive) {
       if (_cam == null && !_camInitInFlight) _initCamera();
     }
   }
@@ -123,7 +136,7 @@ class _ContributeScreenState extends State<ContributeScreen>
           _cam = null;
         }
       }
-    } else if (state == AppLifecycleState.resumed && widget.isActive) {
+    } else if (state == AppLifecycleState.resumed && widget.isActive && _isSignedIn) {
       if (_cam == null && !_camInitInFlight) _initCamera();
     }
   }
@@ -246,7 +259,7 @@ class _ContributeScreenState extends State<ContributeScreen>
     if (picked.path == null) return;
     if (mounted) setState(() => _uploadInFlight++);
     try {
-      final api = ApiClient(widget.settings);
+      final api = ApiClient(widget.settings, widget.auth);
       await api.uploadTrainingVideo(File(picked.path!), _family, _gender);
       if (!mounted) return;
       _showToast('✓ Video sent — server is extracting crops');
@@ -265,7 +278,7 @@ class _ContributeScreenState extends State<ContributeScreen>
     final isHoldout = _holdout;
     if (mounted) setState(() => _uploadInFlight++);
     try {
-      final api = ApiClient(widget.settings);
+      final api = ApiClient(widget.settings, widget.auth);
       final UploadResult result = isHoldout
           ? await api.uploadTestHoldoutPhoto(f, cls, session: _sessionId)
           : await api.uploadTrainingPhoto(f, cls, session: _sessionId);
@@ -282,6 +295,11 @@ class _ContributeScreenState extends State<ContributeScreen>
       _showToast('✓ #$_uploadedCount $cls${isHoldout ? " · holdout" : ""}');
       HapticFeedback.selectionClick();
     } catch (e) {
+      if (e is UnauthorizedException) {
+        await widget.auth.signOut();
+        _showToast('Session expired — please sign in again.', error: true);
+        return;
+      }
       _showToast('Upload failed: ${_friendlyError(e)}', error: true);
     } finally {
       if (mounted) setState(() => _uploadInFlight--);
@@ -293,7 +311,7 @@ class _ContributeScreenState extends State<ContributeScreen>
     final isHoldout = _holdout;
     if (mounted) setState(() => _uploadInFlight++);
     try {
-      final api = ApiClient(widget.settings);
+      final api = ApiClient(widget.settings, widget.auth);
       final UploadResult result = isHoldout
           ? await api.uploadTestHoldoutPhotoBytes(bytes, cls, filename: filename, session: _sessionId)
           : await api.uploadTrainingPhotoBytes(bytes, cls, filename: filename, session: _sessionId);
@@ -309,6 +327,11 @@ class _ContributeScreenState extends State<ContributeScreen>
       });
       _showToast('✓ #$_uploadedCount $cls${isHoldout ? " · holdout" : ""}');
     } catch (e) {
+      if (e is UnauthorizedException) {
+        await widget.auth.signOut();
+        _showToast('Session expired — please sign in again.', error: true);
+        return;
+      }
       _showToast('Upload failed: ${_friendlyError(e)}', error: true);
     } finally {
       if (mounted) setState(() => _uploadInFlight--);
@@ -329,6 +352,7 @@ class _ContributeScreenState extends State<ContributeScreen>
   }
 
   String _friendlyError(Object e) {
+    if (e is UnauthorizedException) return 'Not signed in.';
     final s = e.toString();
     if (s.contains('SocketException') || s.contains('Failed host lookup')) {
       return 'No connection — check Wi-Fi.';
@@ -337,7 +361,7 @@ class _ContributeScreenState extends State<ContributeScreen>
       return 'Server slow — try again.';
     }
     if (s.contains('ApiError 401') || s.contains('ApiError 403')) {
-      return 'Auth failed — check token in Settings.';
+      return 'Auth failed — please sign in again.';
     }
     if (s.contains('ApiError 413')) {
       return 'Image too large.';
@@ -350,7 +374,7 @@ class _ContributeScreenState extends State<ContributeScreen>
     final last = _undoStack.removeLast();
     if (mounted) setState(() {});
     try {
-      await ApiClient(widget.settings).deleteLabelerFile(last.record.path);
+      await ApiClient(widget.settings, widget.auth).deleteLabelerFile(last.record.path);
       if (!mounted) return;
       setState(() {
         _uploadedCount = (_uploadedCount - 1).clamp(0, 1 << 30);
@@ -408,8 +432,43 @@ class _ContributeScreenState extends State<ContributeScreen>
     }
   }
 
+  void _showSignOutDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Account'),
+        content: Text(
+          'Signed in as ${widget.auth.username ?? "unknown"}.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await widget.auth.signOut();
+              // Camera is torn down via didUpdateWidget / sign-in gate.
+              final cam = _cam;
+              if (cam != null) {
+                await cam.dispose();
+                if (mounted) setState(() => _cam = null);
+              }
+            },
+            child: const Text('Sign out', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (!_isSignedIn) {
+      return _SignInCard(auth: widget.auth);
+    }
+
     final bottomInset = MediaQuery.of(context).padding.bottom;
     return Scaffold(
       backgroundColor: Colors.black,
@@ -505,6 +564,7 @@ class _ContributeScreenState extends State<ContributeScreen>
       isScrollControlled: true,
       builder: (ctx) => _StatsSheet(
         settings: widget.settings,
+        auth: widget.auth,
         sessionTrain: Map.unmodifiable(_sessionCounts),
         sessionHoldout: Map.unmodifiable(_sessionHoldout),
       ),
@@ -512,6 +572,7 @@ class _ContributeScreenState extends State<ContributeScreen>
   }
 
   Widget _buildTopBar() {
+    final username = widget.auth.username;
     return Row(
       children: [
         GestureDetector(
@@ -522,6 +583,34 @@ class _ContributeScreenState extends State<ContributeScreen>
           ),
         ),
         const Spacer(),
+        if (username != null && username.isNotEmpty)
+          GestureDetector(
+            onTap: _showSignOutDialog,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.person_outline, size: 13, color: Colors.white70),
+                  const SizedBox(width: 5),
+                  Text(
+                    username,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(width: 8),
         _HoldoutToggle(
           on: _holdout,
           onTap: () => setState(() => _holdout = !_holdout),
@@ -626,6 +715,145 @@ class _ContributeScreenState extends State<ContributeScreen>
           ],
         ),
       ],
+    );
+  }
+}
+
+/// Sign-in card shown when [AuthService.isSignedIn] is false.
+class _SignInCard extends StatefulWidget {
+  const _SignInCard({required this.auth});
+  final AuthService auth;
+
+  @override
+  State<_SignInCard> createState() => _SignInCardState();
+}
+
+class _SignInCardState extends State<_SignInCard> {
+  final _userCtl = TextEditingController();
+  final _passCtl = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _userCtl.dispose();
+    _passCtl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final user = _userCtl.text.trim();
+    final pass = _passCtl.text;
+    if (user.isEmpty || pass.isEmpty) {
+      setState(() => _error = 'Username and password are required.');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      await widget.auth.signIn(username: user, password: pass);
+      // AuthService notifies listeners → ContributeScreen rebuilds.
+    } on AuthFailed catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.lock_outline, size: 20, color: Color(0xFFE63946)),
+                        SizedBox(width: 10),
+                        Text(
+                          'Sign in to contribute',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Your account lets you upload training photos to the aired.com labeler.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: theme.colorScheme.onSurface.withOpacity(0.6),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    TextField(
+                      controller: _userCtl,
+                      autofocus: true,
+                      textInputAction: TextInputAction.next,
+                      autocorrect: false,
+                      enableSuggestions: false,
+                      decoration: const InputDecoration(
+                        labelText: 'Username',
+                        prefixIcon: Icon(Icons.person_outline, size: 18),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _passCtl,
+                      obscureText: true,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _loading ? null : _submit(),
+                      decoration: const InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: Icon(Icons.lock_outline, size: 18),
+                      ),
+                    ),
+                    if (_error != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        _error!,
+                        style: const TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      onPressed: _loading ? null : _submit,
+                      child: _loading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Sign in'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -839,10 +1067,12 @@ class _StatusPill extends StatelessWidget {
 class _StatsSheet extends StatefulWidget {
   const _StatsSheet({
     required this.settings,
+    required this.auth,
     required this.sessionTrain,
     required this.sessionHoldout,
   });
   final Settings settings;
+  final AuthService auth;
   final Map<String, int> sessionTrain;
   final Map<String, int> sessionHoldout;
 
@@ -867,7 +1097,7 @@ class _StatsSheetState extends State<_StatsSheet> {
       _err = null;
     });
     try {
-      final s = await ApiClient(widget.settings).fetchLabelerStats();
+      final s = await ApiClient(widget.settings, widget.auth).fetchLabelerStats();
       if (!mounted) return;
       setState(() {
         _stats = s;

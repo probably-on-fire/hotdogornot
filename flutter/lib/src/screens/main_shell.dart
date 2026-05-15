@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../auth.dart';
 import '../settings.dart';
 import 'about_screen.dart';
 import 'contribute_screen.dart';
 import 'identify_screen.dart';
 
 /// Bottom-nav shell with three tabs: Identify, Contribute, About.
-/// The About screen's Advanced (relay/token/labeler) panel is still
-/// gated behind a 7-tap dev-mode unlock so end users don't accidentally
-/// edit credentials.
+/// The About screen's Advanced (relay/token) panel is still gated
+/// behind a 7-tap dev-mode unlock so end users don't accidentally
+/// edit settings.
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -18,14 +19,23 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   Settings? _settings;
+  AuthService? _auth;
   int _index = 0;
 
   @override
   void initState() {
     super.initState();
-    Settings.load().then((s) {
-      if (!mounted) return;
-      setState(() => _settings = s);
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    final s = await Settings.load();
+    final a = AuthService(s);
+    await a.load();
+    if (!mounted) return;
+    setState(() {
+      _settings = s;
+      _auth = a;
     });
   }
 
@@ -45,7 +55,8 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final settings = _settings;
-    if (settings == null) {
+    final auth = _auth;
+    if (settings == null || auth == null) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
@@ -55,9 +66,20 @@ class _MainShellState extends State<MainShell> {
     // Each camera-bearing screen gets isActive so it can dispose its
     // CameraController when not the selected tab — Android allows only
     // one CameraController on the hardware at a time.
+    //
+    // Contribute is wrapped in AnimatedBuilder so sign-in state changes
+    // reactively swap the camera UI vs the sign-in card without
+    // requiring the whole shell to rebuild.
     final pages = <Widget>[
       IdentifyScreen(settings: settings, isActive: _index == 0),
-      ContributeScreen(settings: settings, isActive: _index == 1),
+      AnimatedBuilder(
+        animation: auth,
+        builder: (context, _) => ContributeScreen(
+          settings: settings,
+          auth: auth,
+          isActive: _index == 1,
+        ),
+      ),
       AboutScreen(
         settings: settings,
         onDevModeChanged: _onDevModeChanged,
