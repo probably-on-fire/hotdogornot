@@ -65,8 +65,31 @@ def test_real_capture_counts_skips_synth_and_derived(labeler_dirs):
     assert counts["SMA-M"] == 0  # absent folders count as 0
 
 
-def test_stats_requires_auth(client):
+def test_stats_is_public(client):
+    """Read-only routes are public so the labeler grid can be shared."""
     r = client.get("/rfcai/labeler/stats")
+    assert r.status_code == 200
+
+
+def test_grid_is_public(client):
+    # _list_records uses imagehash for duplicate-detection; skip if
+    # not installed in this venv (it lives on the production box).
+    pytest.importorskip("imagehash")
+    r = client.get("/rfcai/labeler/grid")
+    assert r.status_code == 200
+
+
+def test_delete_still_requires_auth(client):
+    r = client.post("/rfcai/labeler/delete", data={"path": "/dev/null"})
+    assert r.status_code == 401
+
+
+def test_upload_train_still_requires_auth(client):
+    r = client.post(
+        "/rfcai/labeler/upload-train",
+        data={"cls": "2.4mm-M"},
+        files=[("images", ("a.jpg", b"\xff\xd8\xff\xd9", "image/jpeg"))],
+    )
     assert r.status_code == 401
 
 
@@ -76,7 +99,8 @@ def test_stats_returns_train_and_holdout_counts(client, labeler_dirs):
     _seed_class_dir(labeled, "2.4mm-M", ["photo_a_clean.jpg"])  # skip
     _seed_class_dir(holdout, "2.4mm-M", ["IMG_holdout.jpg"])
 
-    r = client.get("/rfcai/labeler/stats", auth=("u", "p"))
+    # No auth — stats is public now.
+    r = client.get("/rfcai/labeler/stats")
     assert r.status_code == 200
     body = r.json()
 

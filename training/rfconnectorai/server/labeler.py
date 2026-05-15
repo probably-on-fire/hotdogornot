@@ -329,8 +329,11 @@ def create_router() -> APIRouter:
     # so backend routes must include /rfcai/ to be reachable externally.
     r = APIRouter(prefix="/rfcai/labeler", tags=["labeler"])
 
+    # Read-only routes (stats / index / grid / img) are public so the
+    # labeler grid can be shared as a viewer. Write routes (delete,
+    # flip, bulk-delete, upload-*) stay basic-auth gated below.
     @r.get("/stats")
-    def stats(_: str = Depends(_require_basic_auth)):
+    def stats():
         """
         Per-class real-capture counts for the training set and the
         held-out test set. Used by the Flutter Contribute screen to
@@ -342,7 +345,7 @@ def create_router() -> APIRouter:
         }
 
     @r.get("/", response_class=HTMLResponse)
-    def index(request: Request, _: str = Depends(_require_basic_auth)):
+    def index(request: Request):
         counts = _class_counts()
         return templates.TemplateResponse(
             request,
@@ -357,7 +360,6 @@ def create_router() -> APIRouter:
     @r.get("/grid", response_class=HTMLResponse)
     def grid(
         request: Request,
-        _: str = Depends(_require_basic_auth),
         cls: list[str] = Query(default=CANONICAL_CLASSES),
         only_no_circle: bool = False,
         only_multi: bool = False,
@@ -429,7 +431,7 @@ def create_router() -> APIRouter:
         )
 
     @r.get("/img")
-    def serve_img(path: str, _: str = Depends(_require_basic_auth)):
+    def serve_img(path: str):
         p = _safe_path(path)
         if not p.exists():
             raise HTTPException(404, "not found")
