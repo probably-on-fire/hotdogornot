@@ -64,6 +64,11 @@ class _ContributeScreenState extends State<ContributeScreen>
       .substring(0, 10);  // YYYY-MM-DD
 
   bool _shutterBusy = false;     // single-flight guard on capture
+  // Skip-if-busy guard on the on-device classifier: only one check runs
+  // at a time. Rapid-fire shots get their upload (fine) but skip the
+  // post-hoc model agree/disagree toast — prevents OOM under burst
+  // capture from N concurrent ~5 MB JPEG buffers + ONNX sessions.
+  bool _onDeviceCheckBusy = false;
   int _uploadInFlight = 0;       // count of background uploads posting now
   int _uploadedCount = 0;        // session total successful uploads
   final Map<String, int> _sessionCounts = {};   // training uploads per class
@@ -362,6 +367,12 @@ class _ContributeScreenState extends State<ContributeScreen>
   }
 
   Future<void> _runOnDeviceCheck(File f, String cls) async {
+    // Skip if a previous check is still running. Rapid-fire shutter taps
+    // get their upload (which is what matters) but skip the agree/disagree
+    // toast for that shot — prevents memory pressure from N concurrent
+    // ~5 MB JPEG buffers + ONNX inference sessions tripping the OOM killer.
+    if (_onDeviceCheckBusy) return;
+    _onDeviceCheckBusy = true;
     try {
       final bytes = await f.readAsBytes();
       final pred = await OnDeviceClassifier.instance.predict(bytes);
@@ -392,6 +403,8 @@ class _ContributeScreenState extends State<ContributeScreen>
       }
     } catch (_) {
       // Model not loaded / inference failed — silently fall back.
+    } finally {
+      _onDeviceCheckBusy = false;
     }
   }
 
