@@ -7,7 +7,6 @@
 {% block content %}
   <main class="centered-page">
     <div class="card">
-      <h1>RFCAI Labeler — Sign in</h1>
       {% if error %}<div class="error">{{ error }}</div>{% endif %}
       <form method="post" action="/rfcai/labeler/login">
         <input type="hidden" name="next" value="{{ next }}">
