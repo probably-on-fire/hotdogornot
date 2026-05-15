@@ -8,23 +8,151 @@
   <span class="app">Labeler</span>
 {% endblock %}
 
+{% block head_extra %}
+<style>
+  /* ── Login-page-only overrides ──────────────────────────────── */
+
+  /* Subtle radial accent glow on the page background */
+  body {
+    background:
+      radial-gradient(ellipse 600px 400px at 50% 40%,
+        rgba(91,158,255,0.07) 0%,
+        transparent 70%),
+      var(--bg);
+  }
+
+  /* Back link — top-left, outside the card */
+  .back-link {
+    position: fixed;
+    top: 60px;            /* just below the 48px header */
+    left: 20px;
+    font-size: 12px;
+    color: var(--subtle);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: color 120ms;
+    z-index: 10;
+  }
+  .back-link:hover { color: var(--muted); }
+  .back-link svg { flex-shrink: 0; }
+
+  /* Wider, more breathable card */
+  .login-card {
+    width: 100%;
+    max-width: 380px;
+    padding: 36px 36px 32px;
+  }
+
+  /* Large brand mark inside card */
+  .login-brand-mark {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 20px;
+    position: relative;
+    box-shadow: 0 4px 16px rgba(91,158,255,0.25);
+  }
+
+  /* Slow pulse on the inner dot — RF-signal feel */
+  @keyframes rf-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50%       { opacity: 1.0; transform: scale(1.15); }
+  }
+  .login-brand-mark .inner-dot {
+    animation: rf-pulse 3s ease-in-out infinite;
+    transform-origin: center;
+  }
+
+  /* Text hierarchy inside card */
+  .login-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--accent);
+    text-align: center;
+    margin: 0 0 10px;
+  }
+  .login-headline {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+    text-align: center;
+    margin: 0 0 6px;
+    letter-spacing: -0.3px;
+  }
+  .login-sub {
+    font-size: 14px;
+    color: var(--muted);
+    text-align: center;
+    margin: 0 0 28px;
+  }
+
+  /* Closed-group help text */
+  .login-help {
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--subtle);
+    text-align: center;
+    line-height: 1.5;
+  }
+  .login-help a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .login-help a:hover {
+    color: var(--accent-strong);
+    text-decoration: underline;
+  }
+
+  /* On narrow viewports, hide the fixed back link so it doesn't
+     overlap the card header area */
+  @media (max-width: 480px) {
+    .back-link {
+      position: static;
+      display: block;
+      padding: 12px 16px 0;
+    }
+    .login-card {
+      padding: 28px 20px 24px;
+    }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
+  <!-- Back to aired.com — top-left of page, outside the card -->
+  <a href="https://aired.com/" class="back-link" aria-label="Back to aired.com">
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    Back to aired.com
+  </a>
+
   <main class="centered-page">
-    <div class="card">
-      <!-- Mini brand mark inside the card -->
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
-        <div class="brand-mark" aria-hidden="true" style="width:32px;height:32px;border-radius:8px;">
-          <svg width="16" height="16" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="7" cy="7" r="4.5" stroke="white" stroke-width="1.5"/>
-            <circle cx="7" cy="7" r="1.5" fill="white"/>
-          </svg>
-        </div>
-        <span style="font-size:12px; font-weight:700; text-transform:uppercase;
-                     letter-spacing:0.8px; color:var(--muted);">RFCAI</span>
+    <div class="card login-card">
+
+      <!-- Large brand mark -->
+      <div class="login-brand-mark" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+             xmlns="http://www.w3.org/2000/svg">
+          <!-- Outer ring -->
+          <circle cx="12" cy="12" r="8" stroke="white" stroke-width="2"/>
+          <!-- Inner dot — animated -->
+          <circle class="inner-dot" cx="12" cy="12" r="3" fill="white"/>
+        </svg>
       </div>
 
-      <p class="card-headline">Welcome to RFCAI Labeler</p>
-      <p class="card-sub">Sign in to manage training data.</p>
+      <p class="login-eyebrow">RFCAI</p>
+      <h1 class="login-headline">Welcome back</h1>
+      <p class="login-sub">Sign in to manage training data.</p>
 
       {% if error %}
       <div class="error" style="
@@ -52,6 +180,11 @@
         <button type="submit" class="btn btn-primary btn-full"
                 style="padding:11px 14px; font-size:14px;">Sign in</button>
       </form>
+
+      <p class="login-help">
+        Closed-group access. Need an account?
+        <a href="mailto:chris@aired.com">Contact chris.</a>
+      </p>
     </div>
   </main>
 {% endblock %}

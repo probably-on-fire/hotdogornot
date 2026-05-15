@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Red — RF Connector AI</title>
+  <meta name="description"
+        content="Identify RF connectors from your phone camera. Open dataset,
+                 on-device classifier, mobile-first.">
+  <style>
+    /* ── Design tokens — matches labeler palette exactly ─────── */
+    :root {
+      --bg:           #0a0d12;
+      --panel:        #131720;
+      --panel-2:      #1b202c;
+      --panel-3:      #232938;
+      --border:       #2b3344;
+      --border-strong:#3a4458;
+      --text:         #e6ecf5;
+      --muted:        #97a0b0;
+      --subtle:       #5d6478;
+      --accent:       #5b9eff;
+      --accent-strong:#80b5ff;
+      --accent-tint:  rgba(91,158,255,0.12);
+      --green:        #4ade80;
+      --shadow-lg:    0 8px 24px -8px rgba(0,0,0,0.5),
+                      0 1px 0 rgba(255,255,255,0.04) inset;
+    }
+
+    /* ── Reset ────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+                   "Segoe UI Variable Text", "Segoe UI", sans-serif;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-strong); }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      padding: 0 24px;
+      height: 52px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(10,13,18,0.88);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .brand-mark {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      background: var(--accent);
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .brand-mark svg { display: block; }
+    .brand-name {
+      font-size: 15px; font-weight: 700; color: var(--text);
+      white-space: nowrap;
+    }
+    .header-signin {
+      margin-left: auto;
+      display: inline-flex; align-items: center;
+      padding: 6px 16px;
+      background: var(--accent); color: #fff;
+      border-radius: 6px; font-size: 13px; font-weight: 600;
+      text-decoration: none;
+      transition: background 120ms;
+    }
+    .header-signin:hover { background: var(--accent-strong); color: #fff; }
+
+    /* ── Page glow ────────────────────────────────────────────── */
+    .page-glow {
+      pointer-events: none;
+      position: fixed; inset: 0; z-index: 0;
+      background:
+        radial-gradient(ellipse 800px 500px at 50% 20%,
+          rgba(91,158,255,0.06) 0%,
+          transparent 70%);
+    }
+
+    /* ── Layout wrapper ───────────────────────────────────────── */
+    .page-content {
+      position: relative; z-index: 1;
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Hero ─────────────────────────────────────────────────── */
+    .hero {
+      padding: 80px 0 56px;
+      display: flex; flex-direction: column; align-items: center;
+      text-align: center;
+      gap: 0;
+    }
+    /* Large brand mark in hero */
+    .hero-mark {
+      width: 72px; height: 72px;
+      background: var(--accent);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 28px;
+      box-shadow: 0 0 48px rgba(91,158,255,0.2), var(--shadow-lg);
+      position: relative;
+    }
+    @keyframes rf-pulse {
+      0%, 100% { opacity: 0.55; transform: scale(1); }
+      50%       { opacity: 1.0;  transform: scale(1.2); }
+    }
+    .hero-mark .inner-dot {
+      animation: rf-pulse 3s ease-in-out infinite;
+      transform-origin: center;
+    }
+    .hero-eyebrow {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1px;
+      color: var(--accent);
+      margin: 0 0 14px;
+    }
+    .hero-headline {
+      font-size: clamp(32px, 5vw, 48px);
+      font-weight: 800;
+      letter-spacing: -0.8px;
+      line-height: 1.1;
+      color: var(--text);
+      margin: 0 0 16px;
+    }
+    .hero-tagline {
+      font-size: 17px;
+      color: var(--muted);
+      line-height: 1.55;
+      max-width: 520px;
+      margin: 0 0 36px;
+    }
+    .hero-ctas {
+      display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+    }
+    .cta-primary {
+      display: inline-flex; align-items: center;
+      padding: 12px 24px;
+      background: var(--accent); color: #fff;
+      border-radius: 8px; font-size: 15px; font-weight: 600;
+      text-decoration: none;
+      transition: background 120ms, transform 80ms;
+    }
+    .cta-primary:hover { background: var(--accent-strong); color: #fff; transform: translateY(-1px); }
+    .cta-secondary {
+      display: inline-flex; align-items: center;
+      padding: 12px 24px;
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px; font-size: 15px; font-weight: 600;
+      text-decoration: none;
+      transition: background 120ms, border-color 120ms, transform 80ms;
+    }
+    .cta-secondary:hover {
+      background: var(--panel-2);
+      border-color: var(--border-strong);
+      color: var(--text);
+      transform: translateY(-1px);
+    }
+
+    /* ── Stats banner ─────────────────────────────────────────── */
+    .stats-section {
+      padding: 0 0 56px;
+    }
+    .stats-banner {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 32px;
+      text-align: center;
+      min-height: 80px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: var(--shadow-lg);
+    }
+    /* Loading state */
+    .stats-banner[data-loading="true"] .skeleton {
+      display: inline-block;
+      color: var(--subtle);
+      font-size: 14px;
+    }
+    /* Loaded state */
+    .stat-num {
+      font-size: 28px; font-weight: 800;
+      color: var(--accent);
+      letter-spacing: -0.5px;
+      margin: 0 6px;
+    }
+    .stat-label {
+      font-size: 15px;
+      color: var(--muted);
+      margin: 0 4px;
+    }
+    /* Fallback link */
+    .stats-banner a {
+      font-size: 14px;
+      color: var(--accent);
+    }
+    .stats-banner a:hover { color: var(--accent-strong); }
+
+    /* ── About ────────────────────────────────────────────────── */
+    .about-section {
+      padding: 0 0 64px;
+    }
+    .section-label {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.7px;
+      color: var(--accent);
+      margin: 0 0 16px;
+    }
+    .about-section h2 {
+      font-size: 24px; font-weight: 700;
+      color: var(--text);
+      margin: 0 0 20px;
+      letter-spacing: -0.3px;
+    }
+    .about-section p {
+      font-size: 15px;
+      color: var(--muted);
+      line-height: 1.65;
+      margin: 0 0 16px;
+      max-width: 620px;
+    }
+    .about-section p:last-child { margin-bottom: 0; }
+
+    /* ── Divider ──────────────────────────────────────────────── */
+    hr.divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 0 0 56px;
+    }
+
+    /* ── Footer ───────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 20px 24px;
+    }
+    .footer-inner {
+      max-width: 760px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .footer-links {
+      display: flex; gap: 20px; flex-wrap: wrap;
+    }
+    .footer-links a {
+      font-size: 12px; color: var(--subtle);
+      text-decoration: none;
+      transition: color 100ms;
+    }
+    .footer-links a:hover { color: var(--muted); }
+    .footer-wordmark {
+      font-size: 12px; color: var(--subtle);
+      white-space: nowrap;
+    }
+    .footer-wordmark strong { color: var(--muted); }
+
+    /* ── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 480px) {
+      .hero { padding: 52px 0 40px; }
+      .hero-mark { width: 60px; height: 60px; border-radius: 16px; }
+      .stats-banner { padding: 20px; }
+      .stat-num { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Subtle background glow — purely decorative -->
+  <div class="page-glow" aria-hidden="true"></div>
+
+  <!-- ── Header ──────────────────────────────────────────────── -->
+  <header>
+    <div class="brand-mark" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="5.5" stroke="white" stroke-width="2"/>
+        <circle cx="8" cy="8" r="2" fill="white"/>
+      </svg>
+    </div>
+    <span class="brand-name">AI Red</span>
+    <a href="/rfcai/labeler/login" class="header-signin">Sign in</a>
+  </header>
+
+  <div class="page-content">
+
+    <!-- ── Hero ──────────────────────────────────────────────── -->
+    <section class="hero">
+      <div class="hero-mark" aria-hidden="true">
+        <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
+          <circle cx="19" cy="19" r="13" stroke="white" stroke-width="2.5"/>
+          <circle class="inner-dot" cx="19" cy="19" r="5" fill="white"/>
+        </svg>
+      </div>
+      <p class="hero-eyebrow">Open project</p>
+      <h1 class="hero-headline">RF Connector AI</h1>
+      <p class="hero-tagline">
+        Identify RF connectors from your phone camera.
+        Open dataset. On-device classifier. Mobile-first.
+      </p>
+      <div class="hero-ctas">
+        <a href="/rfcai/labeler/" class="cta-primary">Explore Training Data</a>
+        <a href="/rfcai/labeler/login" class="cta-secondary">Sign in to Contribute</a>
+      </div>
+    </section>
+
+    <!-- ── Live stats banner ──────────────────────────────────── -->
+    <section class="stats-section">
+      <div class="stats-banner" id="stats" data-loading="true">
+        <span class="skeleton">Loading project stats…</span>
+      </div>
+    </section>
+
+    <hr class="divider">
+
+    <!-- ── About ─────────────────────────────────────────────── -->
+    <section class="about-section">
+      <p class="section-label">About the project</p>
+      <h2>What is RF Connector AI?</h2>
+      <p>
+        RF Connector AI (RFCAI) is an open training-data project for
+        fine-grained visual classification of radio-frequency connectors — the
+        SMA, N-type, BNC, TNC, SMP, and other small hardware pieces that live on
+        the end of RF cables. The goal is a lightweight, on-device model that
+        runs in real time on a smartphone camera, so technicians in the field can
+        identify an unfamiliar connector in seconds.
+      </p>
+      <p>
+        The dataset is collected via a mobile-first Flutter app and a web-based
+        labeling tool. Anyone with access can contribute images, review labels, and
+        trigger training runs. The current on-device classifier is exported to
+        ONNX and runs via Unity Sentis on iOS and Android. A public Streamlit demo
+        is available at
+        <a href="/demo/">/demo/</a>.
+        To contribute images or help review labels,
+        <a href="/rfcai/labeler/login">sign in</a> or get in touch with
+        <a href="mailto:chris@aired.com">chris@aired.com</a>.
+      </p>
+    </section>
+
+  </div><!-- /.page-content -->
+
+  <!-- ── Footer ──────────────────────────────────────────────── -->
+  <footer>
+    <div class="footer-inner">
+      <nav class="footer-links" aria-label="Footer links">
+        <a href="/rfcai/labeler/">Labeler</a>
+        <a href="/rfcai/labeler/login">Sign in</a>
+        <a href="/screen.html">Screen sharing</a>
+        <a href="/demo/">Streamlit demo</a>
+      </nav>
+      <span class="footer-wordmark">Powered by <strong>aired.com</strong></span>
+    </div>
+  </footer>
+
+  <!-- ── Live stats fetch ───────────────────────────────────── -->
+  <script>
+    (function () {
+      var el = document.getElementById('stats');
+      fetch('/rfcai/labeler/stats')
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function (data) {
+          var train = (data && data.train) ? data.train : {};
+          var total = Object.values(train).reduce(function (a, b) { return a + b; }, 0);
+          var nClasses = Object.values(train).filter(function (c) { return c > 0; }).length;
+          el.dataset.loading = 'false';
+          el.innerHTML =
+            '<span class="stat-num">' + total.toLocaleString() + '</span>' +
+            '<span class="stat-label">training samples across</span>' +
+            '<span class="stat-num">' + nClasses + '</span>' +
+            '<span class="stat-label">connector classes</span>';
+        })
+        .catch(function () {
+          el.dataset.loading = 'false';
+          el.innerHTML =
+            '<a href="/rfcai/labeler/">Open the labeler to see stats →</a>';
+        });
+    })();
+  </script>
+</body>
+</html>
