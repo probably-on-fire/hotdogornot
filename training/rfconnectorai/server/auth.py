@@ -219,3 +219,18 @@ def delete_user(db_path: Path, user_id: int) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
+
+
+def update_last_login(db_path: Path, user_id: int) -> None:
+    """Set last_login_at to now for *user_id*. No-op if not found.
+
+    Exposed as a standalone function for callers that already hold a
+    User object and don't need to re-authenticate (e.g. session resume).
+    ``authenticate()`` already calls this internally on success.
+    """
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET last_login_at = datetime('now') WHERE id = ?",
+            (user_id,),
+        )
+        conn.commit()

@@ -41,6 +41,7 @@ import numpy as np
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from rfconnectorai.classifier.predict import (
     ConnectorClassifier, EnsembleClassifier,
@@ -142,6 +143,18 @@ def create_app(config: dict | None = None) -> FastAPI:
     specs_path: Path = cfg.get("specs_path", Path(DEFAULT_SPECS_PATH))
 
     app = FastAPI(title="RF Connector AI prediction service", version="1.0.0")
+
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=os.environ.get(
+            "RFCAI_SESSION_SECRET",
+            # Dev default — overridden by env var in production via
+            # /etc/default/rfcai-predict. Generated via secrets.token_urlsafe(32).
+            "dev-session-secret-CHANGE-IN-PROD-via-RFCAI_SESSION_SECRET",
+        ),
+        https_only=False,  # box runs HTTP behind nginx HTTPS proxy
+        same_site="lax",
+    )
 
     # CORS: allow the Flutter web build (and any future browser-side
     # client) to call /predict and /labeler/* from a different origin.

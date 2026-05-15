@@ -334,3 +334,153 @@ def test_snapshot_download_and_path_traversal_rejected(tmp_path, monkeypatch):
     # Missing file → 404.
     r = c.get("/rfcai/labeler/snapshots/nope.tar.gz")
     assert r.status_code == 404
+
+
+def test_login_get_returns_form(client):
+    r = client.get("/rfcai/labeler/login")
+    assert r.status_code == 200
+    assert b"username" in r.content.lower()
+    assert b"password" in r.content.lower()
+
+
+def test_login_post_invalid_credentials_redirects_with_error(client, tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "correctpw", role="admin")
+
+    # We need a fresh client because the env var is read per call;
+    # the fixture's client uses an older env. So rebuild here.
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    app = FastAPI()
+    app.add_middleware(
+        __import__("starlette.middleware.sessions", fromlist=["SessionMiddleware"]).SessionMiddleware,
+        secret_key="test-secret",
+    )
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    r = c.post(
+        "/rfcai/labeler/login",
+        data={"username": "alice", "password": "wrong", "next": "/rfcai/labeler/"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "/rfcai/labeler/login" in r.headers["location"]
+    assert "error=" in r.headers["location"]
+
+
+def test_login_post_valid_credentials_sets_session(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "correctpw", role="admin")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    r = c.post(
+        "/rfcai/labeler/login",
+        data={"username": "alice", "password": "correctpw", "next": "/rfcai/labeler/"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/rfcai/labeler/"
+    # Session cookie was set.
+    assert "session" in r.cookies
+
+
+def test_logout_clears_session(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.middleware.sessions import SessionMiddleware
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+    c = TestClient(app)
+
+    # Log in first.
+    c.post("/rfcai/labeler/login",
+           data={"username": "alice", "password": "pw"},
+           follow_redirects=False)
+    # Logout.
+    r = c.post("/rfcai/labeler/logout", follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_require_admin_accepts_basic_auth_against_users_db(tmp_path, monkeypatch):
+    """The Flutter app uses HTTP Basic; require_admin must validate
+    against the users DB, not the old LABELER_USER/PASS env vars."""
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    # Build an isolated mini-app that has a route protected by require_admin.
+    from fastapi import FastAPI, Depends
+    from fastapi.testclient import TestClient
+    from starlette.middleware.sessions import SessionMiddleware
+    from rfconnectorai.server.labeler import require_admin
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+
+    @app.get("/protected")
+    def protected(user=Depends(require_admin)):
+        return {"username": user.username}
+
+    c = TestClient(app)
+
+    # No auth -> 401.
+    assert c.get("/protected").status_code == 401
+
+    # Correct basic auth -> 200.
+    r = c.get("/protected", auth=("alice", "pw"))
+    assert r.status_code == 200
+    assert r.json()["username"] == "alice"
+
+    # Wrong password -> 401.
+    assert c.get("/protected", auth=("alice", "nope")).status_code == 401
+
+
+def test_require_admin_accepts_session_cookie(tmp_path, monkeypatch):
+    db = tmp_path / "users.db"
+    monkeypatch.setenv("RFCAI_USERS_DB", str(db))
+    from rfconnectorai.server import auth as _auth
+    _auth.init_db(db)
+    _auth.create_user(db, "alice", "pw", role="admin")
+
+    from fastapi import FastAPI, Depends
+    from fastapi.testclient import TestClient
+    from starlette.middleware.sessions import SessionMiddleware
+    from rfconnectorai.server.labeler import require_admin
+    app = FastAPI()
+    app.add_middleware(SessionMiddleware, secret_key="test-secret")
+    app.include_router(labeler.create_router())
+
+    @app.get("/protected")
+    def protected(user=Depends(require_admin)):
+        return {"username": user.username}
+
+    c = TestClient(app)
+    # Log in via the labeler /login endpoint; session cookie carries over.
+    c.post("/rfcai/labeler/login",
+           data={"username": "alice", "password": "pw"},
+           follow_redirects=False)
+    r = c.get("/protected")
+    assert r.status_code == 200
+    assert r.json()["username"] == "alice"

@@ -44,6 +44,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 from rfconnectorai.data_fetch.connector_crops import detect_connector_crops_hough
+from rfconnectorai.server import auth as _auth
 
 
 CANONICAL_CLASSES = [
@@ -88,6 +89,15 @@ def _snapshot_root() -> Path:
     return Path(os.environ.get(
         "RFCAI_SNAPSHOT_DIR",
         "/opt/rfcai/repo/training/data/snapshots",
+    )).resolve()
+
+
+def _users_db_path() -> Path:
+    """SQLite path for the labeler users table. Lives under data/
+    so it's covered by the existing systemd ReadWritePaths."""
+    return Path(os.environ.get(
+        "RFCAI_USERS_DB",
+        "/opt/rfcai/repo/training/data/labeler_users.db",
     )).resolve()
 
 
@@ -323,6 +333,53 @@ def _require_basic_auth(creds: HTTPBasicCredentials = Depends(_security)) -> str
     return creds.username
 
 
+def require_admin(request: Request) -> _auth.User:
+    """Auth dependency for admin-only routes.
+
+    Accepts either:
+      1. A valid session cookie (set by /labeler/login)
+      2. HTTP Basic Authorization header (for the Flutter app and
+         curl users — credentials validated against the users DB,
+         not the LABELER_USER/PASS env vars)
+
+    Returns the authenticated User on success.
+    Raises HTTPException(401) on failure.
+    """
+    db_path = _users_db_path()
+
+    # Try session first.
+    sess_user_id = request.session.get("user_id")
+    if sess_user_id is not None:
+        # Confirm the user still exists (admin may have deleted them
+        # since they logged in).
+        for u in _auth.list_users(db_path):
+            if u.id == sess_user_id:
+                return u
+        # Stale session — clear it.
+        request.session.clear()
+
+    # Fall back to HTTP Basic.
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("basic "):
+        import base64
+        try:
+            decoded = base64.b64decode(auth_header.split(None, 1)[1]).decode("utf-8")
+            username, _, password = decoded.partition(":")
+        except Exception:
+            decoded = None
+            username = password = ""
+        if username:
+            user = _auth.authenticate(db_path, username, password)
+            if user is not None:
+                return user
+
+    raise HTTPException(
+        status_code=401,
+        detail="login required",
+        headers={"WWW-Authenticate": 'Basic realm="labeler"'},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -483,6 +540,38 @@ def create_router() -> APIRouter:
             raise HTTPException(404, "snapshot not found")
         media = "application/gzip" if name.endswith(".gz") else "application/octet-stream"
         return FileResponse(path, media_type=media, filename=name)
+
+    @r.get("/login", response_class=HTMLResponse)
+    def login_page(request: Request, error: str = "", next: str = "/rfcai/labeler/"):
+        return templates.TemplateResponse(
+            request,
+            "labeler/login.html",
+            {"error": error, "next": next},
+        )
+
+    @r.post("/login")
+    def login_submit(
+        request: Request,
+        username: str = Form(...),
+        password: str = Form(...),
+        next: str = Form("/rfcai/labeler/"),
+    ):
+        from fastapi.responses import RedirectResponse
+        user = _auth.authenticate(_users_db_path(), username, password)
+        if user is None:
+            # Re-render the login page with an error (303 to avoid
+            # form re-submission on refresh).
+            qs = urllib.parse.urlencode({"error": "invalid credentials", "next": next})
+            return RedirectResponse(f"/rfcai/labeler/login?{qs}", status_code=303)
+        request.session["user_id"] = user.id
+        request.session["username"] = user.username
+        return RedirectResponse(next, status_code=303)
+
+    @r.post("/logout")
+    def logout(request: Request):
+        from fastapi.responses import RedirectResponse
+        request.session.clear()
+        return RedirectResponse("/rfcai/labeler/", status_code=303)
 
     @r.post("/delete", response_class=HTMLResponse)
     def delete(path: str = Form(...), _: str = Depends(_require_basic_auth)):
