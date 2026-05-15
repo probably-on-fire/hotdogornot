@@ -1,37 +1,16 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RFCAI Labeler — Admin / Users</title>
+{% extends "labeler/_base.html" %}
+
+{% block title %}RFCAI Labeler — Admin / Users{% endblock %}
+
+{% block page_title %}RFCAI Labeler — Admin{% endblock %}
+
+{% block header_nav %}
+  <a href="/rfcai/labeler/" style="color: var(--accent); font-size: 13px; text-decoration: none;">&larr; Back to labeler</a>
+  <span style="color: var(--muted); font-size: 13px;">/ Users</span>
+{% endblock %}
+
+{% block head_extra %}
   <style>
-    :root {
-      --bg: #0f1115;
-      --panel: #161a22;
-      --panel-2: #1d222c;
-      --border: #2a313e;
-      --text: #d6dde8;
-      --muted: #8a93a3;
-      --accent: #4f8cff;
-      --red: #f87171;
-      --green: #4ade80;
-    }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0; padding: 0;
-      background: var(--bg); color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-      font-size: 14px;
-    }
-    header {
-      padding: 12px 20px;
-      border-bottom: 1px solid var(--border);
-      background: var(--panel);
-      display: flex; align-items: center; gap: 12px;
-    }
-    header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-    header a { color: var(--accent); font-size: 13px; text-decoration: none; }
-    header a:hover { text-decoration: underline; }
     main { padding: 24px 28px; max-width: 860px; }
     .banner {
       padding: 10px 14px; border-radius: 4px; margin-bottom: 16px; font-size: 13px;
@@ -84,12 +63,9 @@
     }
     .add-form button[type="submit"]:hover { filter: brightness(1.1); }
   </style>
-</head>
-<body>
-  <header>
-    <h1>Labeler — Admin / Users</h1>
-    <a href="/rfcai/labeler/">&larr; Back to labeler</a>
-  </header>
+{% endblock %}
+
+{% block content %}
   <main>
     {% if error %}
     <div class="banner error">{{ error }}</div>
@@ -153,5 +129,4 @@
       <button type="submit">Create</button>
     </form>
   </main>
-</body>
-</html>
+{% endblock %}
