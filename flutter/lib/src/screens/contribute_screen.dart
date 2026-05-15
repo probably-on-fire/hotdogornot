@@ -93,12 +93,21 @@ class _ContributeScreenState extends State<ContributeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // AuthService is shared across rebuilds — oldWidget.auth and
+    // widget.auth point at the same instance, so didUpdateWidget can't
+    // detect auth flips via widget diffing. Subscribe to the
+    // ChangeNotifier directly instead.
+    widget.auth.addListener(_onAuthChanged);
     if (widget.isActive && _isSignedIn) _initCamera();
   }
 
   @override
   void didUpdateWidget(covariant ContributeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.auth != widget.auth) {
+      oldWidget.auth.removeListener(_onAuthChanged);
+      widget.auth.addListener(_onAuthChanged);
+    }
     if (oldWidget.isActive && !widget.isActive) {
       final cam = _cam;
       if (cam != null) {
@@ -108,10 +117,28 @@ class _ContributeScreenState extends State<ContributeScreen>
     } else if (!oldWidget.isActive && widget.isActive) {
       if (_cam == null && !_camInitInFlight && _isSignedIn) _initCamera();
     }
-    // If auth state just flipped to signed-in and the tab is active,
-    // start the camera.
-    if (!oldWidget.auth.isSignedIn && widget.auth.isSignedIn && widget.isActive) {
-      if (_cam == null && !_camInitInFlight) _initCamera();
+  }
+
+  void _onAuthChanged() {
+    if (!mounted) return;
+    if (widget.auth.isSignedIn) {
+      // Just signed in — kick the camera if the tab is currently
+      // visible. Wait one frame so the keyboard has time to dismiss
+      // and the widget tree settles before grabbing the hardware.
+      if (widget.isActive && _cam == null && !_camInitInFlight) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.isActive && _cam == null && !_camInitInFlight) {
+            _initCamera();
+          }
+        });
+      }
+    } else {
+      // Just signed out — release the camera.
+      final cam = _cam;
+      if (cam != null) {
+        cam.dispose();
+        if (mounted) setState(() => _cam = null);
+      }
     }
   }
 
@@ -119,6 +146,7 @@ class _ContributeScreenState extends State<ContributeScreen>
   void dispose() {
     _toastTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    widget.auth.removeListener(_onAuthChanged);
     _cam?.dispose();
     super.dispose();
   }
