@@ -230,17 +230,35 @@ class _AboutScreenState extends State<AboutScreen> {
                       width: 64,
                       height: 64,
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE63946),
+                        // Accent blue matching the aired.com landing
+                        // page + labeler login brand mark.
+                        color: const Color(0xFF5B9EFF),
                         borderRadius: BorderRadius.circular(14),
                       ),
-                      child: const Center(
-                        child: Text(
-                          'ai',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -1,
+                      child: Center(
+                        // RF-connector cross-section: white ring with
+                        // a filled center dot. Matches the inline SVG
+                        // brand mark used everywhere else (see
+                        // aired_site/index.html and labeler login).
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white,
+                              width: 2.5,
+                            ),
+                          ),
+                          child: Center(
+                            child: Container(
+                              width: 10,
+                              height: 10,
+                              decoration: const BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white,
+                              ),
+                            ),
                           ),
                         ),
                       ),
