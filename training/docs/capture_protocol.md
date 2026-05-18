@@ -9,6 +9,23 @@ gives sub-mm aperture measurements; a 3/4-view shot can only ever be
 identified by the classifier (no measurement). Both are useful — they go to
 different folders and feed different models.
 
+## TL;DR for new contributions via the Flutter app (post 2026-05-18)
+
+The Flutter Contribute screen now shows a centered **white target circle**.
+Fit the connector face inside the circle, tap shutter. The app crops to a
+centered 60%-of-min-dim square on-device before upload — train and inference
+now share scale automatically, so the model doesn't need to learn distance/
+zoom invariance.
+
+Pinch to zoom if you can't get the phone physically closer (digital zoom is
+fine — the classifier sees 384×384 anyway). The uploaded filename will be
+`reticle_crop.jpg`; older `photo_*` uploads were full-frame and remain in
+the training corpus, but new captures going forward are reticle-cropped.
+
+If you're contributing via the legacy web labeler or the older Flutter
+build, the full-frame protocol below still applies — but new app captures
+should follow the reticle-fit pattern.
+
 ---
 
 ## Equipment

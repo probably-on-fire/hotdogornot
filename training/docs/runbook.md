@@ -3,6 +3,10 @@
 Operational reference. Read `classifier_journey.md` first for *why*
 the pipeline is shaped the way it is.
 
+For the YOLO+EfficientNet pipeline swap (the big 2026-05 architecture
+upgrade), see `docs/backend_swap_jerry_pipeline_runbook.md` at the
+repo root.
+
 ---
 
 ## Box facts

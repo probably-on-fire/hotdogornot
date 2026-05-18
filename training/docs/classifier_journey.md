@@ -3,10 +3,30 @@
 This doc captures the iteration history, key findings, and current state
 of the RF connector classifier. Read this before making more changes.
 
+## Current state (2026-05-18)
+
+- **Production:** ResNet-18 v18, trained 2026-05-05. 68.6% Full / 91.4% Gender
+  on the 35-image carved holdout (`tmp_baseline_eval.md`). 5-7s per image
+  through the Hough/edge-density detector + ResNet-18 classifier.
+- **Staged, not yet deployed:** YOLO11n detector + EfficientNetV2-S classifier
+  ported from `trextrader/hotdogornot` (partner repo). 97.1% Full / 100% Gender
+  on the same holdout, 155ms per image. Lives at
+  `training/rfconnectorai/pipeline/jerry_pipeline.py`; opt in by setting
+  `RFCAI_USE_JERRY_PIPELINE=1` in `/etc/default/rfcai-predict`. Deploy
+  runbook: `docs/backend_swap_jerry_pipeline_runbook.md`.
+- **Flutter app:** reticle-crop capture (commit `c034312`). User fits the
+  connector in a centered circle; app crops to a 60% centered square before
+  upload. Train and inference now share scale. New camera uploads use
+  `reticle_crop.jpg` as filename; older `photo_*` images remain in the
+  training corpus.
+- **Holdout:** 43 images total. 35 freshly carved from train + 8 originals.
+  3.5mm-M and 2.4mm-F have only 1 each (no photo_* in train to carve from).
+  Future captures should prioritize SMA-M, 3.5mm-M, 2.4mm-M/F.
+
 ## Goal
 
-iPhone/Android (eventually) classifier for 8 RF connector classes:
-SMA / 3.5mm / 2.92mm / 2.4mm × M / F. Supports a take-a-photo demo
+iPhone/Android classifier for 10 RF connector classes:
+SMA / 1.85mm / 2.4mm / 2.92mm / 3.5mm × M / F. Supports a take-a-photo demo
 plus a continuous-learning loop where phone uploads grow the dataset.
 
 ## Hard data constraint

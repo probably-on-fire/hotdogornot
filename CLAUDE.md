@@ -1,12 +1,23 @@
 # RF Connector AI — Claude session context
 
-You are picking up an active project. Read this first. Everything below is current as of **2026-05-15**.
+You are picking up an active project. Read this first. Everything below is current as of **2026-05-18**.
 
 ## Elevator pitch
 
-Phone app that identifies RF coaxial connectors (SMA, 1.85mm, 2.4mm, 2.92mm, 3.5mm in male/female) using a ResNet-18 ONNX classifier. Companion web app at **aired.com** for managing training data and granting collaborator logins. Closed-signup multi-user auth.
+Phone app that identifies RF coaxial connectors (SMA, 1.85mm, 2.4mm, 2.92mm, 3.5mm in male/female). Companion web app at **aired.com** for managing training data and granting collaborator logins. Closed-signup multi-user auth.
 
 The Flutter app (`flutter/`) and the Python service (`training/rfconnectorai/server/`) talk to each other through aired.com. The actual ML runs on a LAN box that reverse-SSH-tunnels into aired.com's public-facing nginx.
+
+## Current classifier state (2026-05-18)
+
+Two pipelines live in this repo:
+
+- **Legacy (still serving prod):** Hough/edge-density detector + ResNet-18 ONNX classifier. **68.6% Full / 91.4% Gender** on the 35-image carved holdout (`tmp_baseline_eval.md`), ~5-7s/image.
+- **Staged (env-var gated, ready to deploy):** YOLO11n detector + EfficientNetV2-S classifier, ported from the partner repo `trextrader/hotdogornot`. Lives at `training/rfconnectorai/pipeline/jerry_pipeline.py`. **97.1% Full / 100% Gender** on the same holdout (`tmp_jerry_pipeline_eval.py`), ~155ms/image on CPU.
+
+The new pipeline is committed but NOT yet active in production — `predict_service.py` only routes through it when `RFCAI_USE_JERRY_PIPELINE=1` is set in `/etc/default/rfcai-predict`. See `docs/backend_swap_jerry_pipeline_runbook.md` for the deploy steps; the swap needs ~10 min on the LAN box.
+
+The Flutter app (commit `c034312`) also added a **reticle-crop UX**: user fits the connector inside a centered circle, app crops to a 60% centered square before upload. Train and inference now share scale. Confidence threshold tightened 0.40 → 0.65. See [the memory](MEMORY.md) for the rationale.
 
 ## Immediate goal of this session
 
@@ -127,11 +138,17 @@ To share with a phone over local Wi-Fi: `python -m http.server 8000` from the AP
 flutter/                    Flutter app (Android + iOS)
   lib/src/
     screens/
-      identify_screen.dart  Camera live preview + /predict API
-      contribute_screen.dart Capture flow (auth-gated)
+      identify_screen.dart  Camera live preview + /predict API. Pinch zoom,
+                            reticle overlay, post-capture bbox painter.
+      contribute_screen.dart Capture flow (auth-gated). Same reticle + zoom.
+                            Camera uploads are now reticle-cropped JPEGs
+                            (filename: reticle_crop.jpg).
       about_screen.dart     App info + on-device toggle
       main_shell.dart       Bottom-nav with three tabs
       login_screen.dart     (none — login is a card inside contribute_screen)
+    widgets/
+      reticle.dart          Shared centered target circle (28% min-dim
+                            radius). Used by Identify + Contribute.
     auth.dart               AuthService (ChangeNotifier, Bearer tokens)
     api.dart                ApiClient — predict + labeler endpoints
     settings.dart           Relay URL + on-device toggle (NO creds anymore)
@@ -146,13 +163,22 @@ flutter/                    Flutter app (Android + iOS)
 training/
   rfconnectorai/server/
     labeler.py              All labeler routes (~40 endpoints)
-    predict_service.py      FastAPI app + SessionMiddleware + plugin glue
+    predict_service.py      FastAPI app + SessionMiddleware + plugin glue.
+                            Reads RFCAI_USE_JERRY_PIPELINE to route through
+                            jerry_pipeline.py instead of Hough+ResNet18.
     auth.py                 Users + API tokens + scrypt (stdlib only)
     templates/labeler/
       _base.html            Shared chrome (CSS variables, header, nav)
       index.html            Grid view
       login.html            Sign-in card
       admin_users.html      User management UI
+  rfconnectorai/pipeline/
+    jerry_pipeline.py       YOLO11n + EfficientNetV2-S ONNX inference.
+                            Ported from trextrader/hotdogornot. Uses
+                            PIL.BILINEAR (NOT cv2.INTER_LINEAR — see the
+                            preprocessing note below).
+    detect_classify.py      Legacy multi-head training-time pipeline.
+    predict_cli.py          Batch CLI for the multi-head model.
   scripts/
     seed_labeler_users.py   Seeds 3 admin users with random passwords
     auto_retrain.py         Training loop (--data-dir --model-dir --epochs)
@@ -175,7 +201,16 @@ docs/
   runbook.md, etc.          Various operational + architectural notes
 ```
 
-## Recent work (what changed in the last session, 2026-05-14 → 2026-05-15)
+## Recent work (2026-05-17 → 2026-05-18)
+
+1. **35-image carved holdout** — moved 5 photo_* files per class from train → holdout for 7 classes via the labeler API (see `tmp_carve.py` + `tmp_carve_execute.py`). Holdout grew 8 → 43. Gaps: 3.5mm-M and 2.4mm-F have no photo_* in train (only synthetic), 2.4mm-M labeler /grid hung on enumeration. Carve scripts kept the `source_backup/` hardlinks so nothing is actually lost.
+2. **Baseline v18 eval (clean)** — 68.6% Full / 91.4% Gender on the 35 new images (`tmp_baseline_eval.md`). v18 was trained 2026-05-05; carved images are dated 2026-05-14+, so this is honest out-of-training-set performance, not inflated.
+3. **Partner pipeline benchmark** — `trextrader/hotdogornot`'s YOLO11n + EfficientNetV2-S scored **94.3%** on the same 35 images (`tmp_partner_eval.md`), 40× faster latency.
+4. **Pipeline ported into our repo** — `training/rfconnectorai/pipeline/jerry_pipeline.py` is a Python implementation of Jerry's `exports/web/app.js`. Routes through `predict_service.py` when `RFCAI_USE_JERRY_PIPELINE=1` is set in `/etc/default/rfcai-predict`. Local sanity test (`tmp_jerry_pipeline_eval.py`): **97.1%** on our 35-image holdout. Critical preprocessing gotcha: use PIL.BILINEAR, not cv2.INTER_LINEAR — costs 14pts otherwise.
+5. **Flutter reticle-crop UX** — pinch-to-zoom + shared `widgets/reticle.dart` overlay on both Identify and Contribute. Captured photos are cropped to a centered 60%-of-min-dim square ON-DEVICE before upload, so train and inference share scale. Filename for camera uploads: `reticle_crop.jpg`. Tightened `_kMinAcceptedConfidence` 0.40 → 0.65 in identify_screen.dart. Post-capture: detector bbox painted on the frozen frame (green = accepted, amber = below threshold).
+6. **Runbooks** — `docs/backend_swap_jerry_pipeline_runbook.md` (deploy Jerry's pipeline on the box, ~10 min on LAN) and `docs/v20_tighter_crop_runbook.md` (alternative tighter-crop experiment if you ever want to claw back accuracy on the legacy ResNet-18 path).
+
+## Recent work (last session, 2026-05-14 → 2026-05-15)
 
 1. **Contribute screen rebuild** — per-class session counters with bottom-sheet, Undo stack (single-tap, 500-entry cap), on-device classifier check toast (serialized to prevent OOM under burst), session-prefixed filenames (`photo_YYYY-MM-DD_*`), video uploads now require gender.
 2. **Server-side hardlink backup** — every `/upload-train` and `/upload-test` also hardlinks to `data/source_backup/<cls>/`. Deletion from the working dir leaves the backup intact (different inode-shared name).
@@ -189,13 +224,16 @@ docs/
 
 ## Pending work
 
+- **Deploy Jerry's pipeline to the box** — runbook at `docs/backend_swap_jerry_pipeline_runbook.md`. Needs LAN access to scp ONNX files + set env vars in `/etc/default/rfcai-predict`. Existing `/predict` API contract unchanged — Flutter app gets the win automatically.
+- **Build + test new Flutter APK** — commit `c034312` adds reticle crop, pinch zoom, tighter abstention, bbox overlay. Pull on Mac, `flutter pub get`, `flutter analyze`, `flutter build apk --release` (Android) or `pod install` + Xcode (iOS).
+- **Capture more reticle-cropped training data** — once new APK is on phones, every Contribute upload is a `reticle_crop.jpg`. Prioritize SMA-M (29 train samples post-carve), 3.5mm-M and 2.4mm-F (0 photo_* in train), 2.4mm-M.
 - **Task 9 cleanup pass** (still queued) — remove the HTTP Basic auth fallback from `require_admin`, delete `_require_basic_auth`, remove `LABELER_USER`/`LABELER_PASS` env vars from `/etc/default/rfcai-predict`, add `itsdangerous` to `requirements.txt`/`pyproject.toml`. Do this AFTER iOS smoke-tests Bearer tokens.
-- **iOS smoke test** — actually build and install on iPhone (this session's goal).
-- **Combined-data experiment** — train a model on legacy + new captures, eval on holdout, compare to current production. The session-only-training experiment already ran (`/tmp/rfcai_session_model` on the box) and confirmed too little data to generalize alone.
-- **More capture** — SMA-M is still 0 samples (Miro shipment didn't include any). 1.85mm M/F have ~30 each, want ~50-100.
+- **iOS smoke test** — actually build and install on iPhone.
 
 ## Common gotchas
 
+- **PIL.BILINEAR ≠ cv2.INTER_LINEAR for the YOLO+EffNet pipeline** — both are "bilinear" but different sampling-center conventions produce different pixel values. Costs ~14pts of accuracy on fine-pitch female connectors (2.92mm-F / 3.5mm-F / 1.85mm-F confusions). `jerry_pipeline.py` uses PIL throughout to match the partner's torchvision training stack. If you ever see <90% on the 35-image holdout after the swap, suspect resampling first.
+- **Labeler /grid hangs on cold load for most classes** — see [memory](C:\Users\chris\.claude\projects\E--anduril\memory\labeler_grid_hang.md). Restart `rfcai-predict` on the box before any /grid enumeration.
 - **Box `nvidia-smi` shows driver mismatch** — cosmetic. CUDA runtime works. Don't reboot — production processes have open GPU handles.
 - **`ProtectSystem=strict` on rfcai-predict.service** — only `/home/rfcai`, `/opt/rfcai/repo/training/data`, `/opt/rfcai/repo/training/models` are writeable. Adding code that writes elsewhere requires editing `ReadWritePaths` in the unit file + `systemctl daemon-reload`.
 - **`itsdangerous` is needed** for FastAPI's `SessionMiddleware`. Installed manually in the rfcai venv (`pip install itsdangerous`); should be added to a requirements file eventually.
