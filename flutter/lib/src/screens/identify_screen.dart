@@ -6,21 +6,25 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
 import '../ondevice/classifier.dart';
 import '../settings.dart';
 import '../theme.dart';
+import '../widgets/reticle.dart';
 
 const _kFamilies = ['SMA', '3.5mm', '2.92mm', '2.4mm', '1.85mm'];
 const _kGenders = ['M', 'F'];
 
 // Below this top-class confidence we treat the prediction as "no real
-// connector found" rather than a verdict — the classifier always emits
-// a softmax over 8 classes, so on background-only frames it returns a
-// best-of-noise pick that we'd otherwise show as a confident answer.
-const _kMinAcceptedConfidence = 0.40;
+// connector found" rather than a verdict. Tightened from 0.40 → 0.65
+// after measuring v18 on a fresh 35-image holdout: most wrong answers
+// passed 0.40 with conviction. 0.65 keeps the correct ones (median was
+// ~0.87) while turning the bulk of misclassifications into "uncertain"
+// guidance, which is more useful than a wrong class.
+const _kMinAcceptedConfidence = 0.65;
 
 // Background frames produce many tiny spurious Hough detections (often
 // well under 1% of image area, sometimes with very high softmax conf
@@ -28,6 +32,14 @@ const _kMinAcceptedConfidence = 0.40;
 // held up to the camera occupies a much larger fraction of the frame.
 // Reject any single-detection bbox below this fraction of the image.
 const _kMinBboxFractionOfImage = 0.02;
+
+// Center-crop side as a fraction of min(width, height). The reticle
+// circle has radius 28% of min dim → diameter 56%. We crop slightly
+// looser (60%) to give the server-side detector breathing room. The
+// user-facing UX is "fit the connector in the circle"; the resulting
+// crop has constant scale at the classifier regardless of phone
+// resolution or how far back the user holds the camera.
+const _kReticleCropFraction = 0.60;
 
 enum _Mode { photo, video }
 
@@ -52,6 +64,15 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   bool _camInitFailed = false;
   bool _camInitInFlight = false;   // re-entrancy guard for _initCamera
   String? _camInitError;
+
+  // Pinch-to-zoom. Camera zoom range varies by device (typical iPhone is
+  // 1.0–6.0 digital + telephoto). We clamp to the controller's reported
+  // bounds at init time and apply incremental scale gestures.
+  double _zoomMin = 1.0;
+  double _zoomMax = 1.0;
+  double _zoomCurrent = 1.0;
+  double _zoomAtGestureStart = 1.0;
+  bool _zoomHintVisible = false;
 
   _Mode _mode = _Mode.photo;
   bool _busy = false;       // capture / classify in flight
@@ -168,6 +189,11 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       try {
         await controller.setFocusMode(FocusMode.auto);
       } catch (_) {/* not all devices support manual focus mode */}
+      double zMin = 1.0, zMax = 1.0;
+      try {
+        zMin = await controller.getMinZoomLevel();
+        zMax = await controller.getMaxZoomLevel();
+      } catch (_) {/* not all devices report zoom range */}
       if (!mounted) {
         await controller.dispose();
         return;
@@ -175,6 +201,9 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       setState(() {
         _cam = controller;
         _camInitFailed = false;
+        _zoomMin = zMin;
+        _zoomMax = zMax;
+        _zoomCurrent = zMin;
       });
     } catch (e) {
       if (!mounted) return;
@@ -202,7 +231,9 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     if (cam != null && cam.value.isInitialized) {
       try {
         final shot = await cam.takePicture();
-        await _classifyPhotoFile(File(shot.path));
+        final raw = await File(shot.path).readAsBytes();
+        final cropped = _cropToReticleBytes(raw);
+        await _classifyPhotoBytes(cropped, 'reticle_crop.jpg');
       } catch (e) {
         setState(() => _error = 'Capture failed: $e');
       }
@@ -343,6 +374,42 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       _contributionStatus = null;
       _selFamily = null;
       _selGender = null;
+    });
+  }
+
+  Uint8List _cropToReticleBytes(Uint8List bytes) {
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return bytes;
+    final w = decoded.width;
+    final h = decoded.height;
+    final side = (math.min(w, h) * _kReticleCropFraction).toInt();
+    final x = ((w - side) / 2).round();
+    final y = ((h - side) / 2).round();
+    final cropped = img.copyCrop(decoded, x: x, y: y, width: side, height: side);
+    return Uint8List.fromList(img.encodeJpg(cropped, quality: 92));
+  }
+
+  void _onScaleStart(ScaleStartDetails _) {
+    _zoomAtGestureStart = _zoomCurrent;
+  }
+
+  Future<void> _onScaleUpdate(ScaleUpdateDetails d) async {
+    final cam = _cam;
+    if (cam == null || !cam.value.isInitialized) return;
+    if (_zoomMax <= _zoomMin) return;
+    final z = (_zoomAtGestureStart * d.scale).clamp(_zoomMin, _zoomMax);
+    if ((z - _zoomCurrent).abs() < 0.02) return;
+    _zoomCurrent = z;
+    try {
+      await cam.setZoomLevel(z);
+    } catch (_) {/* device rejected zoom level — ignore */}
+    if (mounted) setState(() => _zoomHintVisible = true);
+  }
+
+  void _onScaleEnd(ScaleEndDetails _) {
+    if (!mounted) return;
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _zoomHintVisible = false);
     });
   }
 
@@ -501,12 +568,47 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          _buildPreview(),
+          // Pinch-to-zoom is active only on the live preview (no-op
+          // when a result is showing — the captured photo is static).
+          GestureDetector(
+            onScaleStart: _result == null ? _onScaleStart : null,
+            onScaleUpdate: _result == null ? _onScaleUpdate : null,
+            onScaleEnd: _result == null ? _onScaleEnd : null,
+            behavior: HitTestBehavior.opaque,
+            child: _buildPreview(),
+          ),
           // Centered target reticle to help users frame the connector
           // — only visible on the live preview (hide when showing
           // a captured photo + result).
           if (_result == null && _error == null && !_busy && !_camInitFailed)
-            const IgnorePointer(child: _ReticleOverlay()),
+            const IgnorePointer(child: ReticleOverlay()),
+          // Zoom-level indicator — appears briefly while pinching.
+          if (_zoomHintVisible && _result == null)
+            IgnorePointer(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: EdgeInsets.only(
+                    top: MediaQuery.of(context).padding.top + 64,
+                  ),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      '${_zoomCurrent.toStringAsFixed(1)}×',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           // Mode toggle (photo / video) — hidden while showing a result.
           if (_result == null && _error == null)
             Positioned(
@@ -543,15 +645,29 @@ class _IdentifyScreenState extends State<IdentifyScreen>
 
   Widget _buildPreview() {
     // When we have a result, freeze the captured photo on screen instead
-    // of showing the live preview.
+    // of showing the live preview. Overlay the detector bbox so the user
+    // sees what the model actually locked onto.
     if (_result != null && _mode == _Mode.photo) {
+      final bboxOverlay = _BboxOverlay(response: _result!);
       if (_capturedBytes != null) {
-        return Image.memory(_capturedBytes!,
-            fit: BoxFit.cover, alignment: Alignment.center);
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.memory(_capturedBytes!,
+                fit: BoxFit.cover, alignment: Alignment.center),
+            IgnorePointer(child: bboxOverlay),
+          ],
+        );
       }
       if (_capturedFile != null) {
-        return Image.file(_capturedFile!,
-            fit: BoxFit.cover, alignment: Alignment.center);
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(_capturedFile!,
+                fit: BoxFit.cover, alignment: Alignment.center),
+            IgnorePointer(child: bboxOverlay),
+          ],
+        );
       }
     }
     final cam = _cam;
@@ -949,70 +1065,82 @@ class _ShutterButton extends StatelessWidget {
   }
 }
 
-class _ReticleOverlay extends StatelessWidget {
-  const _ReticleOverlay();
+// Reticle was extracted to lib/src/widgets/reticle.dart so the
+// Contribute screen can share the same target circle.
+
+/// Draws the top-accepted prediction's bbox on the captured frame so
+/// the user sees what the detector locked onto. Diagnostic only — not
+/// a live overlay. Bbox is in image pixel coords (x, y, w, h); we map
+/// to widget coords assuming BoxFit.cover with the same center.
+class _BboxOverlay extends StatelessWidget {
+  const _BboxOverlay({required this.response});
+  final PredictResponse response;
 
   @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _ReticlePainter(),
-      child: const SizedBox.expand(),
+    if (response.predictions.isEmpty) return const SizedBox.shrink();
+    final top = response.predictions.first;
+    return LayoutBuilder(
+      builder: (ctx, c) {
+        return CustomPaint(
+          painter: _BboxPainter(
+            imageW: response.imageWidth,
+            imageH: response.imageHeight,
+            bbox: top.bbox,
+            color: top.confidence >= _kMinAcceptedConfidence
+                ? Colors.greenAccent
+                : Colors.amberAccent,
+          ),
+          size: Size(c.maxWidth, c.maxHeight),
+        );
+      },
     );
   }
 }
 
-class _ReticlePainter extends CustomPainter {
+class _BboxPainter extends CustomPainter {
+  _BboxPainter({
+    required this.imageW,
+    required this.imageH,
+    required this.bbox,
+    required this.color,
+  });
+  final int imageW;
+  final int imageH;
+  final Map<String, int> bbox;
+  final Color color;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final r = math.min(size.width, size.height) * 0.28;
-    final ringPaint = Paint()
-      ..color = Colors.white.withOpacity(0.55)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5;
-    final dashPaint = Paint()
-      ..color = Colors.white.withOpacity(0.85)
+    if (imageW <= 0 || imageH <= 0) return;
+    final iw = imageW.toDouble();
+    final ih = imageH.toDouble();
+    // BoxFit.cover: scale so image fills the widget, then center.
+    final scale = math.max(size.width / iw, size.height / ih);
+    final dw = iw * scale;
+    final dh = ih * scale;
+    final dx0 = (size.width - dw) / 2;
+    final dy0 = (size.height - dh) / 2;
+    final x = (bbox['x'] ?? 0).toDouble();
+    final y = (bbox['y'] ?? 0).toDouble();
+    final w = (bbox['w'] ?? 0).toDouble();
+    final h = (bbox['h'] ?? 0).toDouble();
+    final rect = Rect.fromLTWH(
+      dx0 + x * scale,
+      dy0 + y * scale,
+      w * scale,
+      h * scale,
+    );
+    final paint = Paint()
+      ..color = color
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0;
-    // Outer guide ring — where the connector face should fit.
-    canvas.drawCircle(Offset(cx, cy), r, ringPaint);
-    // Four corner ticks at the inscribed-square corners — gives a
-    // sharper target than a single circle without cluttering the view.
-    final tick = r * 0.18;
-    final s = r / math.sqrt(2);   // half-side of inscribed square
-    for (final sx in const [-1.0, 1.0]) {
-      for (final sy in const [-1.0, 1.0]) {
-        final ax = cx + sx * s;
-        final ay = cy + sy * s;
-        canvas.drawLine(Offset(ax, ay), Offset(ax - sx * tick, ay), dashPaint);
-        canvas.drawLine(Offset(ax, ay), Offset(ax, ay - sy * tick), dashPaint);
-      }
-    }
-    // Tiny crosshair in the dead center.
-    final ch = r * 0.08;
-    canvas.drawLine(Offset(cx - ch, cy), Offset(cx + ch, cy), dashPaint);
-    canvas.drawLine(Offset(cx, cy - ch), Offset(cx, cy + ch), dashPaint);
-
-    // "CENTER CONNECTOR" hint above the reticle.
-    final tp = TextPainter(
-      text: TextSpan(
-        text: 'CENTER CONNECTOR',
-        style: TextStyle(
-          color: Colors.white.withOpacity(0.7),
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.5,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    tp.layout();
-    tp.paint(canvas, Offset(cx - tp.width / 2, cy - r - tp.height - 8));
+    canvas.drawRect(rect, paint);
   }
 
   @override
-  bool shouldRepaint(covariant _ReticlePainter oldDelegate) => false;
+  bool shouldRepaint(covariant _BboxPainter old) =>
+      old.bbox != bbox || old.color != color;
 }
 
 class _RoundIconButton extends StatelessWidget {

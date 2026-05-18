@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
@@ -7,15 +8,22 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import '../api.dart';
 import '../auth.dart';
 import '../ondevice/classifier.dart';
 import '../settings.dart';
+import '../widgets/reticle.dart';
 
 const _kFamilies = ['SMA', '3.5mm', '2.92mm', '2.4mm', '1.85mm'];
 const _kGenders = ['M', 'F'];
+
+// Match the identify-screen reticle crop. Training images get the
+// same crop the classifier will see at inference so the two
+// distributions match.
+const _kReticleCropFraction = 0.60;
 
 class _SessionRecord {
   _SessionRecord({required this.record, required this.holdout});
@@ -52,6 +60,14 @@ class _ContributeScreenState extends State<ContributeScreen>
   bool _camInitFailed = false;
   bool _camInitInFlight = false;
   String? _camInitError;
+
+  // Pinch-to-zoom (mirrors identify_screen). Bounds set from controller
+  // after init; gestures clamp + invoke setZoomLevel.
+  double _zoomMin = 1.0;
+  double _zoomMax = 1.0;
+  double _zoomCurrent = 1.0;
+  double _zoomAtGestureStart = 1.0;
+  bool _zoomHintVisible = false;
 
   // Sticky class selection — set once, keep shooting.
   String _family = '2.4mm';
@@ -202,6 +218,11 @@ class _ContributeScreenState extends State<ContributeScreen>
       );
       await controller.initialize();
       try { await controller.setFocusMode(FocusMode.auto); } catch (_) {}
+      double zMin = 1.0, zMax = 1.0;
+      try {
+        zMin = await controller.getMinZoomLevel();
+        zMax = await controller.getMaxZoomLevel();
+      } catch (_) {}
       if (!mounted) {
         await controller.dispose();
         return;
@@ -209,6 +230,9 @@ class _ContributeScreenState extends State<ContributeScreen>
       setState(() {
         _cam = controller;
         _camInitFailed = false;
+        _zoomMin = zMin;
+        _zoomMax = zMax;
+        _zoomCurrent = zMin;
       });
     } catch (e) {
       if (!mounted) return;
@@ -223,6 +247,42 @@ class _ContributeScreenState extends State<ContributeScreen>
 
   String get _classLabel => '$_family-$_gender';
 
+  Uint8List _cropToReticleBytes(Uint8List bytes) {
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return bytes;
+    final w = decoded.width;
+    final h = decoded.height;
+    final side = (math.min(w, h) * _kReticleCropFraction).toInt();
+    final x = ((w - side) / 2).round();
+    final y = ((h - side) / 2).round();
+    final cropped = img.copyCrop(decoded, x: x, y: y, width: side, height: side);
+    return Uint8List.fromList(img.encodeJpg(cropped, quality: 92));
+  }
+
+  void _onScaleStart(ScaleStartDetails _) {
+    _zoomAtGestureStart = _zoomCurrent;
+  }
+
+  Future<void> _onScaleUpdate(ScaleUpdateDetails d) async {
+    final cam = _cam;
+    if (cam == null || !cam.value.isInitialized) return;
+    if (_zoomMax <= _zoomMin) return;
+    final z = (_zoomAtGestureStart * d.scale).clamp(_zoomMin, _zoomMax);
+    if ((z - _zoomCurrent).abs() < 0.02) return;
+    _zoomCurrent = z;
+    try {
+      await cam.setZoomLevel(z);
+    } catch (_) {}
+    if (mounted) setState(() => _zoomHintVisible = true);
+  }
+
+  void _onScaleEnd(ScaleEndDetails _) {
+    if (!mounted) return;
+    Future.delayed(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _zoomHintVisible = false);
+    });
+  }
+
   Future<void> _onShutter() async {
     if (_shutterBusy) return;
     setState(() => _shutterBusy = true);
@@ -231,9 +291,14 @@ class _ContributeScreenState extends State<ContributeScreen>
     try {
       if (cam != null && cam.value.isInitialized) {
         final shot = await cam.takePicture();
-        // Fire-and-forget upload so the camera is ready for the next shot.
-        unawaited(_uploadFile(File(shot.path)));
-        unawaited(_runOnDeviceCheck(File(shot.path), _classLabel));
+        final raw = await File(shot.path).readAsBytes();
+        // Crop to the reticle ROI on-device so training matches the
+        // distribution the classifier sees at inference time. Future
+        // retrains see consistent scale regardless of phone resolution
+        // or capture distance.
+        final cropped = _cropToReticleBytes(raw);
+        unawaited(_uploadBytes(cropped, 'reticle_crop.jpg'));
+        unawaited(_runOnDeviceCheckBytes(cropped, _classLabel));
       } else {
         // Web / no-camera fallback — OS camera dialog.
         final pf = await ImagePicker().pickImage(
@@ -418,7 +483,11 @@ class _ContributeScreenState extends State<ContributeScreen>
     }
   }
 
-  Future<void> _runOnDeviceCheck(File f, String cls) async {
+  Future<void> _runOnDeviceCheck(File f, String cls) =>
+      _runOnDeviceCheckBytes(null, cls, file: f);
+
+  Future<void> _runOnDeviceCheckBytes(Uint8List? bytes, String cls,
+      {File? file}) async {
     // Skip if a previous check is still running. Rapid-fire shutter taps
     // get their upload (which is what matters) but skip the agree/disagree
     // toast for that shot — prevents memory pressure from N concurrent
@@ -426,8 +495,8 @@ class _ContributeScreenState extends State<ContributeScreen>
     if (_onDeviceCheckBusy) return;
     _onDeviceCheckBusy = true;
     try {
-      final bytes = await f.readAsBytes();
-      final pred = await OnDeviceClassifier.instance.predict(bytes);
+      final imgBytes = bytes ?? await file!.readAsBytes();
+      final pred = await OnDeviceClassifier.instance.predict(imgBytes);
       if (!mounted) return;
       if (pred.className == cls) {
         // Model agrees with the chip — the upload's success toast is
@@ -503,7 +572,42 @@ class _ContributeScreenState extends State<ContributeScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          _buildPreview(),
+          GestureDetector(
+            onScaleStart: _onScaleStart,
+            onScaleUpdate: _onScaleUpdate,
+            onScaleEnd: _onScaleEnd,
+            behavior: HitTestBehavior.opaque,
+            child: _buildPreview(),
+          ),
+          // Reticle is the visual contract: user fits the connector
+          // inside, we crop to its inscribing square at capture time.
+          if (_cam != null && _cam!.value.isInitialized && _isSignedIn)
+            const IgnorePointer(child: ReticleOverlay(hint: 'FIT IN CIRCLE')),
+          if (_zoomHintVisible)
+            IgnorePointer(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: EdgeInsets.only(
+                      top: MediaQuery.of(context).padding.top + 64),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      '${_zoomCurrent.toStringAsFixed(1)}×',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             top: MediaQuery.of(context).padding.top + 12,
             left: 12,
