@@ -58,15 +58,28 @@ with `ReadWritePaths=/home/rfcai /opt/rfcai/repo/training/data
 ReadWritePaths, so the service can read the new files without a unit
 edit.
 
-## 2. Apply the code patch
+## 2. Pull the staged code on the box
 
-We add a new pipeline class that the predict service can opt into via
-env var. Keeps the v18 path live as a fallback (set the env var back
-to 0 to revert).
+The pipeline wrapper and the env-var gate are already committed
+(`training/rfconnectorai/pipeline/jerry_pipeline.py` +
+`predict_service.py` patch). Just pull on the box:
 
-Create `training/rfconnectorai/pipeline/jerry_pipeline.py` in this repo
-(I'll commit this as a follow-up — for now you can paste it on the
-box directly):
+```bash
+sudo -u rfcai git -C /opt/rfcai/training pull --ff-only
+```
+
+If you want to read what changed before pulling:
+
+```bash
+git diff master~1 master -- training/rfconnectorai/pipeline/jerry_pipeline.py training/rfconnectorai/server/predict_service.py | less
+```
+
+### Reference: how the wrapper works
+
+The wrapper is a Python port of Jerry's `exports/web/app.js`. It uses
+PIL.BILINEAR for resampling (not cv2.INTER_LINEAR — that costs ~14
+points of accuracy on fine-pitch female connectors per a 2026-05-18
+sanity test). Inference flow:
 
 ```python
 """YOLO11n detector + EfficientNetV2-S classifier — replicates Jerry's
@@ -179,22 +192,12 @@ class JerryPipeline:
         return out
 ```
 
-Then in `training/rfconnectorai/server/predict_service.py`, add at module
-load time:
-
-```python
-_JERRY = None
-if os.environ.get("RFCAI_USE_JERRY_PIPELINE") == "1":
-    from rfconnectorai.pipeline.jerry_pipeline import JerryPipeline
-    _JERRY = JerryPipeline(Path(os.environ["RFCAI_JERRY_MODEL_DIR"]))
-```
-
-And in `_classify_frame(bgr)`, near the top:
-
-```python
-if _JERRY is not None:
-    return _JERRY.run(bgr)
-```
+The `predict_service.py` patch is similarly already committed — at
+`create_app` time it instantiates the wrapper when the env var is set,
+and `_classify_frame` short-circuits through `jerry_pipeline.run(bgr)`
+before the legacy Hough+ResNet18 path. If the env var isn't set,
+behavior is byte-identical to before the patch — safe to merge to
+master before swapping.
 
 ## 3. Configure the env var + restart
 

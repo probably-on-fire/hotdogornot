@@ -142,6 +142,28 @@ def create_app(config: dict | None = None) -> FastAPI:
     yolo_conf_threshold: float = cfg.get("yolo_conf", DEFAULT_YOLO_CONF)
     specs_path: Path = cfg.get("specs_path", Path(DEFAULT_SPECS_PATH))
 
+    # Optional swap-in: YOLO11n + EfficientNetV2-S pipeline (sourced from
+    # trextrader/hotdogornot). When RFCAI_USE_JERRY_PIPELINE=1 is set and
+    # RFCAI_JERRY_MODEL_DIR points at a folder with {detector,classifier}.onnx
+    # + classifier_labels.json (+ optional thresholds.json), all /predict
+    # calls route through it instead of the Hough+ResNet18 path below.
+    # Unset → existing path runs unchanged. Validated against our 35-image
+    # holdout at 97.1% Full / 100.0% Gender vs the legacy path's 68.6%.
+    jerry_pipeline = None
+    if os.environ.get("RFCAI_USE_JERRY_PIPELINE") == "1":
+        jerry_dir = os.environ.get("RFCAI_JERRY_MODEL_DIR")
+        if not jerry_dir:
+            raise RuntimeError(
+                "RFCAI_USE_JERRY_PIPELINE=1 but RFCAI_JERRY_MODEL_DIR is unset"
+            )
+        from rfconnectorai.pipeline.jerry_pipeline import JerryPipeline
+        jerry_pipeline = JerryPipeline(Path(jerry_dir))
+        print(
+            f"[predict] jerry pipeline enabled: dir={jerry_dir} "
+            f"classes={jerry_pipeline.class_names} box_min={jerry_pipeline.box_min}",
+            flush=True,
+        )
+
     app = FastAPI(title="RF Connector AI prediction service", version="1.0.0")
 
     app.add_middleware(
@@ -378,6 +400,14 @@ def create_app(config: dict | None = None) -> FastAPI:
         crops are dropped before classification (the bias-locked
         ResNet-18 will otherwise emit a confident wrong answer for
         background patches)."""
+        # Short-circuit: when the Jerry pipeline is active, skip the
+        # entire Hough+rembg+ResNet18 path. The YOLO detector is robust
+        # enough that the foreground filter is redundant.
+        if jerry_pipeline is not None:
+            preds = jerry_pipeline.run(bgr)
+            for p in preds:
+                p["spec"] = _lookup_spec(p["class_name"])
+            return preds
         import time as _time
         _t0 = _time.perf_counter()
         crops = detect_connector_crops(bgr, max_crops=max_detections)
