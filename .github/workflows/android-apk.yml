@@ -1,0 +1,93 @@
+name: android-apk
+
+# Builds the Flutter Android APK on every push to master + on manual
+# trigger. Publishes under a rolling tag `apk-latest` so the phone
+# download URL is stable:
+#   https://github.com/<owner>/<repo>/releases/download/apk-latest/app-release.apk
+#
+# Release builds are signed with the debug key (see flutter/android/app/
+# build.gradle — release block uses signingConfigs.debug). That's fine
+# for sideload-on-your-own-phone testing; the APK will prompt for
+# "install unknown sources" the first time. Don't ship this to a store.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'flutter/**'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to create + update the rolling Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show Flutter env
+        run: flutter --version
+
+      - name: flutter pub get
+        working-directory: flutter
+        run: flutter pub get
+
+      - name: Build release APK
+        working-directory: flutter
+        run: flutter build apk --release
+
+      - name: Rename APK with commit + timestamp
+        id: rename
+        run: |
+          SRC=flutter/build/app/outputs/flutter-apk/app-release.apk
+          if [ ! -f "$SRC" ]; then
+            echo "::error::expected APK at $SRC not found"
+            ls -la flutter/build/app/outputs/flutter-apk/ || true
+            exit 1
+          fi
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TS=$(date -u +%Y%m%dT%H%M%S)
+          DST=app-release-${TS}-${SHA}.apk
+          cp "$SRC" "$DST"
+          ls -la "$DST"
+          echo "apk=$DST" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to rolling `apk-latest` release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: Android APK (latest from master)
+          prerelease: true
+          # Keep both the stably-named file (for a constant download URL)
+          # and the timestamped file (so older builds can be referenced
+          # if a regression slips in).
+          files: |
+            flutter/build/app/outputs/flutter-apk/app-release.apk
+            ${{ steps.rename.outputs.apk }}
+          body: |
+            Latest Flutter Android build from master (`${{ steps.rename.outputs.sha }}`).
+
+            **Stable download URL** (replaces on every commit to master):
+            `https://github.com/${{ github.repository }}/releases/download/apk-latest/app-release.apk`
+
+            Sideload on Android: open that URL in Chrome on the phone,
+            allow "install from unknown sources" the first time, install.
+
+            Debug-keyed release build — fine for sideload testing.
