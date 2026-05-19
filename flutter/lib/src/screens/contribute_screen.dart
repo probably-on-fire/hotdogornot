@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
@@ -24,6 +23,9 @@ const _kGenders = ['M', 'F'];
 // same crop the classifier will see at inference so the two
 // distributions match.
 const _kReticleCropFraction = 0.60;
+
+// Shutter dispatches photo vs. start/stop-record based on this.
+enum _CaptureMode { photo, video }
 
 class _SessionRecord {
   _SessionRecord({required this.record, required this.holdout});
@@ -86,6 +88,12 @@ class _ContributeScreenState extends State<ContributeScreen>
       .substring(0, 10);  // YYYY-MM-DD
 
   bool _shutterBusy = false;     // single-flight guard on capture
+  // Photo vs. in-app video record. The shutter button dispatches
+  // through _onShutter based on this + _recording.
+  _CaptureMode _captureMode = _CaptureMode.photo;
+  bool _recording = false;
+  DateTime? _recordStartedAt;
+  Timer? _recordTicker;          // forces rebuild ~10/sec so the timer label updates
   // Skip-if-busy guard on the on-device classifier: only one check runs
   // at a time. Rapid-fire shots get their upload (fine) but skip the
   // post-hoc model agree/disagree toast — prevents OOM under burst
@@ -161,6 +169,7 @@ class _ContributeScreenState extends State<ContributeScreen>
   @override
   void dispose() {
     _toastTimer?.cancel();
+    _recordTicker?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     widget.auth.removeListener(_onAuthChanged);
     _cam?.dispose();
@@ -247,6 +256,95 @@ class _ContributeScreenState extends State<ContributeScreen>
 
   String get _classLabel => '$_family-$_gender';
 
+  Future<void> _toggleRecording() async {
+    final cam = _cam;
+    if (cam == null || !cam.value.isInitialized) {
+      _showToast('Camera not available for video on this platform.',
+          error: true);
+      return;
+    }
+    if (!_recording) {
+      try {
+        await cam.startVideoRecording();
+        if (!mounted) return;
+        setState(() {
+          _recording = true;
+          _recordStartedAt = DateTime.now();
+        });
+        // Tick at ~10Hz to refresh the 0:00 timer label; we don't drive
+        // any actual recording state from this, just the UI.
+        _recordTicker = Timer.periodic(const Duration(milliseconds: 100), (_) {
+          if (mounted) setState(() {});
+        });
+        HapticFeedback.mediumImpact();
+      } catch (e) {
+        _showToast('Record start failed: ${_friendlyError(e)}', error: true);
+      }
+    } else {
+      // Stop. The class + holdout intent is captured here so the
+      // user can flip chips for the next clip without retroactively
+      // re-routing the upload that's about to start.
+      final cls = _classLabel;
+      final family = _family;
+      final gender = _gender;
+      try {
+        final clip = await cam.stopVideoRecording();
+        _recordTicker?.cancel();
+        _recordTicker = null;
+        if (!mounted) return;
+        final dur = DateTime.now()
+            .difference(_recordStartedAt ?? DateTime.now())
+            .inSeconds;
+        setState(() {
+          _recording = false;
+          _recordStartedAt = null;
+        });
+        HapticFeedback.mediumImpact();
+        unawaited(_uploadVideoFile(File(clip.path), family, gender, dur, cls));
+      } catch (e) {
+        _recordTicker?.cancel();
+        _recordTicker = null;
+        if (mounted) {
+          setState(() {
+            _recording = false;
+            _recordStartedAt = null;
+          });
+        }
+        _showToast('Record stop failed: ${_friendlyError(e)}', error: true);
+      }
+    }
+  }
+
+  Future<void> _uploadVideoFile(
+      File f, String family, String gender, int durationSec, String cls) async {
+    if (mounted) setState(() => _uploadInFlight++);
+    _showToast('Uploading ${durationSec}s clip for $cls…');
+    try {
+      final api = ApiClient(widget.settings, widget.auth);
+      await api.uploadTrainingVideo(f, family, gender);
+      if (!mounted) return;
+      _showToast('✓ Video sent — server is extracting crops');
+    } catch (e) {
+      if (e is UnauthorizedException) {
+        await widget.auth.signOut();
+        _showToast('Session expired — please sign in again.', error: true);
+        return;
+      }
+      _showToast('Video upload failed: ${_friendlyError(e)}', error: true);
+    } finally {
+      if (mounted) setState(() => _uploadInFlight--);
+    }
+  }
+
+  String _formatRecordDuration() {
+    final start = _recordStartedAt;
+    if (start == null) return '0:00';
+    final s = DateTime.now().difference(start).inSeconds;
+    final m = s ~/ 60;
+    final r = s % 60;
+    return '$m:${r.toString().padLeft(2, '0')}';
+  }
+
   Uint8List _cropToReticleBytes(Uint8List bytes) {
     final decoded = img.decodeImage(bytes);
     if (decoded == null) return bytes;
@@ -285,6 +383,19 @@ class _ContributeScreenState extends State<ContributeScreen>
 
   Future<void> _onShutter() async {
     if (_shutterBusy) return;
+    // Video mode: shutter toggles recording. Use _shutterBusy as a
+    // debounce guard around the async start/stop so a fast double-tap
+    // can't race into two starts (or a start + a stop on a controller
+    // that hasn't finished arming yet).
+    if (_captureMode == _CaptureMode.video) {
+      setState(() => _shutterBusy = true);
+      try {
+        await _toggleRecording();
+      } finally {
+        if (mounted) setState(() => _shutterBusy = false);
+      }
+      return;
+    }
     setState(() => _shutterBusy = true);
     HapticFeedback.lightImpact();
     final cam = _cam;
@@ -334,32 +445,6 @@ class _ContributeScreenState extends State<ContributeScreen>
       unawaited(_uploadBytes(bytes, pf.name));
     } else {
       unawaited(_uploadFile(File(pf.path)));
-    }
-  }
-
-  Future<void> _pickAndUploadVideo() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      allowMultiple: false,
-      withData: kIsWeb,
-    );
-    if (result == null) return;
-    final picked = result.files.single;
-    if (kIsWeb) {
-      _showToast('Video upload only on mobile.', error: true);
-      return;
-    }
-    if (picked.path == null) return;
-    if (mounted) setState(() => _uploadInFlight++);
-    try {
-      final api = ApiClient(widget.settings, widget.auth);
-      await api.uploadTrainingVideo(File(picked.path!), _family, _gender);
-      if (!mounted) return;
-      _showToast('✓ Video sent — server is extracting crops');
-    } catch (e) {
-      _showToast('Video upload failed: ${_friendlyError(e)}', error: true);
-    } finally {
-      if (mounted) setState(() => _uploadInFlight--);
     }
   }
 
@@ -580,9 +665,46 @@ class _ContributeScreenState extends State<ContributeScreen>
             child: _buildPreview(),
           ),
           // Reticle is the visual contract: user fits the connector
-          // inside, we crop to its inscribing square at capture time.
+          // inside, we crop to its inscribing square at capture time
+          // (photo) or guides the user's framing during video record.
           if (_cam != null && _cam!.value.isInitialized && _isSignedIn)
             const IgnorePointer(child: ReticleOverlay(hint: 'FIT IN CIRCLE')),
+          // Recording indicator + timer along the top center.
+          if (_recording)
+            IgnorePointer(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: EdgeInsets.only(
+                      top: MediaQuery.of(context).padding.top + 12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: Colors.redAccent, width: 1.5),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const _RecordingDot(),
+                        const SizedBox(width: 8),
+                        Text(
+                          'REC  ${_formatRecordDuration()}',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.0),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           if (_zoomHintVisible)
             IgnorePointer(
               child: Align(
@@ -821,8 +943,22 @@ class _ContributeScreenState extends State<ContributeScreen>
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        _ShutterButton(busy: _shutterBusy, onTap: _onShutter),
+        const SizedBox(height: 10),
+        // Photo / Video mode toggle — locks shutter behavior. Disabled
+        // mid-recording so the user can't switch out of video mode
+        // while a clip is in progress.
+        _ModeToggle(
+          mode: _captureMode,
+          enabled: !_recording,
+          onChange: (m) => setState(() => _captureMode = m),
+        ),
+        const SizedBox(height: 8),
+        _ShutterButton(
+          busy: _shutterBusy,
+          mode: _captureMode,
+          recording: _recording,
+          onTap: _onShutter,
+        ),
         const SizedBox(height: 10),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -830,19 +966,13 @@ class _ContributeScreenState extends State<ContributeScreen>
             _SmallAction(
               icon: Icons.photo_library,
               label: 'Gallery',
-              onTap: _pickFromGallery,
-            ),
-            const SizedBox(width: 24),
-            _SmallAction(
-              icon: Icons.videocam,
-              label: 'Video',
-              onTap: _pickAndUploadVideo,
+              onTap: _recording ? null : _pickFromGallery,
             ),
             const SizedBox(width: 24),
             _SmallAction(
               icon: Icons.undo,
               label: _undoStack.isEmpty ? 'Undo' : 'Undo (${_undoStack.length})',
-              onTap: _undoStack.isEmpty ? null : _undoLast,
+              onTap: _recording || _undoStack.isEmpty ? null : _undoLast,
             ),
           ],
         ),
@@ -1083,12 +1213,25 @@ class _HoldoutToggle extends StatelessWidget {
 }
 
 class _ShutterButton extends StatelessWidget {
-  const _ShutterButton({required this.busy, required this.onTap});
+  const _ShutterButton({
+    required this.busy,
+    required this.onTap,
+    this.mode = _CaptureMode.photo,
+    this.recording = false,
+  });
   final bool busy;
   final VoidCallback onTap;
+  final _CaptureMode mode;
+  final bool recording;
 
   @override
   Widget build(BuildContext context) {
+    // Inner fill: white circle for photo, red circle for video idle,
+    // red rounded square for video recording (familiar "stop" affordance).
+    final isVideo = mode == _CaptureMode.video;
+    final innerColor = isVideo ? Colors.redAccent : Colors.white;
+    final radius = recording ? 6.0 : 30.0;
+    final innerSize = recording ? 28.0 : 60.0;
     return GestureDetector(
       onTap: busy ? null : onTap,
       child: Container(
@@ -1108,14 +1251,113 @@ class _ShutterButton extends StatelessWidget {
                     color: Colors.white,
                   ),
                 )
-              : Container(
-                  width: 60,
-                  height: 60,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
+              : AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: innerSize,
+                  height: innerSize,
+                  decoration: BoxDecoration(
+                    color: innerColor,
+                    borderRadius: BorderRadius.circular(radius),
                   ),
                 ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ModeToggle extends StatelessWidget {
+  const _ModeToggle({
+    required this.mode,
+    required this.onChange,
+    this.enabled = true,
+  });
+  final _CaptureMode mode;
+  final ValueChanged<_CaptureMode> onChange;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget pill(_CaptureMode m, IconData icon, String label) {
+      final selected = mode == m;
+      return GestureDetector(
+        onTap: !enabled ? null : () => onChange(m),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.black.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: selected ? Colors.white : Colors.white24,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color: selected ? Colors.black : Colors.white),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.black : Colors.white,
+                  fontSize: 12,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.5,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          pill(_CaptureMode.photo, Icons.photo_camera, 'PHOTO'),
+          const SizedBox(width: 8),
+          pill(_CaptureMode.video, Icons.videocam, 'VIDEO'),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecordingDot extends StatefulWidget {
+  const _RecordingDot();
+
+  @override
+  State<_RecordingDot> createState() => _RecordingDotState();
+}
+
+class _RecordingDotState extends State<_RecordingDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.35, end: 1.0).animate(_ctl),
+      child: Container(
+        width: 10,
+        height: 10,
+        decoration: const BoxDecoration(
+          color: Colors.redAccent,
+          shape: BoxShape.circle,
         ),
       ),
     );

@@ -47,9 +47,6 @@ dependencies:
   # Persist the device token + relay URL across app launches.
   shared_preferences: ^2.3.2
 
-  # Pick video files from the gallery for the training-video upload.
-  file_picker: ^8.1.4
-
   # Read app version + build number for the About screen.
   package_info_plus: ^8.0.0
 
