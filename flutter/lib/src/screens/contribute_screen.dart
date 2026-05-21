@@ -224,7 +224,11 @@ class _ContributeScreenState extends State<ContributeScreen>
         ResolutionPreset.max,
         // iOS AVCaptureMovieFileOutput fails to write video when audio
         // is disabled; the audio track is ignored server-side.
-        enableAudio: true,
+        // Audio off so iOS doesn't show a mic permission prompt — the
+        // app only needs visuals to identify connectors. The earlier
+        // record-fails bug was actually a permission race, not an audio
+        // requirement; prepareForVideoRecording() below is the real fix.
+        enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
       await controller.initialize();

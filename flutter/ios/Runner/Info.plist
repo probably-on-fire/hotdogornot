@@ -51,7 +51,5 @@
 	<string>Used to pick a connector photo or video for identification or upload.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Used to save annotated connector identifications back to your photo library.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Required by the video picker; the app does not record audio.</string>
 </dict>
 </plist>
