@@ -24,6 +24,7 @@ service refuses to serve the labeler routes (predict still works).
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
@@ -266,21 +267,30 @@ def _mark_duplicates(records: list[CropRecord], max_distance: int = 6) -> None:
 
 
 def _safe_path(raw: str) -> Path:
-    """Validate that `raw` points inside the labeled-data root or the
-    test-holdout root. Prevents path-traversal attacks via a crafted
-    form value. Both roots are accepted so that /delete can undo uploads
-    made via /upload-test as well as /upload-train."""
+    """Validate that `raw` points inside the labeled-data root, the
+    test-holdout root, or the videos root. Prevents path-traversal
+    attacks via a crafted form value. All three roots are accepted so
+    /delete can undo uploads made via /upload-test, /upload-train,
+    AND /upload-video (the latter is used by the /videos management
+    page)."""
     try:
         candidate = Path(raw).resolve()
     except Exception:
         raise HTTPException(400, "bad path")
-    for root in (_data_root(), _test_holdout_root()):
+    for root in (_data_root(), _test_holdout_root(), _videos_root()):
         try:
             candidate.relative_to(root)
             return candidate
         except ValueError:
             continue
     raise HTTPException(400, "path outside data roots")
+
+
+def _video_sidecar_path(video_path: Path) -> Path:
+    """Where to write the JSON manifest for a video — sibling file with
+    a .crops.json suffix. Lets the /videos management page show how many
+    agg_*.jpg crops a video produced + delete them as a bundle."""
+    return video_path.with_suffix(video_path.suffix + ".crops.json")
 
 
 def _class_counts() -> dict[str, int]:
@@ -888,7 +898,7 @@ def create_router() -> APIRouter:
                 existing.append(int(tail))
         idx = max(existing) + 1 if existing else 0
 
-        saved_crops = 0
+        saved_crops: list[str] = []
         with tempfile.TemporaryDirectory(prefix="upload_video_") as tmp:
             tmpp = Path(tmp)
             subprocess.run(
@@ -911,22 +921,204 @@ def create_router() -> APIRouter:
                     accumulator_threshold=22,
                 )
                 for r2 in results:
+                    out_path = out_dir / f"agg_{idx:04d}.jpg"
                     cv2.imwrite(
-                        str(out_dir / f"agg_{idx:04d}.jpg"),
+                        str(out_path),
                         r2.crop, [cv2.IMWRITE_JPEG_QUALITY, 90],
                     )
                     idx += 1
-                    saved_crops += 1
+                    saved_crops.append(str(out_path))
 
+        # Write the sidecar so the /videos page can later show this video
+        # alongside the crops it produced and offer a one-click "delete
+        # video + its crops" action. Lives next to the .mp4.
+        try:
+            sidecar = _video_sidecar_path(saved_video)
+            sidecar.write_text(json.dumps({
+                "video_filename": saved_video.name,
+                "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "uploaded_by": getattr(user, "username", None),
+                "family": family,
+                "gender": gender,
+                "target_class": target_cls,
+                "fps": float(fps),
+                "max_crops_per_frame": int(max_crops),
+                "n_frames_extracted": len(frames),
+                "extracted_crops": saved_crops,
+            }, indent=2))
+        except Exception as e:
+            # Non-fatal — the video + crops are already on disk; the
+            # sidecar just makes management easier. Log via the response.
+            print(f"[upload-video] sidecar write failed: {e}", flush=True)
+
+        saved_crops_count = len(saved_crops)
         # Bust the signal cache so the new crops show up scored on next grid load.
         global _signals_cache
         _signals_cache = {}
 
         return HTMLResponse(
-            f"<div style='color:#4ade80'>Extracted <strong>{saved_crops}</strong> crops "
+            f"<div style='color:#4ade80'>Extracted <strong>{saved_crops_count}</strong> crops "
             f"from {saved_video.name} into <code>{target_cls}/</code> "
             f"({len(frames)} frames at {fps} fps). Refresh the grid to see them.</div>"
         )
+
+    # --- Video management ---------------------------------------------
+    # Lists the .mp4/.mov/etc files in _videos_root() along with the
+    # crop count derived from each sidecar (if present). Provides a
+    # delete action that removes the video and optionally the agg_*.jpg
+    # crops it produced. Pre-existing historical videos that lack a
+    # sidecar (the original 3 .MOV training clips) show "no record" and
+    # can still be deleted as raw files.
+
+    _VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".webm")
+
+    def _video_record(p: Path) -> dict:
+        info: dict = {
+            "name": p.name,
+            "path": str(p),
+            "size_bytes": p.stat().st_size if p.exists() else 0,
+            "mtime": p.stat().st_mtime if p.exists() else 0,
+            "has_sidecar": False,
+            "sidecar_path": None,
+            "uploaded_at": None,
+            "uploaded_by": None,
+            "target_class": None,
+            "family": None,
+            "gender": None,
+            "fps": None,
+            "n_frames_extracted": None,
+            "n_crops": 0,
+            "n_crops_still_on_disk": 0,
+        }
+        sidecar = _video_sidecar_path(p)
+        if sidecar.exists():
+            try:
+                manifest = json.loads(sidecar.read_text())
+                info["has_sidecar"] = True
+                info["sidecar_path"] = str(sidecar)
+                info["uploaded_at"] = manifest.get("uploaded_at")
+                info["uploaded_by"] = manifest.get("uploaded_by")
+                info["target_class"] = manifest.get("target_class")
+                info["family"] = manifest.get("family")
+                info["gender"] = manifest.get("gender")
+                info["fps"] = manifest.get("fps")
+                info["n_frames_extracted"] = manifest.get("n_frames_extracted")
+                crops = manifest.get("extracted_crops") or []
+                info["n_crops"] = len(crops)
+                info["n_crops_still_on_disk"] = sum(
+                    1 for c in crops if Path(c).exists()
+                )
+            except Exception as e:
+                # Corrupted sidecar — treat as "no record" so the user
+                # can still delete the .mp4. Surface the error in the UI.
+                info["sidecar_error"] = str(e)
+        return info
+
+    @r.get("/videos", response_class=HTMLResponse)
+    def videos_list(request: Request):
+        # Public read — anyone can see what's been uploaded. Writes
+        # (delete) still require an admin session.
+        vroot = _videos_root()
+        vroot.mkdir(parents=True, exist_ok=True)
+        files = sorted(
+            (p for p in vroot.iterdir()
+             if p.is_file() and p.suffix.lower() in _VIDEO_EXTS),
+            key=lambda p: -p.stat().st_mtime,   # newest first
+        )
+        records = [_video_record(p) for p in files]
+        return templates.TemplateResponse(
+            request,
+            "labeler/videos.html",
+            {
+                "videos": records,
+                "n_total": len(records),
+                "n_with_crops": sum(1 for r in records if r["n_crops"] > 0),
+                "videos_root": str(vroot),
+            },
+        )
+
+    @r.get("/videos/download/{name}")
+    def videos_download(name: str):
+        """Serve a training video as a download. Public read so the
+        team (Jerry, etc.) can grab the cleaned-up source clips via a
+        shareable URL — same posture as /snapshots. Filenames are
+        constrained to the videos root; no path traversal possible."""
+        if "/" in name or ".." in name or name.startswith("."):
+            raise HTTPException(400, "invalid video name")
+        root = _videos_root()
+        path = root / name
+        try:
+            path.resolve().relative_to(root)
+        except ValueError:
+            raise HTTPException(400, "invalid path")
+        if not path.is_file():
+            raise HTTPException(404, "video not found")
+        if path.suffix.lower() not in _VIDEO_EXTS:
+            raise HTTPException(400, "not a video file")
+        ext = path.suffix.lower()
+        media = {
+            ".mp4": "video/mp4",
+            ".mov": "video/quicktime",
+            ".webm": "video/webm",
+            ".mkv": "video/x-matroska",
+            ".avi": "video/x-msvideo",
+        }.get(ext, "application/octet-stream")
+        return FileResponse(path, media_type=media, filename=name)
+
+    @r.post("/videos/delete", response_class=HTMLResponse)
+    def videos_delete(
+        path: str = Form(...),
+        also_crops: bool = Form(False),
+        user=Depends(require_admin),
+    ):
+        target = _safe_path(path)
+        if not target.exists():
+            # Already gone — return empty (HTMX will swap the row out
+            # either way).
+            return Response(content="", media_type="text/html")
+        if target.suffix.lower() not in _VIDEO_EXTS:
+            raise HTTPException(400, "not a video file")
+
+        deleted_crops = 0
+        if also_crops:
+            sidecar = _video_sidecar_path(target)
+            if sidecar.exists():
+                try:
+                    manifest = json.loads(sidecar.read_text())
+                    for crop_path in manifest.get("extracted_crops", []):
+                        cp = Path(crop_path)
+                        if cp.exists():
+                            try:
+                                cp.unlink()
+                                deleted_crops += 1
+                            except Exception as e:
+                                print(
+                                    f"[videos-delete] crop unlink failed "
+                                    f"{cp}: {e}",
+                                    flush=True,
+                                )
+                except Exception as e:
+                    print(f"[videos-delete] sidecar parse failed: {e}",
+                          flush=True)
+
+        # Sidecar + video itself
+        sidecar = _video_sidecar_path(target)
+        if sidecar.exists():
+            try:
+                sidecar.unlink()
+            except Exception:
+                pass
+        try:
+            target.unlink()
+        except Exception as e:
+            raise HTTPException(500, f"video delete failed: {e}")
+
+        # Bust the signal cache so the grid stops showing crops that
+        # might have just been removed.
+        global _signals_cache
+        _signals_cache = {}
+
+        return Response(content="", media_type="text/html")
 
     @r.post("/api-tokens/exchange")
     def api_tokens_exchange(

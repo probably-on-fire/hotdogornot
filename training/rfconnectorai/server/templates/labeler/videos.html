@@ -1,0 +1,268 @@
+{% extends "labeler/_base.html" %}
+
+{% block title %}RFCAI · Training videos{% endblock %}
+
+{% block htmx_script %}
+  <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous"></script>
+{% endblock %}
+
+{% block head_extra %}
+  <style>
+    main { padding: 16px 20px; max-width: 1200px; margin: 0 auto; }
+
+    .page-header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 10px;
+      margin-bottom: 14px;
+    }
+    .page-header h2 {
+      margin: 0; font-size: 18px; font-weight: 700;
+    }
+    .page-header .meta { color: var(--muted); font-size: 12px; }
+
+    .empty-state {
+      padding: 60px 20px; text-align: center;
+      color: var(--muted); font-size: 14px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .video-list {
+      display: grid; gap: 10px;
+    }
+
+    .video-row {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px 18px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px 18px;
+      align-items: center;
+    }
+    .video-row.gone { opacity: 0; transform: scale(0.95); pointer-events: none; }
+
+    .video-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .video-name {
+      font-size: 14px; font-weight: 600; color: var(--text);
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      word-break: break-all;
+    }
+    .video-meta {
+      display: flex; flex-wrap: wrap; gap: 10px 16px;
+      font-size: 12px; color: var(--muted);
+    }
+    .video-meta .pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 1px 8px; border-radius: 10px;
+      background: var(--panel-2); border: 1px solid var(--border);
+      color: var(--text); font-weight: 500; font-size: 11px;
+    }
+    .video-meta .pill.warn {
+      background: rgba(251,146,60,0.13); border-color: rgba(251,146,60,0.35);
+      color: var(--orange);
+    }
+    .video-meta .pill.muted {
+      background: transparent; border-color: var(--border);
+      color: var(--muted);
+    }
+    .video-meta .pill.crops {
+      background: rgba(74,222,128,0.10); border-color: rgba(74,222,128,0.30);
+      color: var(--green);
+    }
+    .video-meta .pill.cls {
+      background: var(--accent-tint); border-color: rgba(91,158,255,0.35);
+      color: var(--accent-strong);
+    }
+
+    .video-actions {
+      display: flex; gap: 6px; align-items: center;
+    }
+    .video-actions button, .video-actions a.btn {
+      font-size: 12px; padding: 6px 10px;
+    }
+    .video-actions .menu {
+      position: relative;
+    }
+    .video-actions .menu-pop {
+      position: absolute; right: 0; top: 100%; margin-top: 4px;
+      background: var(--panel-2); border: 1px solid var(--border-strong);
+      border-radius: 6px; padding: 4px; min-width: 220px;
+      display: none; flex-direction: column; gap: 2px; z-index: 50;
+      box-shadow: var(--shadow-lg);
+    }
+    .video-actions .menu.open .menu-pop { display: flex; }
+    .video-actions .menu-pop button {
+      background: transparent; border: none; color: var(--text);
+      padding: 8px 10px; text-align: left; cursor: pointer;
+      border-radius: 4px; font-size: 12px;
+    }
+    .video-actions .menu-pop button:hover { background: var(--panel-3); }
+    .video-actions .menu-pop button.danger { color: var(--red); }
+    .video-actions .menu-pop button.danger:hover {
+      background: rgba(248,113,113,0.12);
+    }
+    .video-actions .menu-pop hr {
+      border: none; border-top: 1px solid var(--border); margin: 2px 0;
+    }
+
+    .root-hint {
+      font-size: 11px; color: var(--subtle);
+      font-family: ui-monospace, monospace;
+      margin-top: 10px;
+    }
+  </style>
+{% endblock %}
+
+{% block page_title %}
+  <span class="project">RF Connector AI</span>
+  <span class="sep">·</span>
+  <span class="app">Videos</span>
+{% endblock %}
+
+{% block header_nav %}
+  <a href="/rfcai/labeler/" class="header-admin-link" style="margin-left: 6px;">← Grid</a>
+{% endblock %}
+
+{% block content %}
+  <main>
+    <div class="page-header">
+      <h2>Training videos</h2>
+      <div class="meta">
+        {{ n_total }} file{{ "" if n_total == 1 else "s" }} ·
+        {{ n_with_crops }} with extraction record
+      </div>
+    </div>
+
+    {% if not videos %}
+      <div class="empty-state">
+        No videos uploaded yet.<br>
+        Use the Contribute screen on the phone or the upload form on the grid page.
+      </div>
+    {% else %}
+      <div class="video-list" id="video-list">
+        {% for v in videos %}
+          <div class="video-row" id="vr-{{ loop.index }}">
+            <div class="video-row-main">
+              <div class="video-name">{{ v.name }}</div>
+              <div class="video-meta">
+                {% if v.target_class %}
+                  <span class="pill cls">{{ v.target_class }}</span>
+                {% endif %}
+                {% if v.has_sidecar %}
+                  <span class="pill crops">
+                    {{ v.n_crops }} crop{{ "" if v.n_crops == 1 else "s" }}
+                    {% if v.n_crops_still_on_disk != v.n_crops %}
+                      · {{ v.n_crops_still_on_disk }} on disk
+                    {% endif %}
+                  </span>
+                  {% if v.n_frames_extracted %}
+                    <span class="pill muted">
+                      {{ v.n_frames_extracted }} frames @ {{ v.fps }} fps
+                    </span>
+                  {% endif %}
+                  {% if v.uploaded_at %}
+                    <span class="pill muted">{{ v.uploaded_at }}</span>
+                  {% endif %}
+                  {% if v.uploaded_by %}
+                    <span class="pill muted">by {{ v.uploaded_by }}</span>
+                  {% endif %}
+                {% else %}
+                  <span class="pill warn">no extraction record</span>
+                {% endif %}
+                <span class="pill muted">
+                  {{ (v.size_bytes / 1024 / 1024) | round(1) }} MB
+                </span>
+              </div>
+            </div>
+
+            <div class="video-actions">
+              <button type="button" class="btn btn-secondary copy-link"
+                      data-name="{{ v.name }}"
+                      title="Copy a public share link Jerry can open">
+                Copy link
+              </button>
+              <a class="btn btn-secondary"
+                 href="/rfcai/labeler/videos/download/{{ v.name | urlencode }}"
+                 target="_blank" rel="noopener"
+                 title="Download this video to your machine">
+                Download
+              </a>
+              <div class="menu">
+                <button type="button" class="btn btn-danger"
+                        onclick="this.parentElement.classList.toggle('open')">
+                  Delete ▾
+                </button>
+                <div class="menu-pop">
+                  <form hx-post="/rfcai/labeler/videos/delete"
+                        hx-target="#vr-{{ loop.index }}"
+                        hx-swap="outerHTML"
+                        hx-confirm="Delete the video file only? Extracted crops will stay in the training set."
+                        style="margin:0;">
+                    <input type="hidden" name="path" value="{{ v.path }}">
+                    <input type="hidden" name="also_crops" value="false">
+                    <button type="submit" class="danger">
+                      Delete video file only
+                    </button>
+                  </form>
+                  {% if v.has_sidecar and v.n_crops > 0 %}
+                  <hr>
+                  <form hx-post="/rfcai/labeler/videos/delete"
+                        hx-target="#vr-{{ loop.index }}"
+                        hx-swap="outerHTML"
+                        hx-confirm="Delete the video AND remove all {{ v.n_crops }} crops it produced from training? This cannot be undone."
+                        style="margin:0;">
+                    <input type="hidden" name="path" value="{{ v.path }}">
+                    <input type="hidden" name="also_crops" value="true">
+                    <button type="submit" class="danger">
+                      Delete video + {{ v.n_crops }} crops
+                    </button>
+                  </form>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="root-hint">{{ videos_root }}</div>
+  </main>
+
+  <script>
+    // Copy a public share link (https://aired.com/rfcai/labeler/videos/download/<name>)
+    // to the clipboard. Briefly flash the button to confirm.
+    document.body.addEventListener('click', async (e) => {
+      const btn = e.target.closest('.copy-link');
+      if (!btn) return;
+      const name = btn.dataset.name;
+      const url = `${window.location.origin}/rfcai/labeler/videos/download/${encodeURIComponent(name)}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        const orig = btn.textContent;
+        btn.textContent = 'Copied ✓';
+        btn.disabled = true;
+        setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1200);
+      } catch (err) {
+        // clipboard API may be blocked on http (LAN). Fallback: prompt.
+        window.prompt('Share link', url);
+      }
+    });
+
+    // Click outside menus to close them.
+    document.body.addEventListener('click', (e) => {
+      if (!e.target.closest('.menu')) {
+        document.querySelectorAll('.menu.open').forEach((m) => m.classList.remove('open'));
+      }
+    });
+    // After a successful delete the row's outerHTML is replaced with "",
+    // so the row vanishes. Refresh the counts in the header by rerouting
+    // to the page; cheaper than re-rendering server-side.
+    document.body.addEventListener('htmx:afterRequest', (e) => {
+      const url = e.detail?.requestConfig?.path || '';
+      if (url.includes('/videos/delete') && e.detail?.successful) {
+        setTimeout(() => { window.location.reload(); }, 300);
+      }
+    });
+  </script>
+{% endblock %}
