@@ -125,6 +125,20 @@
       background: rgba(74,222,128,0.10); border-color: rgba(74,222,128,0.30);
       color: var(--green);
     }
+    .video-meta .pill.pending {
+      background: rgba(91,158,255,0.10); border-color: rgba(91,158,255,0.30);
+      color: var(--accent-strong);
+    }
+    .video-meta .pill.pending::before {
+      content: "\21bb"; display: inline-block;
+      margin-right: 4px;
+      animation: spin 1.4s linear infinite;
+    }
+    .video-meta .pill.err {
+      background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.30);
+      color: var(--red);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .video-meta .pill.cls {
       background: var(--accent-tint); border-color: rgba(91,158,255,0.35);
       color: var(--accent-strong);
@@ -263,12 +277,24 @@
                   <span class="pill cls">{{ v.target_class }}</span>
                 {% endif %}
                 {% if v.has_sidecar %}
-                  <span class="pill crops">
-                    {{ v.n_crops }} crop{{ "" if v.n_crops == 1 else "s" }}
-                    {% if v.n_crops_still_on_disk != v.n_crops %}
-                      · {{ v.n_crops_still_on_disk }} on disk
-                    {% endif %}
-                  </span>
+                  {% if v.extraction_state == "pending" %}
+                    <span class="pill pending"
+                          title="Background extraction in progress. Refresh in a moment.">
+                      extracting…
+                    </span>
+                  {% elif v.extraction_state == "error" %}
+                    <span class="pill err"
+                          title="{{ v.extraction_error or 'unknown error' }}">
+                      extraction failed
+                    </span>
+                  {% else %}
+                    <span class="pill crops">
+                      {{ v.n_crops }} crop{{ "" if v.n_crops == 1 else "s" }}
+                      {% if v.n_crops_still_on_disk != v.n_crops %}
+                        · {{ v.n_crops_still_on_disk }} on disk
+                      {% endif %}
+                    </span>
+                  {% endif %}
                   {% if v.n_frames_extracted %}
                     <span class="pill muted">
                       {{ v.n_frames_extracted }} frames @ {{ v.fps }} fps

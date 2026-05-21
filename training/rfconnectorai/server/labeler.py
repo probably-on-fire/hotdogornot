@@ -39,7 +39,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -166,6 +166,150 @@ def _drive_backup(local_path: Path, target_class: str) -> dict | None:
     except Exception as e:
         print(f"[upload-video] Drive backup failed: {e}", flush=True)
         return None
+
+
+def _extract_video_job(
+    saved_video: Path,
+    sidecar: Path,
+    family: str,
+    gender: str,
+    target_cls: str,
+    fps: float,
+    max_crops: int,
+    with_predict: bool,
+    classifier,
+) -> None:
+    """Background extraction worker scheduled by /upload-video.
+
+    Runs after the HTTP response has been sent to the client (FastAPI's
+    BackgroundTasks). On its own thread; no event loop access. Does:
+      1. ffmpeg frame extract at `fps`.
+      2. Hough-detect connectors per frame, write agg_*.jpg crops.
+      3. Optional classify per crop, keeps the highest-confidence pred.
+      4. Drive backup of the source .mp4 (no-op without env vars).
+      5. Patches the sidecar with extracted_crops / n_frames_extracted /
+         processed_at / extraction_state="ok" (or "error" + error msg).
+
+    Every failure path is caught and recorded in the sidecar so the
+    /videos page can show what went wrong instead of a stuck "pending".
+    """
+    try:
+        manifest = json.loads(sidecar.read_text())
+    except Exception:
+        manifest = {}
+
+    def _patch(**fields) -> None:
+        manifest.update(fields)
+        try:
+            sidecar.write_text(json.dumps(manifest, indent=2))
+        except Exception as e:
+            print(f"[extract-video] sidecar patch failed: {e}", flush=True)
+
+    try:
+        import imageio_ffmpeg
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as e:
+        _patch(
+            extraction_state="error",
+            extraction_error=f"ffmpeg unavailable: {e}",
+            processed_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
+        return
+
+    out_dir = _data_root() / target_cls
+    out_dir.mkdir(parents=True, exist_ok=True)
+    do_predict = with_predict and classifier is not None
+
+    # Pick a fresh starting index for "agg_NNNN.jpg" output names.
+    existing: list[int] = []
+    for p in out_dir.glob("agg_*.jpg"):
+        tail = p.stem[len("agg_"):]
+        if tail.isdigit():
+            existing.append(int(tail))
+    idx = max(existing) + 1 if existing else 0
+
+    saved_crops: list[str] = []
+    best_pred: dict | None = None
+    n_frames = 0
+    try:
+        with tempfile.TemporaryDirectory(prefix="upload_video_bg_") as tmp:
+            tmpp = Path(tmp)
+            subprocess.run(
+                [ff, "-y", "-i", str(saved_video),
+                 "-vf", f"fps={fps}", "-q:v", "4",
+                 str(tmpp / "f_%04d.jpg")],
+                capture_output=True, check=False,
+            )
+            frame_paths = sorted(tmpp.glob("f_*.jpg"))
+            n_frames = len(frame_paths)
+            for fp in frame_paths:
+                bgr = cv2.imread(str(fp))
+                if bgr is None:
+                    continue
+                results = detect_connector_crops_hough(
+                    bgr,
+                    max_crops=int(max_crops),
+                    pad_frac=0.35,
+                    accumulator_threshold=22,
+                )
+                for r2 in results:
+                    out_path = out_dir / f"agg_{idx:04d}.jpg"
+                    cv2.imwrite(str(out_path), r2.crop,
+                                [cv2.IMWRITE_JPEG_QUALITY, 90])
+                    idx += 1
+                    saved_crops.append(str(out_path))
+                    if do_predict:
+                        rgb = cv2.cvtColor(r2.crop, cv2.COLOR_BGR2RGB)
+                        try:
+                            cp = classifier.predict(rgb)
+                            pred = {
+                                "class_name": cp.class_name,
+                                "confidence": float(cp.confidence),
+                                "probabilities": {
+                                    k: float(v) for k, v in
+                                    cp.probabilities.items()
+                                },
+                                "bbox": {"x": 0, "y": 0, "w": 0, "h": 0},
+                            }
+                        except Exception:
+                            pred = None
+                        if pred is not None and (
+                            best_pred is None
+                            or pred["confidence"] > best_pred["confidence"]
+                        ):
+                            best_pred = pred
+    except Exception as e:
+        _patch(
+            extraction_state="error",
+            extraction_error=f"extract failed: {e}",
+            n_frames_extracted=n_frames,
+            extracted_crops=saved_crops,
+            processed_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        )
+        return
+
+    drive_ref = _drive_backup(saved_video, target_cls)
+
+    fields = {
+        "extraction_state": "ok",
+        "n_frames_extracted": n_frames,
+        "extracted_crops": saved_crops,
+        "processed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    if best_pred is not None:
+        fields["best_prediction"] = best_pred
+    if drive_ref is not None:
+        fields["drive_backup"] = drive_ref
+    _patch(**fields)
+
+    # Bust the signal cache so the new crops show up scored on next grid load.
+    global _signals_cache
+    _signals_cache = {}
+    print(
+        f"[extract-video] done: {saved_video.name} -> "
+        f"{len(saved_crops)} crops from {n_frames} frames",
+        flush=True,
+    )
 
 
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
@@ -919,15 +1063,17 @@ def create_router(classifier=None) -> APIRouter:
 
     @r.post("/upload-video")
     async def upload_video(
+        background_tasks: BackgroundTasks,
         family: str = Form(...),
         gender: str = Form(...),
         fps: float = Form(5.0),
         sensitivity: float = Form(2.0),
         max_crops: int = Form(5),
         # When true (Flutter Contribute uploader), classify each extracted
-        # crop and return JSON with the best prediction alongside the
-        # saved-crop summary. Default false preserves the HTML response
-        # the web labeler UI expects.
+        # crop and write the best prediction into the sidecar. The HTTP
+        # response itself returns immediately (extraction is async), so
+        # the predictions only show up on the /videos page once the
+        # background task finishes.
         with_predict: bool = Form(False),
         file: UploadFile = File(...),
         user=Depends(require_admin),
@@ -957,134 +1103,77 @@ def create_router(classifier=None) -> APIRouter:
             stem = Path(assigned_name).stem
             saved_video = videos_dir / f"{stem}_dup{n}{ext}"
             n += 1
+
+        # Phase A: respond as soon as the .mp4 + initial manifest hit
+        # disk. ffmpeg extraction + per-frame Hough + (optional) classify
+        # + Drive backup all run in the background; the client gets
+        # immediate confirmation and the /videos page picks up
+        # processed_at when the work finishes.
         data = await file.read()
-
-        # Everything below is CPU/IO-bound (200MB disk write, ffmpeg
-        # extract, per-frame Hough, per-crop classify). Doing it on the
-        # event-loop thread wedges every other labeler route — sign-in,
-        # grid, stats — until the upload finishes. Move it to a worker.
+        await run_in_threadpool(saved_video.write_bytes, data)
+        sidecar = _video_sidecar_path(saved_video)
+        uploaded_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        initial_manifest = {
+            "video_filename": saved_video.name,
+            "original_filename": original_filename,
+            "uploaded_at": uploaded_at,
+            "uploaded_by": getattr(user, "username", None),
+            "family": family,
+            "gender": gender,
+            "target_class": target_cls,
+            "fps": float(fps),
+            "max_crops_per_frame": int(max_crops),
+            "size_bytes": len(data),
+            "with_predict": bool(with_predict),
+            # Filled in by the background extraction task.
+            "n_frames_extracted": None,
+            "extracted_crops": [],
+            "processed_at": None,
+            "extraction_state": "pending",
+        }
         try:
-            import imageio_ffmpeg
-            ff = imageio_ffmpeg.get_ffmpeg_exe()
+            sidecar.write_text(json.dumps(initial_manifest, indent=2))
         except Exception as e:
-            raise HTTPException(500, f"ffmpeg not available: {e}")
-        out_dir = _data_root() / target_cls
-        out_dir.mkdir(parents=True, exist_ok=True)
-        do_predict = with_predict and classifier is not None
+            print(f"[upload-video] initial sidecar write failed: {e}",
+                  flush=True)
 
-        def _process_sync() -> tuple[list[str], dict | None, int]:
-            saved_video.write_bytes(data)
-            # Pick a fresh starting index for "agg_NNNN.jpg" output names.
-            existing = []
-            for p in out_dir.glob("agg_*.jpg"):
-                tail = p.stem[len("agg_"):]
-                if tail.isdigit():
-                    existing.append(int(tail))
-            idx = max(existing) + 1 if existing else 0
+        # Schedule the heavy lifting AFTER the response is sent.
+        # FastAPI calls sync functions in the threadpool, so this won't
+        # block the event loop. Errors are surfaced via the sidecar's
+        # extraction_error field; the HTTP response is already in flight
+        # and stays 200 regardless.
+        background_tasks.add_task(
+            _extract_video_job,
+            saved_video, sidecar, family, gender, target_cls,
+            float(fps), int(max_crops), bool(with_predict), classifier,
+        )
 
-            saved_crops_inner: list[str] = []
-            best_pred_inner: dict | None = None
-            with tempfile.TemporaryDirectory(prefix="upload_video_") as tmp:
-                tmpp = Path(tmp)
-                subprocess.run(
-                    [ff, "-y", "-i", str(saved_video),
-                     "-vf", f"fps={fps}", "-q:v", "4",
-                     str(tmpp / "f_%04d.jpg")],
-                    capture_output=True, check=False,
-                )
-                frame_paths = sorted(tmpp.glob("f_*.jpg"))
-                for fp in frame_paths:
-                    bgr = cv2.imread(str(fp))
-                    if bgr is None:
-                        continue
-                    # Reuse the Hough detector with the same defaults the
-                    # bulk-extract script tuned (pad_frac=0.35, param2=22).
-                    results = detect_connector_crops_hough(
-                        bgr,
-                        max_crops=int(max_crops),
-                        pad_frac=0.35,
-                        accumulator_threshold=22,
-                    )
-                    for r2 in results:
-                        out_path = out_dir / f"agg_{idx:04d}.jpg"
-                        cv2.imwrite(
-                            str(out_path),
-                            r2.crop, [cv2.IMWRITE_JPEG_QUALITY, 90],
-                        )
-                        idx += 1
-                        saved_crops_inner.append(str(out_path))
-                        if do_predict:
-                            rgb = cv2.cvtColor(r2.crop, cv2.COLOR_BGR2RGB)
-                            try:
-                                cp = classifier.predict(rgb)
-                                # ClassifierPrediction → dict so it
-                                # round-trips through JSONResponse and
-                                # matches the /predict-video schema the
-                                # Flutter app already parses.
-                                pred = {
-                                    "class_name": cp.class_name,
-                                    "confidence": float(cp.confidence),
-                                    "probabilities": {
-                                        k: float(v) for k, v in cp.probabilities.items()
-                                    },
-                                    "bbox": {"x": 0, "y": 0, "w": 0, "h": 0},
-                                }
-                            except Exception:
-                                pred = None
-                            if pred is not None and (
-                                best_pred_inner is None
-                                or pred["confidence"] > best_pred_inner["confidence"]
-                            ):
-                                best_pred_inner = pred
-            return saved_crops_inner, best_pred_inner, len(frame_paths)
+        # Free `data` reference now — the BackgroundTask reads from disk.
+        del data
 
-        saved_crops, best_pred, n_frames = await run_in_threadpool(_process_sync)
-
-        # Backup the source video to Drive — no-op when env isn't set.
-        # Runs in the threadpool too so the HTTP call doesn't block.
-        drive_ref = await run_in_threadpool(_drive_backup, saved_video, target_cls)
-
-        # Write the sidecar so the /videos page can later show this video
-        # alongside the crops it produced and offer a one-click "delete
-        # video + its crops" action. Lives next to the .mp4.
-        try:
-            sidecar = _video_sidecar_path(saved_video)
-            sidecar.write_text(json.dumps({
-                "video_filename": saved_video.name,
-                "original_filename": original_filename,
-                "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "uploaded_by": getattr(user, "username", None),
-                "family": family,
-                "gender": gender,
-                "target_class": target_cls,
-                "fps": float(fps),
-                "max_crops_per_frame": int(max_crops),
-                "n_frames_extracted": n_frames,
-                "extracted_crops": saved_crops,
-            }, indent=2))
-        except Exception as e:
-            # Non-fatal — the video + crops are already on disk; the
-            # sidecar just makes management easier. Log via the response.
-            print(f"[upload-video] sidecar write failed: {e}", flush=True)
-
-        saved_crops_count = len(saved_crops)
-        # Bust the signal cache so the new crops show up scored on next grid load.
-        global _signals_cache
-        _signals_cache = {}
-
+        download_url = (
+            f"/rfcai/labeler/videos/download/"
+            f"{urllib.parse.quote(saved_video.name)}"
+        )
         if with_predict:
             return JSONResponse({
-                "saved_crops": saved_crops_count,
-                "frames_scanned": n_frames,
+                "saved_crops": 0,
+                "frames_scanned": 0,
                 "target_class": target_cls,
-                "predictions": [best_pred] if best_pred else [],
+                "predictions": [],
                 "classifier_loaded": classifier is not None,
-                "drive_backup": drive_ref,
+                "extraction_state": "pending",
+                "saved_video_filename": saved_video.name,
+                "download_url": download_url,
+                "drive_backup": None,
             })
         return HTMLResponse(
-            f"<div style='color:#4ade80'>Extracted <strong>{saved_crops_count}</strong> crops "
-            f"from {saved_video.name} into <code>{target_cls}/</code> "
-            f"({n_frames} frames at {fps} fps). Refresh the grid to see them.</div>"
+            f"<div style='color:#5b9eff'>"
+            f"Saved <strong>{saved_video.name}</strong> "
+            f"({initial_manifest['size_bytes'] / 1024 / 1024:.1f} MB) "
+            f"into <code>{target_cls}/</code>. Extraction running in background; "
+            f"refresh the <a href='/rfcai/labeler/videos'>videos page</a> "
+            f"in a moment to see crop counts.</div>"
         )
 
     # --- Video management ---------------------------------------------
@@ -1143,6 +1232,12 @@ def create_router(classifier=None) -> APIRouter:
             "n_frames_extracted": None,
             "n_crops": 0,
             "n_crops_still_on_disk": 0,
+            # Async-extraction tracking. "ok" / "pending" / "error" /
+            # None (no manifest at all yet).
+            "extraction_state": None,
+            "extraction_error": None,
+            "processed_at": None,
+            "processed_at_display": None,
         }
         sidecar = _video_sidecar_path(p)
         if sidecar.exists():
@@ -1182,6 +1277,30 @@ def create_router(classifier=None) -> APIRouter:
                 info["n_crops_still_on_disk"] = sum(
                     1 for c in crops if Path(c).exists()
                 )
+                # Async-extraction state. Defaults preserve older
+                # synchronously-extracted videos: if processed_at is set
+                # OR a crop list exists, we treat the extraction as
+                # complete; only the brand-new (Phase A) uploads emit
+                # an explicit "pending" until the background task
+                # finishes.
+                state = manifest.get("extraction_state")
+                if state is None:
+                    state = "ok" if (manifest.get("processed_at")
+                                     or info["n_crops"]) else None
+                info["extraction_state"] = state
+                info["extraction_error"] = manifest.get("extraction_error")
+                info["processed_at"] = manifest.get("processed_at")
+                if info["processed_at"]:
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        _ts = _dt.strptime(
+                            info["processed_at"], "%Y-%m-%dT%H:%M:%SZ",
+                        ).replace(tzinfo=_tz.utc).astimezone()
+                        info["processed_at_display"] = _ts.strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
+                    except Exception:
+                        info["processed_at_display"] = info["processed_at"]
             except Exception as e:
                 # Corrupted sidecar — treat as "no record" so the user
                 # can still delete the .mp4. Surface the error in the UI.
