@@ -481,6 +481,43 @@ def create_app(config: dict | None = None) -> FastAPI:
             headers=resp_headers,
         )
 
+    _VIDEO_MIME = {
+        ".mp4": "video/mp4",
+        ".mov": "video/quicktime",
+        ".webm": "video/webm",
+        ".mkv": "video/x-matroska",
+        ".avi": "video/x-msvideo",
+    }
+
+    @app.get("/labeler/videos/download/{name}")
+    async def labeler_videos_download(name: str, request: Request):
+        """Local-first download — aired.com's /srv/rfcai/videos/ archive
+        wins over the box-served copy. Falls back to the existing
+        labeler proxy when the file isn't in the archive, so share
+        links to box-only files (the historical .MOVs etc.) keep
+        working unchanged."""
+        if "/" in name or ".." in name or name.startswith("."):
+            raise HTTPException(400, "invalid name")
+        local = _videos_root() / name
+        try:
+            local_resolved = local.resolve()
+            local_resolved.relative_to(_videos_root())
+        except (OSError, ValueError):
+            local_resolved = None
+        if (local_resolved
+                and local_resolved.is_file()
+                and local_resolved.suffix.lower() in VIDEO_EXTS):
+            return FileResponse(
+                local_resolved,
+                media_type=_VIDEO_MIME.get(
+                    local_resolved.suffix.lower(),
+                    "application/octet-stream",
+                ),
+                filename=name,
+            )
+        # Fall through to the box.
+        return await _proxy_labeler(request, f"videos/download/{name}")
+
     @app.api_route("/labeler", methods=["GET", "POST"])
     async def labeler_root(request: Request):
         return await _proxy_labeler(request, "")
