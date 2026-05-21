@@ -65,6 +65,11 @@ dependencies:
   image: ^4.2.0
   path_provider: ^2.1.5
 
+  # Keep the screen on while a long upload is in flight — iOS suspends
+  # network tasks for backgrounded apps, so a screen-off in the middle
+  # of a video upload kills the request mid-stream.
+  wakelock_plus: ^1.2.8
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

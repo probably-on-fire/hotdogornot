@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../api.dart';
 import '../auth.dart';
@@ -23,6 +24,12 @@ const _kGenders = ['M', 'F'];
 // same crop the classifier will see at inference so the two
 // distributions match.
 const _kReticleCropFraction = 0.60;
+
+// Hard cap on Contribute video record length. Beyond this iOS screen
+// dimming + cellular variability start eating uploads; the classifier
+// also samples at 1 fps so longer clips don't add information past
+// the first few unique angles.
+const _kMaxVideoSeconds = 15;
 
 // Shutter dispatches photo vs. start/stop-record based on this.
 enum _CaptureMode { photo, video }
@@ -173,6 +180,10 @@ class _ContributeScreenState extends State<ContributeScreen>
     WidgetsBinding.instance.removeObserver(this);
     widget.auth.removeListener(_onAuthChanged);
     _cam?.dispose();
+    // Releasing on tear-down catches the case where the user navigates
+    // away mid-upload — without this the wakelock leaks and the phone
+    // stays awake until the OS kills the app.
+    WakelockPlus.disable().catchError((_) {});
     super.dispose();
   }
 
@@ -281,10 +292,17 @@ class _ContributeScreenState extends State<ContributeScreen>
           _recording = true;
           _recordStartedAt = DateTime.now();
         });
-        // Tick at ~10Hz to refresh the 0:00 timer label; we don't drive
-        // any actual recording state from this, just the UI.
+        // Tick at ~10Hz to refresh the 0:00 timer label; also auto-stop
+        // once we hit the hard cap so users don't accidentally upload
+        // multi-minute clips.
         _recordTicker = Timer.periodic(const Duration(milliseconds: 100), (_) {
-          if (mounted) setState(() {});
+          if (!mounted) return;
+          setState(() {});
+          final started = _recordStartedAt;
+          if (_recording && started != null
+              && DateTime.now().difference(started).inSeconds >= _kMaxVideoSeconds) {
+            _toggleRecording();   // auto-stop + upload
+          }
         });
         HapticFeedback.mediumImpact();
       } catch (e) {
@@ -328,6 +346,10 @@ class _ContributeScreenState extends State<ContributeScreen>
   Future<void> _uploadVideoFile(
       File f, String family, String gender, int durationSec, String cls) async {
     if (mounted) setState(() => _uploadInFlight++);
+    // Keep the screen awake for the upload. iOS suspends network tasks
+    // for backgrounded apps; without this a screen-off mid-upload
+    // produces a 499 (client closed) on the server side.
+    try { await WakelockPlus.enable(); } catch (_) {}
     _showToast('Uploading ${durationSec}s clip for $cls…');
     try {
       final api = ApiClient(widget.settings, widget.auth);
@@ -357,6 +379,12 @@ class _ContributeScreenState extends State<ContributeScreen>
       _showToast('Video upload failed: ${_friendlyError(e)}', error: true);
     } finally {
       if (mounted) setState(() => _uploadInFlight--);
+      // Release the wakelock only when this was the last in-flight
+      // upload; otherwise a parallel upload that's still running would
+      // also lose its keep-awake.
+      if (_uploadInFlight <= 0) {
+        try { await WakelockPlus.disable(); } catch (_) {}
+      }
     }
   }
 
