@@ -394,10 +394,11 @@ class ApiClient {
     req.headers.addAll(_authHeaders);
     req.fields.addAll(fields);
     req.files.add(http.MultipartFile.fromBytes(fileField, bytes, filename: filename));
-    // 5 min: long enough for a 200MB phone video over cellular to upload
-    // AND the server to ffmpeg-extract + Hough-detect + classify before
-    // the response. Matches nginx proxy_send/read_timeout=300s on aired.
-    final streamed = await req.send().timeout(const Duration(seconds: 300));
+    // 10 min: long enough for a 200MB phone video over cellular to upload
+    // AND the server to ffmpeg-extract + Hough-detect + classify + the
+    // relay's httpx round trip. Matches nginx proxy_send/read_timeout
+    // and rfcai-relay httpx client (both 600s).
+    final streamed = await req.send().timeout(const Duration(seconds: 600));
     final resp = await http.Response.fromStream(streamed);
     if (resp.statusCode == 401) throw const UnauthorizedException();
     if (resp.statusCode != 200) {

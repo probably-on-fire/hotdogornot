@@ -265,7 +265,10 @@ def create_app(config: dict | None = None) -> FastAPI:
         # Generous timeout: a cold-start grid load runs Hough+blur+dHash
         # over every labeled crop (~500 files at ~50ms each = ~30-60s on
         # the training-box CPU). Subsequent loads are instant from cache.
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        # Bumped to 10 min so big-video /upload-video uploads (ffmpeg
+        # extract + per-frame Hough + per-crop classify on a 100MB+ clip)
+        # don't 500 here while the upstream is still working.
+        async with httpx.AsyncClient(timeout=600.0) as client:
             upstream = await client.request(
                 method=request.method,
                 url=target,
