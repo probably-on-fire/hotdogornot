@@ -294,6 +294,25 @@ def _video_sidecar_path(video_path: Path) -> Path:
     return video_path.with_suffix(video_path.suffix + ".crops.json")
 
 
+def _class_video_filename(family: str, gender: str, ext: str,
+                          when: float | None = None) -> str:
+    """Build a self-describing video filename so a directory listing
+    sorts naturally by connector type: `2.4mm-M_2026-05-21T18-23-15.mp4`.
+    Uses ISO 8601 timestamps with `-` separating time parts (`:` is not
+    a valid character in filenames on common filesystems).
+    """
+    target_cls = f"{family}-{gender}"
+    ts = time.gmtime(when) if when is not None else time.gmtime()
+    stamp = time.strftime("%Y-%m-%dT%H-%M-%S", ts)
+    return f"{target_cls}_{stamp}{ext.lower()}"
+
+
+def _filename_already_class_prefixed(name: str, family: str, gender: str) -> bool:
+    """True if `name` already leads with the canonical class prefix —
+    no need to rename on annotate when the upload path got it right."""
+    return name.startswith(f"{family}-{gender}_")
+
+
 def _class_counts() -> dict[str, int]:
     root = _data_root()
     out = {}
@@ -877,13 +896,18 @@ def create_router(classifier=None) -> APIRouter:
         if ext not in {".mp4", ".mov", ".avi", ".mkv", ".webm"}:
             raise HTTPException(400, f"unsupported video extension {ext!r}")
         # Stash a copy of the source video for re-extraction later.
+        # Assigned name leads with the class so a sorted /videos listing
+        # groups by type — much friendlier for the team (Jerry) to scan
+        # than `REC_<uuid>.mp4` straight from iOS. The original client
+        # filename is preserved in the sidecar for provenance.
         videos_dir = _videos_root()
         videos_dir.mkdir(parents=True, exist_ok=True)
-        stem = Path(file.filename).stem or f"upload_{int(time.time())}"
-        stem = Path(stem).name
-        saved_video = videos_dir / f"{stem}{ext}"
+        original_filename = Path(file.filename).name
+        assigned_name = _class_video_filename(family, gender, ext)
+        saved_video = videos_dir / assigned_name
         n = 1
         while saved_video.exists():
+            stem = Path(assigned_name).stem
             saved_video = videos_dir / f"{stem}_dup{n}{ext}"
             n += 1
         data = await file.read()
@@ -964,6 +988,7 @@ def create_router(classifier=None) -> APIRouter:
             sidecar = _video_sidecar_path(saved_video)
             sidecar.write_text(json.dumps({
                 "video_filename": saved_video.name,
+                "original_filename": original_filename,
                 "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "uploaded_by": getattr(user, "username", None),
                 "family": family,
@@ -1163,6 +1188,37 @@ def create_router(classifier=None) -> APIRouter:
                 existing = json.loads(sidecar.read_text())
             except Exception:
                 existing = {}
+
+        # If the file doesn't already lead with the class, rename it +
+        # its sidecar so the directory listing stays self-documenting.
+        # The original filename is preserved in the sidecar as
+        # original_filename for provenance — useful when comparing
+        # against client logs / nginx access logs.
+        renamed = False
+        if not _filename_already_class_prefixed(target.name, family, gender):
+            new_name = _class_video_filename(
+                family, gender, target.suffix, when=target.stat().st_mtime,
+            )
+            new_target = target.parent / new_name
+            n = 1
+            while new_target.exists() and new_target != target:
+                stem = Path(new_name).stem
+                new_target = target.parent / f"{stem}_dup{n}{target.suffix.lower()}"
+                n += 1
+            existing.setdefault("original_filename", target.name)
+            try:
+                target.rename(new_target)
+                if sidecar.exists():
+                    new_sidecar = _video_sidecar_path(new_target)
+                    sidecar.rename(new_sidecar)
+                    sidecar = new_sidecar
+                else:
+                    sidecar = _video_sidecar_path(new_target)
+                target = new_target
+                renamed = True
+            except Exception as e:
+                print(f"[videos-annotate] rename failed: {e}", flush=True)
+
         # Preserve any existing manifest fields (uploaded_at, crops,
         # uploaded_by) and just patch the family/gender. For brand-new
         # annotations the file gets seeded with sane defaults.
@@ -1183,6 +1239,8 @@ def create_router(classifier=None) -> APIRouter:
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime(),
         )
         existing["annotated_by"] = getattr(user, "username", None)
+        if renamed:
+            existing["renamed_at"] = existing["annotated_at"]
         sidecar.write_text(json.dumps(existing, indent=2))
         # Return a tiny HTMX-swappable confirmation that the row script
         # can use to reload itself.
