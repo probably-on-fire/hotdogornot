@@ -35,12 +35,28 @@
       background: var(--panel); border: 1px solid var(--border);
       border-radius: 8px; padding: 14px 18px;
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 220px 1fr auto;
       gap: 12px 18px;
       align-items: center;
     }
+    @media (max-width: 720px) {
+      .video-row {
+        grid-template-columns: 1fr;
+      }
+      .video-actions { justify-content: flex-end; }
+    }
     .video-row.gone { opacity: 0; transform: scale(0.95); pointer-events: none; }
 
+    .video-preview {
+      width: 100%;
+      max-width: 220px;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      object-fit: contain;
+      display: block;
+    }
     .video-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
     .video-name {
       font-size: 14px; font-weight: 600; color: var(--text);
@@ -142,9 +158,26 @@
       <div class="video-list" id="video-list">
         {% for v in videos %}
           <div class="video-row" id="vr-{{ loop.index }}">
+            <video class="video-preview"
+                   preload="metadata"
+                   controls
+                   playsinline
+                   src="/rfcai/labeler/videos/download/{{ v.name | urlencode }}#t=0.5"
+                   title="Click to play">
+              Your browser does not support inline video — use the
+              <a href="/rfcai/labeler/videos/download/{{ v.name | urlencode }}">Download</a>
+              link to view.
+            </video>
             <div class="video-row-main">
               <div class="video-name">{{ v.name }}</div>
               <div class="video-meta">
+                <span class="pill"
+                      title="{{ 'From upload sidecar' if v.uploaded_at_source == 'sidecar' else 'File modification time (no upload record)' }}">
+                  {{ v.uploaded_at_display }}
+                  {% if v.uploaded_at_source != 'sidecar' %}
+                    <span style="color: var(--subtle); margin-left: 4px;">(mtime)</span>
+                  {% endif %}
+                </span>
                 {% if v.target_class %}
                   <span class="pill cls">{{ v.target_class }}</span>
                 {% endif %}
@@ -159,9 +192,6 @@
                     <span class="pill muted">
                       {{ v.n_frames_extracted }} frames @ {{ v.fps }} fps
                     </span>
-                  {% endif %}
-                  {% if v.uploaded_at %}
-                    <span class="pill muted">{{ v.uploaded_at }}</span>
                   {% endif %}
                   {% if v.uploaded_by %}
                     <span class="pill muted">by {{ v.uploaded_by }}</span>

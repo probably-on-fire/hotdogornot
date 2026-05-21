@@ -973,14 +973,25 @@ def create_router() -> APIRouter:
     _VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 
     def _video_record(p: Path) -> dict:
+        mtime = p.stat().st_mtime if p.exists() else 0
+        # Friendly "YYYY-MM-DD HH:MM" rendering for the file's mtime.
+        # When the sidecar is present we prefer its uploaded_at field,
+        # but fall back to mtime for the historical .MOV files that
+        # predate the sidecar mechanism.
+        mtime_display = time.strftime(
+            "%Y-%m-%d %H:%M", time.localtime(mtime)
+        ) if mtime else ""
         info: dict = {
             "name": p.name,
             "path": str(p),
             "size_bytes": p.stat().st_size if p.exists() else 0,
-            "mtime": p.stat().st_mtime if p.exists() else 0,
+            "mtime": mtime,
+            "mtime_display": mtime_display,
             "has_sidecar": False,
             "sidecar_path": None,
             "uploaded_at": None,
+            "uploaded_at_display": mtime_display,
+            "uploaded_at_source": "mtime",
             "uploaded_by": None,
             "target_class": None,
             "family": None,
@@ -997,6 +1008,22 @@ def create_router() -> APIRouter:
                 info["has_sidecar"] = True
                 info["sidecar_path"] = str(sidecar)
                 info["uploaded_at"] = manifest.get("uploaded_at")
+                # Sidecar uploaded_at is a UTC ISO8601 string. Render in
+                # local time for display when possible — falls back to
+                # the raw string on parse failure.
+                if info["uploaded_at"]:
+                    try:
+                        from datetime import datetime, timezone
+                        ts = datetime.strptime(
+                            info["uploaded_at"], "%Y-%m-%dT%H:%M:%SZ",
+                        ).replace(tzinfo=timezone.utc).astimezone()
+                        info["uploaded_at_display"] = ts.strftime(
+                            "%Y-%m-%d %H:%M"
+                        )
+                        info["uploaded_at_source"] = "sidecar"
+                    except Exception:
+                        info["uploaded_at_display"] = info["uploaded_at"]
+                        info["uploaded_at_source"] = "sidecar-raw"
                 info["uploaded_by"] = manifest.get("uploaded_by")
                 info["target_class"] = manifest.get("target_class")
                 info["family"] = manifest.get("family")
