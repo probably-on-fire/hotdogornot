@@ -969,7 +969,19 @@ def create_router(classifier=None) -> APIRouter:
                         if do_predict:
                             rgb = cv2.cvtColor(r2.crop, cv2.COLOR_BGR2RGB)
                             try:
-                                pred = classifier.predict(rgb)
+                                cp = classifier.predict(rgb)
+                                # ClassifierPrediction → dict so it
+                                # round-trips through JSONResponse and
+                                # matches the /predict-video schema the
+                                # Flutter app already parses.
+                                pred = {
+                                    "class_name": cp.class_name,
+                                    "confidence": float(cp.confidence),
+                                    "probabilities": {
+                                        k: float(v) for k, v in cp.probabilities.items()
+                                    },
+                                    "bbox": {"x": 0, "y": 0, "w": 0, "h": 0},
+                                }
                             except Exception:
                                 pred = None
                             if pred is not None and (
