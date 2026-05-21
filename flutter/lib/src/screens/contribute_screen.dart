@@ -222,10 +222,16 @@ class _ContributeScreenState extends State<ContributeScreen>
       final controller = CameraController(
         rear,
         ResolutionPreset.max,
-        enableAudio: false,
+        // iOS AVCaptureMovieFileOutput fails to write video when audio
+        // is disabled; the audio track is ignored server-side.
+        enableAudio: true,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
       await controller.initialize();
+      // Pre-configure the AVCaptureSession for video so iOS prompts for
+      // mic permission up front; otherwise the first Record tap throws
+      // because the permission dialog races with startVideoRecording().
+      try { await controller.prepareForVideoRecording(); } catch (_) {}
       try { await controller.setFocusMode(FocusMode.auto); } catch (_) {}
       double zMin = 1.0, zMax = 1.0;
       try {
