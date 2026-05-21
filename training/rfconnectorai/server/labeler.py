@@ -121,6 +121,53 @@ def _source_backup_root() -> Path:
 CANONICAL_FAMILIES = ["SMA", "3.5mm", "2.92mm", "2.4mm", "1.85mm"]
 
 
+def _drive_backup(local_path: Path, target_class: str) -> dict | None:
+    """Upload `local_path` to the configured Drive folder. Returns
+    {"id": "...", "webViewLink": "..."} on success, None if Drive
+    backup isn't configured or the call fails.
+
+    Reads:
+      RFCAI_DRIVE_FOLDER_ID         — destination folder ID (required)
+      RFCAI_DRIVE_CREDENTIALS_PATH  — path to service-account JSON (required)
+    Both unset → no-op (returns None). Failures are logged, never raised.
+    """
+    folder_id = os.environ.get("RFCAI_DRIVE_FOLDER_ID", "").strip()
+    creds_path = os.environ.get("RFCAI_DRIVE_CREDENTIALS_PATH", "").strip()
+    if not folder_id or not creds_path:
+        return None
+    try:
+        # Lazy import so the service doesn't fail to boot when the
+        # Drive client libs aren't installed.
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
+        creds = service_account.Credentials.from_service_account_file(
+            creds_path, scopes=["https://www.googleapis.com/auth/drive.file"],
+        )
+        svc = build("drive", "v3", credentials=creds, cache_discovery=False)
+        media = MediaFileUpload(
+            str(local_path),
+            mimetype="video/mp4",
+            resumable=False,
+        )
+        # Tag the file with the target class so the Drive view groups
+        # naturally; the on-disk filename already encodes class+timestamp.
+        meta = {
+            "name": local_path.name,
+            "parents": [folder_id],
+            "description": f"target_class={target_class}",
+        }
+        f = svc.files().create(
+            body=meta, media_body=media,
+            fields="id, webViewLink",
+            supportsAllDrives=True,
+        ).execute()
+        return {"id": f.get("id"), "webViewLink": f.get("webViewLink")}
+    except Exception as e:
+        print(f"[upload-video] Drive backup failed: {e}", flush=True)
+        return None
+
+
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 
@@ -993,6 +1040,10 @@ def create_router(classifier=None) -> APIRouter:
 
         saved_crops, best_pred, n_frames = await run_in_threadpool(_process_sync)
 
+        # Backup the source video to Drive — no-op when env isn't set.
+        # Runs in the threadpool too so the HTTP call doesn't block.
+        drive_ref = await run_in_threadpool(_drive_backup, saved_video, target_cls)
+
         # Write the sidecar so the /videos page can later show this video
         # alongside the crops it produced and offer a one-click "delete
         # video + its crops" action. Lives next to the .mp4.
@@ -1028,6 +1079,7 @@ def create_router(classifier=None) -> APIRouter:
                 "target_class": target_cls,
                 "predictions": [best_pred] if best_pred else [],
                 "classifier_loaded": classifier is not None,
+                "drive_backup": drive_ref,
             })
         return HTMLResponse(
             f"<div style='color:#4ade80'>Extracted <strong>{saved_crops_count}</strong> crops "
