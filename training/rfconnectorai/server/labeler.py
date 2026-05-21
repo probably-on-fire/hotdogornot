@@ -972,6 +972,22 @@ def create_router() -> APIRouter:
 
     _VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 
+    def _infer_family_from_name(stem: str) -> str | None:
+        """Best-effort family extraction from a filename stem. Covers the
+        historical training clips (2_4mm.MOV, 2_92mm.MOV, 3_5mm.MOV) and
+        any future ad-hoc uploads that follow the convention. Returns one
+        of CANONICAL_FAMILIES or None if no match."""
+        normalized = stem.lower().replace("-", "_")
+        for fam in CANONICAL_FAMILIES:
+            # Match "2_4mm", "2.4mm", "24mm" etc. against canonical "2.4mm"
+            fam_loose = fam.lower().replace(".", "_")
+            if fam_loose in normalized or fam.lower() in normalized:
+                return fam
+        # SMA appears as a token, sometimes lowercase.
+        if "sma" in normalized:
+            return "SMA" if "SMA" in CANONICAL_FAMILIES else None
+        return None
+
     def _video_record(p: Path) -> dict:
         mtime = p.stat().st_mtime if p.exists() else 0
         # Friendly "YYYY-MM-DD HH:MM" rendering for the file's mtime.
@@ -996,6 +1012,8 @@ def create_router() -> APIRouter:
             "target_class": None,
             "family": None,
             "gender": None,
+            "family_source": None,    # "sidecar" | "filename" | None
+            "gender_source": None,    # "sidecar" | None
             "fps": None,
             "n_frames_extracted": None,
             "n_crops": 0,
@@ -1028,6 +1046,10 @@ def create_router() -> APIRouter:
                 info["target_class"] = manifest.get("target_class")
                 info["family"] = manifest.get("family")
                 info["gender"] = manifest.get("gender")
+                if info["family"]:
+                    info["family_source"] = "sidecar"
+                if info["gender"]:
+                    info["gender_source"] = "sidecar"
                 info["fps"] = manifest.get("fps")
                 info["n_frames_extracted"] = manifest.get("n_frames_extracted")
                 crops = manifest.get("extracted_crops") or []
@@ -1039,6 +1061,20 @@ def create_router() -> APIRouter:
                 # Corrupted sidecar — treat as "no record" so the user
                 # can still delete the .mp4. Surface the error in the UI.
                 info["sidecar_error"] = str(e)
+
+        # If the sidecar is missing OR doesn't include family, fall back
+        # to a filename heuristic so the historical .MOV files don't
+        # display as Unknown. Gender can't be inferred from filename in
+        # the existing corpus, so it stays None until the user annotates.
+        if not info["family"]:
+            inferred = _infer_family_from_name(p.stem)
+            if inferred:
+                info["family"] = inferred
+                info["family_source"] = "filename"
+                if info["gender"] and (
+                    f"{inferred}-{info['gender']}" in CANONICAL_CLASSES
+                ):
+                    info["target_class"] = f"{inferred}-{info['gender']}"
         return info
 
     @r.get("/videos", response_class=HTMLResponse)
@@ -1062,6 +1098,64 @@ def create_router() -> APIRouter:
                 "n_with_crops": sum(1 for r in records if r["n_crops"] > 0),
                 "videos_root": str(vroot),
             },
+        )
+
+    @r.post("/videos/annotate", response_class=HTMLResponse)
+    def videos_annotate(
+        path: str = Form(...),
+        family: str = Form(...),
+        gender: str = Form(...),
+        user=Depends(require_admin),
+    ):
+        """Retroactively label a video that lacks a sidecar (legacy
+        .MOVs, 504-orphaned uploads, etc.). Writes a minimal manifest so
+        future visits to /videos show the connector type; does NOT touch
+        any extracted crops — those are recorded separately when the
+        video flows through /upload-video."""
+        if family not in CANONICAL_FAMILIES:
+            raise HTTPException(400, f"unknown family {family!r}")
+        target_cls = f"{family}-{gender}"
+        if target_cls not in CANONICAL_CLASSES:
+            raise HTTPException(400, f"unknown class {target_cls!r}")
+        target = _safe_path(path)
+        if not target.exists() or target.suffix.lower() not in _VIDEO_EXTS:
+            raise HTTPException(404, "video not found")
+        sidecar = _video_sidecar_path(target)
+        existing: dict = {}
+        if sidecar.exists():
+            try:
+                existing = json.loads(sidecar.read_text())
+            except Exception:
+                existing = {}
+        # Preserve any existing manifest fields (uploaded_at, crops,
+        # uploaded_by) and just patch the family/gender. For brand-new
+        # annotations the file gets seeded with sane defaults.
+        existing.update({
+            "video_filename": target.name,
+            "family": family,
+            "gender": gender,
+            "target_class": target_cls,
+        })
+        existing.setdefault("uploaded_at",
+            time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                          time.gmtime(target.stat().st_mtime)))
+        existing.setdefault("uploaded_by", getattr(user, "username", None))
+        existing.setdefault("extracted_crops", [])
+        existing.setdefault("n_frames_extracted", None)
+        existing.setdefault("fps", None)
+        existing["annotated_at"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(),
+        )
+        existing["annotated_by"] = getattr(user, "username", None)
+        sidecar.write_text(json.dumps(existing, indent=2))
+        # Return a tiny HTMX-swappable confirmation that the row script
+        # can use to reload itself.
+        return HTMLResponse(
+            f'<div hx-trigger="load delay:300ms" '
+            f'hx-get="/rfcai/labeler/videos" hx-target="body" '
+            f'hx-swap="outerHTML" '
+            f'style="color: var(--green); font-size: 12px;">'
+            f'Saved as <strong>{target_cls}</strong>. Refreshing…</div>'
         )
 
     @r.get("/videos/download/{name}")

@@ -57,9 +57,49 @@
       object-fit: contain;
       display: block;
     }
-    .video-row-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .video-row-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .video-class-header {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 15px; font-weight: 700;
+    }
+    .video-class-header .family { color: var(--accent-strong); }
+    .video-class-header .gender { color: var(--text); }
+    .video-class-header .gender.M { color: #4f8cff; }
+    .video-class-header .gender.F { color: #f472b6; }
+    .video-class-header .src {
+      font-size: 10px; font-weight: 500;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 1px 6px; border-radius: 4px;
+      background: var(--panel-2); color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .video-class-header .src.inferred {
+      background: rgba(251,146,60,0.13);
+      border-color: rgba(251,146,60,0.35);
+      color: var(--orange);
+    }
+    .video-class-header .unknown {
+      color: var(--muted); font-style: italic; font-weight: 500;
+    }
+    .annotate-form {
+      display: inline-flex; gap: 4px; align-items: center;
+      margin-left: 8px;
+    }
+    .annotate-form select {
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px;
+      padding: 3px 6px; font-size: 12px; outline: none;
+    }
+    .annotate-form button {
+      background: var(--accent); color: white; border: none;
+      border-radius: 4px; padding: 4px 10px; font-size: 12px;
+      font-weight: 600; cursor: pointer;
+    }
+    .annotate-form button:hover { background: var(--accent-strong); }
+    .annotate-status { font-size: 12px; color: var(--green); }
+
     .video-name {
-      font-size: 14px; font-weight: 600; color: var(--text);
+      font-size: 12px; color: var(--muted);
       font-family: ui-monospace, "Cascadia Code", monospace;
       word-break: break-all;
     }
@@ -169,6 +209,47 @@
               link to view.
             </video>
             <div class="video-row-main">
+              <div class="video-class-header">
+                {% if v.family and v.gender %}
+                  <span class="family">{{ v.family }}</span>
+                  <span class="subtle">·</span>
+                  <span class="gender {{ v.gender }}">
+                    {{ "Male" if v.gender == "M" else "Female" }}
+                  </span>
+                  {% if v.family_source == "filename" %}
+                    <span class="src inferred" title="Inferred from filename — no upload record">guessed</span>
+                  {% elif not v.has_sidecar %}
+                    <span class="src">annotated</span>
+                  {% endif %}
+                {% elif v.family and not v.gender %}
+                  <span class="family">{{ v.family }}</span>
+                  <span class="subtle">·</span>
+                  <span class="unknown">gender unknown</span>
+                  {% if v.family_source == "filename" %}
+                    <span class="src inferred" title="Family inferred from filename">filename only</span>
+                  {% endif %}
+                {% else %}
+                  <span class="unknown">Unlabeled</span>
+                {% endif %}
+                {% if (not v.has_sidecar) or (not v.gender) %}
+                  <form class="annotate-form"
+                        hx-post="/rfcai/labeler/videos/annotate"
+                        hx-target="this"
+                        hx-swap="outerHTML">
+                    <input type="hidden" name="path" value="{{ v.path }}">
+                    <select name="family" required>
+                      {% for f in ['SMA', '1.85mm', '2.4mm', '2.92mm', '3.5mm'] %}
+                        <option value="{{ f }}" {{ "selected" if v.family == f else "" }}>{{ f }}</option>
+                      {% endfor %}
+                    </select>
+                    <select name="gender" required>
+                      <option value="M" {{ "selected" if v.gender == "M" else "" }}>M</option>
+                      <option value="F" {{ "selected" if v.gender == "F" else "" }}>F</option>
+                    </select>
+                    <button type="submit">{{ "Update" if v.has_sidecar else "Save type" }}</button>
+                  </form>
+                {% endif %}
+              </div>
               <div class="video-name">{{ v.name }}</div>
               <div class="video-meta">
                 <span class="pill"
