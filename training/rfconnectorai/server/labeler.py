@@ -40,6 +40,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
@@ -886,70 +887,75 @@ def create_router(classifier=None) -> APIRouter:
             saved_video = videos_dir / f"{stem}_dup{n}{ext}"
             n += 1
         data = await file.read()
-        saved_video.write_bytes(data)
 
-        # Extract frames at requested fps, run Hough, dump crops to
-        # the target class directory (user can still Flip mistakes
-        # via the labeler grid).
+        # Everything below is CPU/IO-bound (200MB disk write, ffmpeg
+        # extract, per-frame Hough, per-crop classify). Doing it on the
+        # event-loop thread wedges every other labeler route — sign-in,
+        # grid, stats — until the upload finishes. Move it to a worker.
         try:
             import imageio_ffmpeg
             ff = imageio_ffmpeg.get_ffmpeg_exe()
         except Exception as e:
             raise HTTPException(500, f"ffmpeg not available: {e}")
-        # target_cls already validated above
         out_dir = _data_root() / target_cls
         out_dir.mkdir(parents=True, exist_ok=True)
-        # Pick a fresh starting index for "agg_NNNN.jpg" output names.
-        existing = []
-        for p in out_dir.glob("agg_*.jpg"):
-            tail = p.stem[len("agg_"):]
-            if tail.isdigit():
-                existing.append(int(tail))
-        idx = max(existing) + 1 if existing else 0
-
-        saved_crops: list[str] = []
-        best_pred: dict | None = None  # only populated when with_predict
         do_predict = with_predict and classifier is not None
-        with tempfile.TemporaryDirectory(prefix="upload_video_") as tmp:
-            tmpp = Path(tmp)
-            subprocess.run(
-                [ff, "-y", "-i", str(saved_video),
-                 "-vf", f"fps={fps}", "-q:v", "4",
-                 str(tmpp / "f_%04d.jpg")],
-                capture_output=True, check=False,
-            )
-            frames = sorted(tmpp.glob("f_*.jpg"))
-            for fp in frames:
-                bgr = cv2.imread(str(fp))
-                if bgr is None:
-                    continue
-                # Reuse the Hough detector with the same defaults the
-                # bulk-extract script tuned (pad_frac=0.35, param2=22).
-                results = detect_connector_crops_hough(
-                    bgr,
-                    max_crops=int(max_crops),
-                    pad_frac=0.35,
-                    accumulator_threshold=22,
+
+        def _process_sync() -> tuple[list[str], dict | None, int]:
+            saved_video.write_bytes(data)
+            # Pick a fresh starting index for "agg_NNNN.jpg" output names.
+            existing = []
+            for p in out_dir.glob("agg_*.jpg"):
+                tail = p.stem[len("agg_"):]
+                if tail.isdigit():
+                    existing.append(int(tail))
+            idx = max(existing) + 1 if existing else 0
+
+            saved_crops_inner: list[str] = []
+            best_pred_inner: dict | None = None
+            with tempfile.TemporaryDirectory(prefix="upload_video_") as tmp:
+                tmpp = Path(tmp)
+                subprocess.run(
+                    [ff, "-y", "-i", str(saved_video),
+                     "-vf", f"fps={fps}", "-q:v", "4",
+                     str(tmpp / "f_%04d.jpg")],
+                    capture_output=True, check=False,
                 )
-                for r2 in results:
-                    out_path = out_dir / f"agg_{idx:04d}.jpg"
-                    cv2.imwrite(
-                        str(out_path),
-                        r2.crop, [cv2.IMWRITE_JPEG_QUALITY, 90],
+                frame_paths = sorted(tmpp.glob("f_*.jpg"))
+                for fp in frame_paths:
+                    bgr = cv2.imread(str(fp))
+                    if bgr is None:
+                        continue
+                    # Reuse the Hough detector with the same defaults the
+                    # bulk-extract script tuned (pad_frac=0.35, param2=22).
+                    results = detect_connector_crops_hough(
+                        bgr,
+                        max_crops=int(max_crops),
+                        pad_frac=0.35,
+                        accumulator_threshold=22,
                     )
-                    idx += 1
-                    saved_crops.append(str(out_path))
-                    if do_predict:
-                        rgb = cv2.cvtColor(r2.crop, cv2.COLOR_BGR2RGB)
-                        try:
-                            pred = classifier.predict(rgb)
-                        except Exception:
-                            pred = None
-                        if pred is not None and (
-                            best_pred is None
-                            or pred["confidence"] > best_pred["confidence"]
-                        ):
-                            best_pred = pred
+                    for r2 in results:
+                        out_path = out_dir / f"agg_{idx:04d}.jpg"
+                        cv2.imwrite(
+                            str(out_path),
+                            r2.crop, [cv2.IMWRITE_JPEG_QUALITY, 90],
+                        )
+                        idx += 1
+                        saved_crops_inner.append(str(out_path))
+                        if do_predict:
+                            rgb = cv2.cvtColor(r2.crop, cv2.COLOR_BGR2RGB)
+                            try:
+                                pred = classifier.predict(rgb)
+                            except Exception:
+                                pred = None
+                            if pred is not None and (
+                                best_pred_inner is None
+                                or pred["confidence"] > best_pred_inner["confidence"]
+                            ):
+                                best_pred_inner = pred
+            return saved_crops_inner, best_pred_inner, len(frame_paths)
+
+        saved_crops, best_pred, n_frames = await run_in_threadpool(_process_sync)
 
         # Write the sidecar so the /videos page can later show this video
         # alongside the crops it produced and offer a one-click "delete
@@ -965,7 +971,7 @@ def create_router(classifier=None) -> APIRouter:
                 "target_class": target_cls,
                 "fps": float(fps),
                 "max_crops_per_frame": int(max_crops),
-                "n_frames_extracted": len(frames),
+                "n_frames_extracted": n_frames,
                 "extracted_crops": saved_crops,
             }, indent=2))
         except Exception as e:
@@ -981,7 +987,7 @@ def create_router(classifier=None) -> APIRouter:
         if with_predict:
             return JSONResponse({
                 "saved_crops": saved_crops_count,
-                "frames_scanned": len(frames),
+                "frames_scanned": n_frames,
                 "target_class": target_cls,
                 "predictions": [best_pred] if best_pred else [],
                 "classifier_loaded": classifier is not None,
@@ -989,7 +995,7 @@ def create_router(classifier=None) -> APIRouter:
         return HTMLResponse(
             f"<div style='color:#4ade80'>Extracted <strong>{saved_crops_count}</strong> crops "
             f"from {saved_video.name} into <code>{target_cls}/</code> "
-            f"({len(frames)} frames at {fps} fps). Refresh the grid to see them.</div>"
+            f"({n_frames} frames at {fps} fps). Refresh the grid to see them.</div>"
         )
 
     # --- Video management ---------------------------------------------
