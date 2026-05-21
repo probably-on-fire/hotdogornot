@@ -1321,6 +1321,15 @@ def create_router(classifier=None) -> APIRouter:
                     info["target_class"] = f"{inferred}-{info['gender']}"
         return info
 
+    @r.get("/auth/whoami")
+    def auth_whoami(user=Depends(require_admin)):
+        """Cheap admin-validation endpoint. Returns 200 + username when
+        the caller is admin-authenticated (session cookie OR Bearer
+        token OR HTTP Basic), 401 otherwise. The relay calls this
+        before accepting an aired.com-side upload so junk can't fill
+        /srv/rfcai/videos/."""
+        return {"username": getattr(user, "username", None)}
+
     @r.get("/videos", response_class=HTMLResponse)
     def videos_list(request: Request):
         # Public read — anyone can see what's been uploaded. Writes

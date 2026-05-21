@@ -38,6 +38,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,6 +47,38 @@ from fastapi import (
     Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile,
 )
 from fastapi.responses import FileResponse, JSONResponse, Response
+
+
+# Aired.com-side archive of uploaded training videos. The relay TEEs
+# /labeler/upload-video bodies here BEFORE forwarding the original
+# multipart to the training box for extraction. After this, every
+# uploaded clip has two copies: one durable on aired.com (this dir,
+# class-prefix named) and one on the box where extraction runs. The
+# aired.com copy is the long-term archive; the box copy is a
+# processing scratch space.
+DEFAULT_VIDEOS_DIR = Path("/srv/rfcai/videos")
+VIDEO_EXTS = (".mp4", ".mov", ".avi", ".mkv", ".webm")
+CANONICAL_FAMILIES = ("SMA", "1.85mm", "2.4mm", "2.92mm", "3.5mm")
+CANONICAL_GENDERS = ("M", "F")
+
+
+def _videos_root() -> Path:
+    return Path(os.environ.get("RFCAI_VIDEOS_DIR", DEFAULT_VIDEOS_DIR)).resolve()
+
+
+def _class_video_filename(family: str, gender: str, ext: str,
+                          when: float | None = None) -> str:
+    """Mirror of labeler.py's _class_video_filename so the aired.com
+    copy gets the same `<family>-<gender>_<ISO timestamp>.<ext>` name.
+    `:` is replaced with `-` in the time portion since `:` isn't a
+    legal filename character on every filesystem we'd ever care about."""
+    ts = time.gmtime(when) if when is not None else time.gmtime()
+    stamp = time.strftime("%Y-%m-%dT%H-%M-%S", ts)
+    return f"{family}-{gender}_{stamp}{ext.lower()}"
+
+
+def _video_sidecar_path(video_path: Path) -> Path:
+    return video_path.with_suffix(video_path.suffix + ".crops.json")
 
 
 DEFAULT_INCOMING = Path("./incoming")
@@ -280,6 +313,168 @@ def create_app(config: dict | None = None) -> FastAPI:
             k: v for k, v in upstream.headers.items()
             if k.lower() not in _HOP_BY_HOP
         }
+        return Response(
+            content=upstream.content,
+            status_code=upstream.status_code,
+            headers=resp_headers,
+        )
+
+    # --- aired.com-side video archive --------------------------------
+    # The relay TEEs every /labeler/upload-video into /srv/rfcai/videos/
+    # with a class-prefix filename, THEN forwards the original multipart
+    # to the box so the existing extraction path keeps working. Result:
+    # aired.com always has a durable archive copy regardless of what
+    # happens to the box.
+
+    async def _validate_admin_via_box(authz_header: str) -> bool:
+        """Forward the caller's Authorization header to the box's cheap
+        /labeler/auth/whoami endpoint. Returns True if the box says the
+        caller is admin-authenticated."""
+        if not authz_header:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{_LABELER_BACKEND}/rfcai/labeler/auth/whoami",
+                    headers={"Authorization": authz_header},
+                )
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    @app.post("/labeler/upload-video")
+    async def labeler_upload_video_tee(request: Request):
+        # Bearer-validate before we save anything. Don't want random
+        # bodies hitting /srv/rfcai/videos/.
+        if not await _validate_admin_via_box(
+            request.headers.get("authorization", "")
+        ):
+            raise HTTPException(401, "admin auth required")
+
+        # Parse the multipart once. We consume the body to extract the
+        # file + form fields, then re-construct it when forwarding to
+        # the box — extra in-memory work, but it lets us name the
+        # aired.com archive copy by class without guessing.
+        form = await request.form()
+        family = str(form.get("family") or "")
+        gender = str(form.get("gender") or "")
+        upload = form.get("file")
+        if family not in CANONICAL_FAMILIES:
+            raise HTTPException(400, f"unknown family {family!r}")
+        if gender not in CANONICAL_GENDERS:
+            raise HTTPException(400, f"unknown gender {gender!r}")
+        if upload is None or not getattr(upload, "filename", None):
+            raise HTTPException(400, "missing file")
+        target_cls = f"{family}-{gender}"
+        original_filename = Path(upload.filename).name
+        ext = Path(upload.filename).suffix.lower()
+        if ext not in VIDEO_EXTS:
+            raise HTTPException(400, f"unsupported video extension {ext!r}")
+
+        data = await upload.read()
+
+        # Save the archive copy on aired.com.
+        videos_dir = _videos_root()
+        videos_dir.mkdir(parents=True, exist_ok=True)
+        assigned_name = _class_video_filename(family, gender, ext)
+        archive_path = videos_dir / assigned_name
+        n = 1
+        while archive_path.exists():
+            stem = Path(assigned_name).stem
+            archive_path = videos_dir / f"{stem}_dup{n}{ext}"
+            n += 1
+        archive_path.write_bytes(data)
+        # Minimal sidecar — the box's response will fill in the
+        # processing-state fields, but this guarantees the aired.com
+        # copy always has the class info even if the box never
+        # finishes (e.g. the box is offline).
+        sidecar = _video_sidecar_path(archive_path)
+        sidecar.write_text(json.dumps({
+            "video_filename": archive_path.name,
+            "original_filename": original_filename,
+            "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "family": family,
+            "gender": gender,
+            "target_class": target_cls,
+            "size_bytes": len(data),
+            "archive_location": "aired.com",
+            # Filled when (if) the box reports back via the existing
+            # /labeler/upload-video extraction path.
+            "extraction_state": "pending",
+            "n_frames_extracted": None,
+            "extracted_crops": [],
+            "processed_at": None,
+        }, indent=2))
+
+        # Re-build the multipart for the upstream forward. The box runs
+        # its own extraction job on its own copy; we don't dedupe storage
+        # tonight, just guarantee aired.com has the durable archive.
+        forward_files = {
+            "file": (
+                original_filename,
+                data,
+                getattr(upload, "content_type", "application/octet-stream"),
+            ),
+        }
+        forward_data = {
+            k: str(v) for k, v in form.items()
+            if k != "file" and not hasattr(v, "filename")
+        }
+        fwd_headers = {
+            "Authorization": request.headers.get("authorization", ""),
+        }
+        archive_url = (
+            f"/rfcai/labeler/videos/download/{archive_path.name}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                upstream = await client.post(
+                    f"{_LABELER_BACKEND}/rfcai/labeler/upload-video",
+                    data=forward_data,
+                    files=forward_files,
+                    headers=fwd_headers,
+                )
+        except Exception as e:
+            # Box unreachable. The aired.com archive copy is on disk,
+            # so the upload isn't lost; just signal the failure.
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "archived_on_relay": True,
+                    "archive_url": archive_url,
+                    "archive_filename": archive_path.name,
+                    "size_bytes": len(data),
+                    "target_class": target_cls,
+                    "forwarded_to_box": False,
+                    "box_error": str(e),
+                },
+            )
+
+        # Preserve the box's response shape so the Flutter app's
+        # VideoTrainingUploadResult parser keeps working — just patch
+        # in the archive fields when the response is JSON.
+        ct = upstream.headers.get("content-type", "")
+        if ct.startswith("application/json"):
+            try:
+                merged = upstream.json()
+            except Exception:
+                merged = {}
+            merged["archived_on_relay"] = True
+            merged["archive_url"] = archive_url
+            merged["archive_filename"] = archive_path.name
+            return JSONResponse(
+                status_code=upstream.status_code, content=merged,
+            )
+        # HTML / opaque body: pass through unchanged, but record the
+        # archive event in a custom header so a curious client can see
+        # the relay also stored a copy.
+        resp_headers = dict(upstream.headers)
+        for hop in (
+            "content-length", "content-encoding",
+            "transfer-encoding", "connection",
+        ):
+            resp_headers.pop(hop, None)
+        resp_headers["X-Relay-Archive"] = archive_path.name
         return Response(
             content=upstream.content,
             status_code=upstream.status_code,
