@@ -19,6 +19,39 @@ class UploadRecord {
 }
 
 /// Parsed JSON from `/upload-train` and `/upload-test`.
+/// Response from `/labeler/upload-video` when `with_predict=true`. Older
+/// servers that don't know about the flag still return HTML; in that
+/// case `bestPrediction` is null and `savedCrops` is null.
+class VideoTrainingUploadResult {
+  VideoTrainingUploadResult({
+    this.savedCrops,
+    this.framesScanned,
+    this.bestPrediction,
+  });
+  final int? savedCrops;
+  final int? framesScanned;
+  final Prediction? bestPrediction;
+
+  factory VideoTrainingUploadResult.fromResponseBody(String body) {
+    try {
+      final j = jsonDecode(body);
+      if (j is! Map<String, dynamic>) {
+        return VideoTrainingUploadResult();
+      }
+      final preds = (j['predictions'] as List?) ?? [];
+      return VideoTrainingUploadResult(
+        savedCrops: (j['saved_crops'] as num?)?.toInt(),
+        framesScanned: (j['frames_scanned'] as num?)?.toInt(),
+        bestPrediction: preds.isEmpty
+            ? null
+            : Prediction.fromJson(preds.first as Map<String, dynamic>),
+      );
+    } catch (_) {
+      return VideoTrainingUploadResult();   // legacy HTML response
+    }
+  }
+}
+
 class UploadResult {
   UploadResult({required this.saved, required this.errors});
   final List<UploadRecord> saved;
@@ -283,10 +316,12 @@ class ApiClient {
   }
 
   /// POST a training video to the labeler. family is "2.4mm" / "2.92mm" /
-  /// "3.5mm" / "SMA". gender is "M" or "F".
-  Future<String> uploadTrainingVideo(
+  /// "3.5mm" / "SMA". gender is "M" or "F". with_predict=true asks the
+  /// server to also classify the extracted crops and return the best
+  /// prediction alongside the saved-crop count.
+  Future<VideoTrainingUploadResult> uploadTrainingVideo(
       File videoFile, String family, String gender) async {
-    return _uploadMultipart(
+    final body = await _uploadMultipart(
       url: settings.labelerUploadVideoUrl(),
       fields: {
         'family': family,
@@ -294,10 +329,12 @@ class ApiClient {
         'fps': '5',
         'sensitivity': '2.0',
         'max_crops': '5',
+        'with_predict': 'true',
       },
       fileField: 'file',
       file: videoFile,
     );
+    return VideoTrainingUploadResult.fromResponseBody(body);
   }
 
   /// GET /labeler/stats — per-class real-capture counts.

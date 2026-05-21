@@ -579,7 +579,7 @@ def create_app(config: dict | None = None) -> FastAPI:
     # /rfcai/* nginx wildcard. Auth is HTTP Basic via LABELER_USER /
     # LABELER_PASS env vars (separate from the device-token auth on
     # /predict and /uploads).
-    app.include_router(create_labeler_router())
+    app.include_router(create_labeler_router(classifier=classifier))
 
     return app
 

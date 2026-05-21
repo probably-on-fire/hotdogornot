@@ -40,7 +40,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -446,7 +446,11 @@ def _backup_hardlink(src: Path, cls: str, backup_root: Path) -> None:
         )
 
 
-def create_router() -> APIRouter:
+def create_router(classifier=None) -> APIRouter:
+    """`classifier`: optional ConnectorClassifier instance. When passed,
+    `/upload-video` callers can set `with_predict=true` to also receive
+    a JSON prediction over the extracted crops (alongside saving them as
+    training data). Left as None when the server starts without weights."""
     # Prefix matches the public URL path. nginx on aired.com forwards
     # /rfcai/* to the predict service backend with the /rfcai prefix
     # preserved (for paths nginx doesn't have an explicit rewrite for),
@@ -846,13 +850,18 @@ def create_router() -> APIRouter:
             _backup_hardlink(dst, cls, _source_backup_root())
         return {"saved": saved, "errors": errors}
 
-    @r.post("/upload-video", response_class=HTMLResponse)
+    @r.post("/upload-video")
     async def upload_video(
         family: str = Form(...),
         gender: str = Form(...),
         fps: float = Form(5.0),
         sensitivity: float = Form(2.0),
         max_crops: int = Form(5),
+        # When true (Flutter Contribute uploader), classify each extracted
+        # crop and return JSON with the best prediction alongside the
+        # saved-crop summary. Default false preserves the HTML response
+        # the web labeler UI expects.
+        with_predict: bool = Form(False),
         file: UploadFile = File(...),
         user=Depends(require_admin),
     ):
@@ -899,6 +908,8 @@ def create_router() -> APIRouter:
         idx = max(existing) + 1 if existing else 0
 
         saved_crops: list[str] = []
+        best_pred: dict | None = None  # only populated when with_predict
+        do_predict = with_predict and classifier is not None
         with tempfile.TemporaryDirectory(prefix="upload_video_") as tmp:
             tmpp = Path(tmp)
             subprocess.run(
@@ -928,6 +939,17 @@ def create_router() -> APIRouter:
                     )
                     idx += 1
                     saved_crops.append(str(out_path))
+                    if do_predict:
+                        rgb = cv2.cvtColor(r2.crop, cv2.COLOR_BGR2RGB)
+                        try:
+                            pred = classifier.predict(rgb)
+                        except Exception:
+                            pred = None
+                        if pred is not None and (
+                            best_pred is None
+                            or pred["confidence"] > best_pred["confidence"]
+                        ):
+                            best_pred = pred
 
         # Write the sidecar so the /videos page can later show this video
         # alongside the crops it produced and offer a one-click "delete
@@ -956,6 +978,14 @@ def create_router() -> APIRouter:
         global _signals_cache
         _signals_cache = {}
 
+        if with_predict:
+            return JSONResponse({
+                "saved_crops": saved_crops_count,
+                "frames_scanned": len(frames),
+                "target_class": target_cls,
+                "predictions": [best_pred] if best_pred else [],
+                "classifier_loaded": classifier is not None,
+            })
         return HTMLResponse(
             f"<div style='color:#4ade80'>Extracted <strong>{saved_crops_count}</strong> crops "
             f"from {saved_video.name} into <code>{target_cls}/</code> "

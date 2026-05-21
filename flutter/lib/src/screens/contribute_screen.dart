@@ -327,9 +327,23 @@ class _ContributeScreenState extends State<ContributeScreen>
     _showToast('Uploading ${durationSec}s clip for $cls…');
     try {
       final api = ApiClient(widget.settings, widget.auth);
-      await api.uploadTrainingVideo(f, family, gender);
+      final r = await api.uploadTrainingVideo(f, family, gender);
       if (!mounted) return;
-      _showToast('✓ Video sent — server is extracting crops');
+      final bp = r.bestPrediction;
+      if (bp != null) {
+        final pct = (bp.confidence * 100).toStringAsFixed(0);
+        final match = bp.className == cls;
+        _showToast(
+          match
+              ? '✓ ${r.savedCrops ?? 0} crops · matched $cls @ $pct%'
+              : '✓ ${r.savedCrops ?? 0} crops · model saw ${bp.className} @ $pct%',
+        );
+      } else if (r.savedCrops != null) {
+        _showToast('✓ ${r.savedCrops} crops saved — no clear classifier hit');
+      } else {
+        // Legacy server response (HTML) — no structured fields available.
+        _showToast('✓ Video sent — server is extracting crops');
+      }
     } catch (e) {
       if (e is UnauthorizedException) {
         await widget.auth.signOut();
