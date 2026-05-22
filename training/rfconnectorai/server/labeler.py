@@ -1462,12 +1462,15 @@ def create_router(classifier=None) -> APIRouter:
              if p.is_file() and p.suffix.lower() in _VIDEO_EXTS),
             key=lambda x: -x.stat().st_mtime,
         )
-        # Build absolute URLs so the JSON is useful from anywhere
-        # (the path is also relative-friendly if the client wants it).
-        base_url = (
-            f"{request.url.scheme}://{request.headers.get('host', 'aired.com')}"
-            f"/rfcai/labeler/videos/download"
-        )
+        # Build absolute URLs so the JSON is useful from anywhere.
+        # The relay strips the Host header when forwarding through the
+        # reverse SSH tunnel, so request.url.netloc is 127.0.0.1:8504
+        # rather than aired.com — hardcode the public base instead.
+        # Override with RFCAI_PUBLIC_BASE_URL if the deploy changes.
+        public_base = os.environ.get(
+            "RFCAI_PUBLIC_BASE_URL", "https://aired.com",
+        ).rstrip("/")
+        base_url = f"{public_base}/rfcai/labeler/videos/download"
         items: list[dict] = []
         by_class: dict[str, list[dict]] = {}
         for p in files:
