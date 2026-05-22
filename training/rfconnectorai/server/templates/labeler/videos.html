@@ -206,6 +206,16 @@
         {{ n_total }} file{{ "" if n_total == 1 else "s" }} ·
         {{ n_with_crops }} with extraction record
       </div>
+      <div class="bulk-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <a href="/rfcai/labeler/videos/archive.tar"
+           class="btn btn-primary"
+           title="Stream a tar of every video on the box"
+           download>Download all (.tar)</a>
+        <a href="/rfcai/labeler/videos.json"
+           class="btn btn-secondary"
+           title="Programmatic listing — JSON with class + download URL per file"
+           target="_blank">JSON manifest</a>
+      </div>
     </div>
 
     {% if not videos %}

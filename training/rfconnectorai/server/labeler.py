@@ -1449,6 +1449,107 @@ def create_router(classifier=None) -> APIRouter:
             f'Saved as <strong>{target_cls}</strong>. Refreshing…</div>'
         )
 
+    @r.get("/videos.json")
+    def videos_list_json(request: Request):
+        """Programmatic listing for training pipelines / Jerry's pull
+        scripts. Returns every .mp4/.mov in _videos_root() with class,
+        size, public download URL, and extraction state."""
+        vroot = _videos_root()
+        if not vroot.is_dir():
+            return {"videos": [], "by_class": {}, "n_total": 0}
+        files = sorted(
+            (p for p in vroot.iterdir()
+             if p.is_file() and p.suffix.lower() in _VIDEO_EXTS),
+            key=lambda x: -x.stat().st_mtime,
+        )
+        # Build absolute URLs so the JSON is useful from anywhere
+        # (the path is also relative-friendly if the client wants it).
+        base_url = (
+            f"{request.url.scheme}://{request.headers.get('host', 'aired.com')}"
+            f"/rfcai/labeler/videos/download"
+        )
+        items: list[dict] = []
+        by_class: dict[str, list[dict]] = {}
+        for p in files:
+            rec = _video_record(p)
+            item = {
+                "name": p.name,
+                "download_url": (
+                    f"{base_url}/{urllib.parse.quote(p.name)}"
+                ),
+                "size_bytes": rec["size_bytes"],
+                "target_class": rec.get("target_class"),
+                "family": rec.get("family"),
+                "gender": rec.get("gender"),
+                "uploaded_at": rec.get("uploaded_at"),
+                "uploaded_by": rec.get("uploaded_by"),
+                "extraction_state": rec.get("extraction_state"),
+                "n_crops": rec.get("n_crops", 0),
+            }
+            items.append(item)
+            cls = rec.get("target_class") or "unlabeled"
+            by_class.setdefault(cls, []).append(item)
+        return {
+            "videos": items,
+            "by_class": by_class,
+            "n_total": len(items),
+            "videos_root": str(vroot),
+        }
+
+    @r.get("/videos/archive.tar")
+    def videos_archive_tar(request: Request, cls: str | None = None):
+        """Stream a tar of every video (or, if `cls=` is set, just the
+        videos in that target_class). Lets Jerry curl a bundle in one
+        request instead of N parallel downloads."""
+        vroot = _videos_root()
+        if not vroot.is_dir():
+            raise HTTPException(404, "no videos dir")
+        candidates: list[Path] = []
+        for p in sorted(vroot.iterdir(), key=lambda x: x.name):
+            if not p.is_file(): continue
+            if p.suffix.lower() not in _VIDEO_EXTS: continue
+            if cls:
+                rec = _video_record(p)
+                if rec.get("target_class") != cls:
+                    continue
+            candidates.append(p)
+        if not candidates:
+            raise HTTPException(
+                404, f"no videos matching cls={cls!r}" if cls else "no videos",
+            )
+
+        # True-streaming tar via the system tar binary, so a 500MB
+        # bundle doesn't sit in RAM.
+        names = [p.name for p in candidates]
+        def stream():
+            proc = subprocess.Popen(
+                ["tar", "-cf", "-"] + names,
+                cwd=str(vroot),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                while True:
+                    chunk = proc.stdout.read(64 * 1024)
+                    if not chunk: break
+                    yield chunk
+            finally:
+                proc.terminate()
+                proc.wait()
+
+        from fastapi.responses import StreamingResponse
+        filename = (
+            f"rfcai-videos-{cls}.tar" if cls else "rfcai-videos.tar"
+        )
+        return StreamingResponse(
+            stream(),
+            media_type="application/x-tar",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Video-Count": str(len(candidates)),
+            },
+        )
+
     @r.get("/videos/download/{name}")
     def videos_download(name: str):
         """Serve a training video as a download. Public read so the
