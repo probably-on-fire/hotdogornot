@@ -1165,7 +1165,9 @@ def create_router(classifier=None) -> APIRouter:
                 "target_class": target_cls,
                 "predictions": [],
                 "classifier_loaded": classifier is not None,
-                "extraction_state": "pending",
+                "extraction_state": (
+                    "pending" if auto_extract else "skipped"
+                ),
                 "saved_video_filename": saved_video.name,
                 "download_url": download_url,
                 "drive_backup": None,
