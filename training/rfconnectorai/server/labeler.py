@@ -1105,10 +1105,16 @@ def create_router(classifier=None) -> APIRouter:
             n += 1
 
         # Phase A: respond as soon as the .mp4 + initial manifest hit
-        # disk. ffmpeg extraction + per-frame Hough + (optional) classify
-        # + Drive backup all run in the background; the client gets
-        # immediate confirmation and the /videos page picks up
-        # processed_at when the work finishes.
+        # disk. Auto-extraction (ffmpeg + Hough + optional classify) is
+        # gated behind RFCAI_AUTO_EXTRACT_VIDEOS=1 so we can collect
+        # raw clips without paying CPU on every upload. When the env
+        # var isn't set, the sidecar is marked extraction_state="skipped"
+        # and the video is saved as-is — re-processing later is a
+        # one-off script away.
+        auto_extract = (
+            os.environ.get("RFCAI_AUTO_EXTRACT_VIDEOS", "0")
+            in ("1", "true", "True", "yes", "on")
+        )
         data = await file.read()
         await run_in_threadpool(saved_video.write_bytes, data)
         sidecar = _video_sidecar_path(saved_video)
@@ -1125,11 +1131,11 @@ def create_router(classifier=None) -> APIRouter:
             "max_crops_per_frame": int(max_crops),
             "size_bytes": len(data),
             "with_predict": bool(with_predict),
-            # Filled in by the background extraction task.
+            # Filled in by the background extraction task (when enabled).
             "n_frames_extracted": None,
             "extracted_crops": [],
             "processed_at": None,
-            "extraction_state": "pending",
+            "extraction_state": "pending" if auto_extract else "skipped",
         }
         try:
             sidecar.write_text(json.dumps(initial_manifest, indent=2))
@@ -1137,16 +1143,13 @@ def create_router(classifier=None) -> APIRouter:
             print(f"[upload-video] initial sidecar write failed: {e}",
                   flush=True)
 
-        # Schedule the heavy lifting AFTER the response is sent.
-        # FastAPI calls sync functions in the threadpool, so this won't
-        # block the event loop. Errors are surfaced via the sidecar's
-        # extraction_error field; the HTTP response is already in flight
-        # and stays 200 regardless.
-        background_tasks.add_task(
-            _extract_video_job,
-            saved_video, sidecar, family, gender, target_cls,
-            float(fps), int(max_crops), bool(with_predict), classifier,
-        )
+        # Only schedule extraction when explicitly enabled.
+        if auto_extract:
+            background_tasks.add_task(
+                _extract_video_job,
+                saved_video, sidecar, family, gender, target_cls,
+                float(fps), int(max_crops), bool(with_predict), classifier,
+            )
 
         # Free `data` reference now — the BackgroundTask reads from disk.
         del data

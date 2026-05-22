@@ -138,6 +138,11 @@
       background: rgba(248,113,113,0.10); border-color: rgba(248,113,113,0.30);
       color: var(--red);
     }
+    .video-meta .pill.skipped {
+      background: var(--panel-2);
+      border-color: var(--border);
+      color: var(--muted);
+    }
     @keyframes spin { to { transform: rotate(360deg); } }
     .video-meta .pill.cls {
       background: var(--accent-tint); border-color: rgba(91,158,255,0.35);
@@ -286,6 +291,11 @@
                     <span class="pill err"
                           title="{{ v.extraction_error or 'unknown error' }}">
                       extraction failed
+                    </span>
+                  {% elif v.extraction_state == "skipped" %}
+                    <span class="pill skipped"
+                          title="Auto-extraction off. Video is archived as-is — set RFCAI_AUTO_EXTRACT_VIDEOS=1 + restart to enable crop extraction.">
+                      raw archive (no crops)
                     </span>
                   {% else %}
                     <span class="pill crops">
