@@ -260,24 +260,27 @@
                 {% else %}
                   <span class="unknown">Unlabeled</span>
                 {% endif %}
-                {% if (not v.has_sidecar) or (not v.gender) %}
-                  <form class="annotate-form"
-                        hx-post="/rfcai/labeler/videos/annotate"
-                        hx-target="this"
-                        hx-swap="outerHTML">
-                    <input type="hidden" name="path" value="{{ v.path }}">
-                    <select name="family" required>
-                      {% for f in ['SMA', '1.85mm', '2.4mm', '2.92mm', '3.5mm'] %}
-                        <option value="{{ f }}" {{ "selected" if v.family == f else "" }}>{{ f }}</option>
-                      {% endfor %}
-                    </select>
-                    <select name="gender" required>
-                      <option value="M" {{ "selected" if v.gender == "M" else "" }}>M</option>
-                      <option value="F" {{ "selected" if v.gender == "F" else "" }}>F</option>
-                    </select>
-                    <button type="submit">{{ "Update" if v.has_sidecar else "Save type" }}</button>
-                  </form>
-                {% endif %}
+                {# Always render — lets the user fix a wrong M/F or
+                   family on an already-labeled video. Submitting with
+                   a different class triggers a server-side rename of
+                   the file + sidecar. #}
+                <form class="annotate-form"
+                      hx-post="/rfcai/labeler/videos/annotate"
+                      hx-target="this"
+                      hx-swap="outerHTML"
+                      hx-confirm="Re-label this video and rename the file to match? Current downloads + share links for the old filename will stop working.">
+                  <input type="hidden" name="path" value="{{ v.path }}">
+                  <select name="family" required>
+                    {% for f in ['SMA', '1.85mm', '2.4mm', '2.92mm', '3.5mm'] %}
+                      <option value="{{ f }}" {{ "selected" if v.family == f else "" }}>{{ f }}</option>
+                    {% endfor %}
+                  </select>
+                  <select name="gender" required>
+                    <option value="M" {{ "selected" if v.gender == "M" else "" }}>M</option>
+                    <option value="F" {{ "selected" if v.gender == "F" else "" }}>F</option>
+                  </select>
+                  <button type="submit">{{ "Re-label" if v.has_sidecar and v.gender else "Save type" }}</button>
+                </form>
               </div>
               <div class="video-name">{{ v.name }}</div>
               <div class="video-meta">
