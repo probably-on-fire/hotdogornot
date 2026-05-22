@@ -220,11 +220,14 @@ class ApiClient {
   /// POST a video clip to /predict-video. Server samples at 1 fps and
   /// returns the highest-confidence single-frame prediction.
   Future<PredictResponse> predictVideo(File videoFile) async {
+    // Force `.mp4` — the Android camera plugin writes recordings to a
+    // .tmp file in cache, and the server's video-extension allowlist
+    // rejects unknown suffixes. iOS happens to use .mov which is
+    // accepted, but neither path's filename is meaningful to the server
+    // (it renames on disk), so just send something legal.
     return predictVideoBytes(
       await videoFile.readAsBytes(),
-      filename: videoFile.uri.pathSegments.isNotEmpty
-          ? videoFile.uri.pathSegments.last
-          : 'video.mp4',
+      filename: 'video.mp4',
     );
   }
 
@@ -321,7 +324,11 @@ class ApiClient {
   /// prediction alongside the saved-crop count.
   Future<VideoTrainingUploadResult> uploadTrainingVideo(
       File videoFile, String family, String gender) async {
-    final body = await _uploadMultipart(
+    // Bypass _uploadMultipart's path-derived filename — Android writes
+    // the camera-plugin clip to `<cache>/CAPxxx.tmp`, which the server
+    // rejects as an unknown video extension. Send as `video.mp4`; the
+    // server renames on disk anyway based on family + gender.
+    final body = await _uploadMultipartBytes(
       url: settings.labelerUploadVideoUrl(),
       fields: {
         'family': family,
@@ -332,7 +339,8 @@ class ApiClient {
         'with_predict': 'true',
       },
       fileField: 'file',
-      file: videoFile,
+      bytes: await videoFile.readAsBytes(),
+      filename: 'video.mp4',
     );
     return VideoTrainingUploadResult.fromResponseBody(body);
   }
