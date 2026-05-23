@@ -68,12 +68,21 @@ def _truth(video: Path) -> str | None:
     return _infer_class(video.stem)
 
 
-def process_video(video: Path, pipe: JerryPipeline, fps: float, ff: str) -> dict:
+def _sharpness(bgr) -> float:
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+
+def process_video(
+    video: Path, pipe: JerryPipeline, fps: float, ff: str,
+    min_sharpness: float = 0.0,
+) -> dict:
     truth = _truth(video)
     if truth is None:
         return {"video": video.name, "skipped": True, "reason": "no class"}
 
     per_frame: list[dict] = []
+    n_blurry = 0
     with tempfile.TemporaryDirectory(prefix="jerry_eval_") as tmp:
         tmpp = Path(tmp)
         subprocess.run(
@@ -88,6 +97,15 @@ def process_video(video: Path, pipe: JerryPipeline, fps: float, ff: str) -> dict
             if bgr is None:
                 per_frame.append({"frame": fp.name, "pred": None, "conf": 0.0})
                 continue
+            if min_sharpness > 0.0:
+                s = _sharpness(bgr)
+                if s < min_sharpness:
+                    n_blurry += 1
+                    per_frame.append({
+                        "frame": fp.name, "pred": None, "conf": 0.0,
+                        "skipped_blurry": True, "sharpness": s,
+                    })
+                    continue
             preds = pipe.run(bgr)
             if not preds:
                 per_frame.append({"frame": fp.name, "pred": None, "conf": 0.0,
@@ -111,15 +129,18 @@ def process_video(video: Path, pipe: JerryPipeline, fps: float, ff: str) -> dict
         sum(r["conf"] for r in per_frame if r.get("pred") == majority_pred)
         / max(1, majority_count)
     )
+    n_kept = n_total - n_blurry
     return {
         "video": video.name,
         "truth": truth,
         "n_frames": n_total,
+        "n_blurry_skipped": n_blurry,
+        "n_kept": n_kept,
         "n_detected": n_detected,
         "n_correct_frames": n_correct_frames,
-        "frame_accuracy": n_correct_frames / n_total if n_total else 0.0,
+        "frame_accuracy": n_correct_frames / n_kept if n_kept else 0.0,
         "majority_pred": majority_pred,
-        "majority_share": majority_count / n_total if n_total else 0.0,
+        "majority_share": majority_count / n_kept if n_kept else 0.0,
         "video_correct": correct_video,
         "mean_conf_majority": mean_conf,
         "prediction_dist": dict(counts),
@@ -131,6 +152,11 @@ def main() -> int:
     ap.add_argument("--videos-dir", type=Path, required=True)
     ap.add_argument("--jerry-dir", type=Path, required=True)
     ap.add_argument("--fps", type=float, default=2.0)
+    ap.add_argument(
+        "--min-sharpness", type=float, default=0.0,
+        help="Skip frames whose Laplacian-variance sharpness is below "
+             "this (0 = no filter; ~60 lenient, ~120 strict).",
+    )
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
@@ -156,7 +182,8 @@ def main() -> int:
         print(f"[{i}/{len(videos)}] {v.name}", flush=True)
         t0 = time.perf_counter()
         try:
-            r = process_video(v, pipe, args.fps, ff)
+            r = process_video(v, pipe, args.fps, ff,
+                              min_sharpness=args.min_sharpness)
         except Exception as e:
             r = {"video": v.name, "error": str(e)}
         dt = time.perf_counter() - t0

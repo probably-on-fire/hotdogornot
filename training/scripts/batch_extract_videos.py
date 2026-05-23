@@ -71,10 +71,21 @@ def _infer_class_from_name(stem: str) -> str | None:
     return None
 
 
+def _frame_sharpness(bgr) -> float:
+    """Variance of the Laplacian — high = sharp, low = blurry. Standard
+    cv2 trick. Computed on the raw frame (not the crop) because Hough
+    on a blurry frame is unreliable too — we want to bail out before
+    spending time on a bad crop."""
+    import cv2 as _cv2
+    gray = _cv2.cvtColor(bgr, _cv2.COLOR_BGR2GRAY)
+    return float(_cv2.Laplacian(gray, _cv2.CV_64F).var())
+
+
 def process_one(
     video: Path, data_root: Path, fps: float, max_crops: int, ff: str,
+    min_sharpness: float = 0.0,
 ) -> dict:
-    """Returns {video, target_class, n_frames, n_crops, status, ...}."""
+    """Returns {video, target_class, n_frames, n_crops, n_skipped_blurry, status, ...}."""
     sidecar = _video_sidecar_path(video)
     manifest: dict = {}
     if sidecar.exists():
@@ -108,6 +119,8 @@ def process_one(
     idx = _next_agg_index(out_dir)
     saved_crops: list[str] = []
     n_frames = 0
+    n_skipped_blurry = 0
+    sharpness_samples: list[float] = []
     t0 = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix="batch_extract_") as tmp:
         tmpp = Path(tmp)
@@ -123,6 +136,15 @@ def process_one(
             bgr = cv2.imread(str(fp))
             if bgr is None:
                 continue
+            # Reject blurry frames before paying for Hough + write.
+            # Sharpness measured on the full frame; if the wide shot is
+            # already blurry the cropped connector face will be worse.
+            if min_sharpness > 0.0:
+                sharp = _frame_sharpness(bgr)
+                sharpness_samples.append(sharp)
+                if sharp < min_sharpness:
+                    n_skipped_blurry += 1
+                    continue
             results = detect_connector_crops_hough(
                 bgr, max_crops=int(max_crops),
                 pad_frac=0.35, accumulator_threshold=22,
@@ -147,6 +169,14 @@ def process_one(
             "uploaded_by": None,
         }
     manifest["n_frames_extracted"] = n_frames
+    manifest["n_frames_skipped_blurry"] = n_skipped_blurry
+    if sharpness_samples:
+        manifest["sharpness_min"] = round(min(sharpness_samples), 1)
+        manifest["sharpness_max"] = round(max(sharpness_samples), 1)
+        manifest["sharpness_mean"] = round(
+            sum(sharpness_samples) / len(sharpness_samples), 1,
+        )
+    manifest["min_sharpness_threshold"] = min_sharpness
     manifest["extracted_crops"] = saved_crops
     manifest["processed_at"] = time.strftime(
         "%Y-%m-%dT%H:%M:%SZ", time.gmtime(),
@@ -160,8 +190,13 @@ def process_one(
         "target_class": target_cls,
         "status": "ok",
         "n_frames": n_frames,
+        "n_skipped_blurry": n_skipped_blurry,
         "n_crops": len(saved_crops),
         "dt_sec": round(dt, 1),
+        "sharpness_mean": (
+            round(sum(sharpness_samples) / len(sharpness_samples), 1)
+            if sharpness_samples else None
+        ),
     }
 
 
@@ -173,6 +208,14 @@ def main() -> int:
                     default=Path("/opt/rfcai/repo/training/data/labeled/embedder"))
     ap.add_argument("--fps", type=float, default=2.0)
     ap.add_argument("--max-crops", type=int, default=5)
+    ap.add_argument(
+        "--min-sharpness", type=float, default=0.0,
+        help="Skip frames whose Laplacian-variance sharpness is below "
+             "this. 0 = accept all. Typical thresholds: 60 (lenient), "
+             "120 (strict), 200 (very strict). Most modern phone "
+             "videos at 1080p sit in the 100-400 range when the shot "
+             "is in focus.",
+    )
     args = ap.parse_args()
 
     try:
@@ -194,15 +237,20 @@ def main() -> int:
     for i, v in enumerate(videos, 1):
         print(f"[{i}/{len(videos)}] {v.name} ...", flush=True)
         try:
-            res = process_one(v, args.data_dir, args.fps, args.max_crops, ff)
+            res = process_one(
+                v, args.data_dir, args.fps, args.max_crops, ff,
+                min_sharpness=args.min_sharpness,
+            )
         except Exception as e:
             res = {"video": v.name, "status": "error", "error": str(e)}
         summary.append(res)
         cls = res.get("target_class") or "-"
         if res.get("status") == "ok":
+            n_blurry = res.get("n_skipped_blurry", 0)
+            blur_str = f" (skipped {n_blurry} blurry)" if n_blurry else ""
             print(
                 f"  -> {cls:<10} frames={res['n_frames']} "
-                f"crops={res['n_crops']} ({res['dt_sec']}s)",
+                f"crops={res['n_crops']}{blur_str} ({res['dt_sec']}s)",
                 flush=True,
             )
         else:
