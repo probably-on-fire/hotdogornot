@@ -217,8 +217,10 @@ class ApiClient {
     return PredictResponse.fromJson(jsonDecode(resp.body));
   }
 
-  /// POST a video clip to /predict-video. Server samples at 1 fps and
-  /// returns the highest-confidence single-frame prediction.
+  /// POST a video clip to /predict-video. Server samples at 3 fps,
+  /// classifies each frame, and returns a softmax-averaged consensus
+  /// across frames (more robust to single-frame variance than a single
+  /// photo). On a 1.5s burst that's ~5 frames of consensus.
   Future<PredictResponse> predictVideo(File videoFile) async {
     // Force `.mp4` — the Android camera plugin writes recordings to a
     // .tmp file in cache, and the server's video-extension allowlist

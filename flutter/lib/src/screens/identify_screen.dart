@@ -282,6 +282,43 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     }
   }
 
+  /// One-tap burst: switch to video mode, record a fixed ~1.5s clip
+  /// automatically, then upload to /predict-video for multi-frame
+  /// consensus. Used by the "Try burst" button on the low-confidence
+  /// result card. The recording duration is deliberately short — the
+  /// server samples at 3 fps so 1.5s = 4-5 frames of consensus, enough
+  /// to smooth single-frame variance without making the user wait.
+  Future<void> _autoBurst() async {
+    final cam = _cam;
+    if (cam == null || !cam.value.isInitialized) {
+      setState(() => _error = 'Camera not available for video burst on this platform.');
+      return;
+    }
+    if (_recording || _busy) return;
+    setState(() {
+      _mode = _Mode.video;
+      _result = null;
+      _error = null;
+    });
+    try {
+      await cam.startVideoRecording();
+      setState(() => _recording = true);
+      HapticFeedback.mediumImpact();
+      await Future.delayed(const Duration(milliseconds: 1500));
+      if (!mounted) return;
+      final clip = await cam.stopVideoRecording();
+      setState(() => _recording = false);
+      HapticFeedback.lightImpact();
+      await _classifyVideo(File(clip.path));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _recording = false;
+        _error = 'Burst failed: ${_friendlyError(e)}';
+      });
+    }
+  }
+
   Future<void> _classifyPhotoFile(File f) async {
     setState(() {
       _busy = true;
@@ -964,8 +1001,10 @@ class _IdentifyScreenState extends State<IdentifyScreen>
                   if (offerVideoBurst) ...[
                     OutlinedButton.icon(
                       onPressed: () {
-                        setState(() => _mode = _Mode.video);
-                        _resetToLive();
+                        // _autoBurst handles reset-to-live + start + 1.5s
+                        // record + stop + send to /predict-video. No
+                        // second tap required.
+                        _autoBurst();
                       },
                       icon: const Icon(Icons.videocam, size: 18),
                       label: const Text('Try burst'),
