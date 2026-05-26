@@ -418,7 +418,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     _selGender = p.gender;
   }
 
-  Future<void> _contribute(String cls) async {
+  void _contribute(String cls) {
     // Video contribution would need a different endpoint; only photos
     // route to /labeler/upload-train today.
     if (_mode == _Mode.video) {
@@ -429,25 +429,38 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     final file = _capturedFile;
     final bytes = _capturedBytes;
     if (file == null && bytes == null) return;
-    setState(() {
-      _contributing = true;
-      _contributionStatus = null;
-    });
-    try {
-      final api = ApiClient(widget.settings);
-      if (file != null) {
-        await api.uploadTrainingPhoto(file, cls);
-      } else {
-        await api.uploadTrainingPhotoBytes(bytes!, cls);
+    // Fire-and-forget — never block the live preview on an upload.
+    // The user wants the camera ready instantly; success/failure surfaces
+    // as a snackbar after they've already moved on. Auth errors hint at
+    // the Contribute tab where sign-in lives.
+    final api = ApiClient(widget.settings);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    Future<void>(() async {
+      try {
+        if (file != null) {
+          await api.uploadTrainingPhoto(file, cls);
+        } else {
+          await api.uploadTrainingPhotoBytes(bytes!, cls);
+        }
+        messenger?.showSnackBar(SnackBar(
+          content: Text('✓ Added $cls to training'),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ));
+      } catch (e) {
+        final s = e.toString();
+        final friendly = (s.contains('401') || s.contains('not signed in') ||
+                          s.contains('Unauthorized'))
+            ? 'Sign in on the Contribute tab to save training photos.'
+            : 'Save failed: ${_friendlyError(e)}';
+        messenger?.showSnackBar(SnackBar(
+          content: Text(friendly),
+          duration: const Duration(seconds: 4),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+        ));
       }
-      if (!mounted) return;
-      setState(() => _contributionStatus = '✓ Added to training as $cls');
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _contributionStatus = 'Upload failed: ${_friendlyError(e)}');
-    } finally {
-      if (mounted) setState(() => _contributing = false);
-    }
+    });
   }
 
   /// Buzz on prediction land. Confident detection => medium impact;
@@ -546,19 +559,13 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     return null;
   }
 
-  Future<void> _saveSelected(String predictedClass) async {
+  void _saveSelected(String predictedClass) {
     final fam = _selFamily;
     final gen = _selGender;
     if (fam == null || gen == null) return;
     final cls = '$fam-$gen';
-    await _contribute(cls);
-    if (!mounted) return;
-    // Brief pause so the user sees the success line, then back to live.
-    await Future.delayed(const Duration(milliseconds: 900));
-    if (!mounted) return;
-    if (_contributionStatus != null && _contributionStatus!.startsWith('✓')) {
-      _resetToLive();
-    }
+    _contribute(cls);        // fire-and-forget
+    _resetToLive();          // back to live immediately
   }
 
   @override
@@ -570,7 +577,12 @@ class _IdentifyScreenState extends State<IdentifyScreen>
         children: [
           // Pinch-to-zoom is active only on the live preview (no-op
           // when a result is showing — the captured photo is static).
+          // When a result IS showing, tap anywhere on the frozen frame
+          // resets to live so the user can immediately scan again. The
+          // result panel + buttons are higher in the Stack so their
+          // taps still go to those widgets.
           GestureDetector(
+            onTap: (_result != null || _error != null) ? _resetToLive : null,
             onScaleStart: _result == null ? _onScaleStart : null,
             onScaleUpdate: _result == null ? _onScaleUpdate : null,
             onScaleEnd: _result == null ? _onScaleEnd : null,
