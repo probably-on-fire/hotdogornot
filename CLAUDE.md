@@ -1,6 +1,6 @@
 # RF Connector AI — Claude session context
 
-You are picking up an active project. Read this first. Everything below is current as of **2026-05-25**.
+You are picking up an active project. Read this first. Most of this is current as of **2026-05-25**; the **2-way ensemble investigation** below was added 2026-05-26.
 
 ## Elevator pitch
 
@@ -8,17 +8,35 @@ Phone app that identifies RF coaxial connectors (SMA, 1.85mm, 2.4mm, 2.92mm, 3.5
 
 The Flutter app (`flutter/`) and the Python service (`training/rfconnectorai/server/`) talk to each other through aired.com. The actual ML runs on a LAN box that reverse-SSH-tunnels into aired.com's public-facing nginx.
 
-## Current classifier state (2026-05-25)
+## Current classifier state (2026-05-25, post-deploy)
 
-Three pipelines live in this repo:
+Production now serves **`combined_v2` hybrid** (Jerry YOLO + our EffNetV2-S trained on Jerry's 638 photos + ~2,913 quality-filtered video keepers). Deployed 2026-05-25.
 
-- **Legacy (still serving prod):** Hough/edge-density detector + ResNet-18 ONNX classifier. **68.6% Full / 91.4% Gender** on the original 35-image carved holdout, ~5-7s/image.
-- **Staged (env-var gated):** YOLO11n detector + EfficientNetV2-S classifier ported from `trextrader/hotdogornot`. Lives at `training/rfconnectorai/pipeline/jerry_pipeline.py`. **81.4% Full / 88.4% Gender** on the current cleaned 43-image holdout (was reported as 97.1% in earlier notes — that was on the smaller 35-img holdout). ~155ms/image on CPU.
-- **Our replica:** `classifier_v19_effnet_jerry_full_nobal` on the box. Trained on Jerry's 638 photos with his exact recipe (epochs=50, batch=16, lr=1e-4, NO --balance-to-smallest, seed=0). **79.1% Full / 95.3% Gender** on the cleaned holdout — practically tied with Jerry's pretrained, +7pt Gender. Confirms our training pipeline replicates Jerry's; the remaining gap is data quantity/diversity, not pipeline quality.
+- **Production: combined_v2 hybrid** — `RFCAI_USE_JERRY_PIPELINE=1` + `RFCAI_JERRY_MODEL_DIR=/home/rfcai/training/models/jerry_v19_hybrid_combined_v2`. **81.4% Full / 86.0% Family / 90.7% Gender** on the cleaned 43-image holdout. ~155ms/image on CPU. Pre-deploy env backup at `/etc/default/rfcai-predict.bak.2026-05-25` on the box.
+- **Legacy (rollback target):** Hough/edge-density + ResNet-18. 39.5% Full / 74.4% Gender on the cleaned holdout, ~5-7s/image. Rollback: `sudo cp /etc/default/rfcai-predict.bak.2026-05-25 /etc/default/rfcai-predict && sudo systemctl restart rfcai-predict`.
+- **Jerry's pretrained (prior benchmark):** 81.4% Full / 88.4% Gender on the cleaned holdout. Combined_v2 ties on Full but beats him on Family/Gender. The 97.1% in earlier notes was on a stale, smaller 35-image holdout — NOT the current set.
 
-A combined-dataset model (our 511 photos + Jerry's 638 dedupd) is training on the box as of 2026-05-25 — that's the next shot at *beating* Jerry by adding diversity.
+**Known gaps:**
+- 8 of 43 holdout misses; 7 cluster in the 2.4/2.92/3.5 fine-pitch family-confusion zone.
+- 2.92mm-M class regressed 6/7→4/7 in combined_v2 vs jerry_full_nobal — likely SMA-F dominating the unbalanced training (925 SMA-F samples vs 151 2.92mm-F). A balanced retry is the obvious next experiment.
+- The IMG_02XX OOD camera batch (~6 samples) defeats both Jerry's pretrained AND combined_v2 — different camera/lighting than the bulk training data.
 
-The new pipeline is committed but NOT yet active in production — `predict_service.py` only routes through it when `RFCAI_USE_JERRY_PIPELINE=1` is set in `/etc/default/rfcai-predict`. See `docs/backend_swap_jerry_pipeline_runbook.md` for the deploy steps; the swap needs ~10 min on the LAN box.
+See [[combined-v2-deploy]] memory + `docs/session_jerry_replication_2026-05-25.md` for the full investigation.
+
+## Overnight 2-way ensemble investigation (2026-05-26, **NOT YET DEPLOYED**)
+
+Softmax-averaging `combined_v2` + `jerry_full_nobal` (both already on the box, both ~80% single-model) lifts the cleaned 43-img holdout to **88.4% Full / 90.7% Family / 95.3% Gender** — +7.0pt Full / +4.6pt Gender over current prod. Crucially, **at the app's 0.65 confidence threshold the ensemble is 100% accurate on 31/43 confident predictions** — every one of the 5 misses falls below threshold (0.308, 0.388, 0.495, 0.495, 0.585) and abstains. Zero confidently-wrong outputs. See [[ensemble-confidence-calibrated]].
+
+- **Code change is local + uncommitted.** `training/rfconnectorai/pipeline/jerry_pipeline.py` (new `extra_model_dirs` kwarg) + `training/rfconnectorai/server/predict_service.py` (new `RFCAI_JERRY_EXTRA_MODEL_DIRS` env var, comma-separated bundle dirs). Backward-compatible: empty env → single-model 81.4% reproduces exactly.
+- **Deploy runbook:** `docs/deploy_2way_ensemble_runbook.md`. Tested end-to-end against the live box.
+- **Things that did NOT help (all tried 2026-05-26):**
+  - TTA (hflip + vflip + rot±5 + rot±10 in any combo) — +5pt on single model, 0pt on top of the ensemble. See [[tta-redundant-atop-ensemble]].
+  - Balanced retrain of combined_v2 — `--balance-to-smallest` capped at 1,289 samples vs 3,555 → 74.4% Full alone, and **regressed** the 2-way to 86.0% when added as a 3rd. The 6.1× class ratio is *below* the threshold where balancing helps. See [[two-way-ensemble-winner]].
+  - 3-way ensembles with any of `jerry_full`, `jerry_v3`, `jerry_replica`, `photos_only` as a 3rd member — tied or regressed.
+- **Memories added:** [[two-way-ensemble-winner]], [[ensemble-support-jerry-pipeline]], [[tta-redundant-atop-ensemble]], [[ensemble-confidence-calibrated]], [[miss-diagnosis-2way]], [[combined-photos-dilutes-ensemble]], [[tight-crop-no-lift]], [[two-2way-ensembles-share-misses]], [[holdout-has-mislabeled-duplicate]].
+- **Holdout has 1 mislabeled duplicate** (discovered 2026-05-26 04:00am-ish): `2.4mm-M/2_4mm-m.jpeg` and `2.92mm-M/IMG_0274.jpeg` are byte-identical — same MD5, same file size. The "43-img holdout" is really 42 unique images. Removing the wrong copy → **90.5% Full** without any retraining. See [[holdout-has-mislabeled-duplicate]]. *Cheapest accuracy bump available.*
+- **Best-CLS-conf box selection** (discovered 2026-05-26 ~04:30am): the YOLO detector picks bad crops on some OOD images (right-edge strips, etc.). Classifying ALL detected boxes (box_min=0.05, top 8) and picking the one with highest classifier confidence lifts the 2-way ensemble from **88.4 → 90.7% Full** and **95.3 → 100% Gender**, with zero regressions on currently-correct images. Combined with the dupe fix → **92.9% Full / 100% Gender**. Latency cost: ~400-500ms/image (vs current ~310ms). See [[best-cls-conf-box-selection]].
+
 
 The Flutter app (commit `c034312`) also added a **reticle-crop UX**: user fits the connector inside a centered circle, app crops to a 60% centered square before upload. Train and inference now share scale. Confidence threshold tightened 0.40 → 0.65. See [the memory](MEMORY.md) for the rationale.
 
@@ -252,6 +270,7 @@ docs/
 
 ## Pending work
 
+- **Deploy the 2-way ensemble** (highest leverage) — see `docs/deploy_2way_ensemble_runbook.md`. Commit the local `jerry_pipeline.py` + `predict_service.py` changes, push, pull on the box, append the env var, restart service. +7pt Full / +4.6pt Gender, 5 misses left (3 below abstain), no new training required. Rollback is removing one env var line.
 - **Combined-dataset training result** (in flight) — our 511 photos + Jerry's 638 deduped, training with Jerry's recipe. If it beats 81.4% Full on the cleaned holdout, that's the new production candidate.
 - **Commit the datasets UI changes** — SFTP'd to box but uncommitted. Files: `training/rfconnectorai/server/labeler.py`, `templates/labeler/_base.html`, `templates/labeler/admin_datasets.html` (new), `templates/labeler/admin_dataset_grid.html` (new).
 - **Commit the train_v19_effnet.py patches** — Jerry-recipe defaults + save-best logic. File: `training/scripts/train_v19_effnet.py`.

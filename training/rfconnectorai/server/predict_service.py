@@ -156,10 +156,19 @@ def create_app(config: dict | None = None) -> FastAPI:
             raise RuntimeError(
                 "RFCAI_USE_JERRY_PIPELINE=1 but RFCAI_JERRY_MODEL_DIR is unset"
             )
+        # Optional ensemble: comma-separated list of extra hybrid bundle dirs.
+        # Each must share classifier_labels.json with the primary bundle.
+        # Softmax is averaged across the primary + all extras at inference.
+        extras_raw = os.environ.get("RFCAI_JERRY_EXTRA_MODEL_DIRS", "").strip()
+        extra_dirs = (
+            [Path(p.strip()) for p in extras_raw.split(",") if p.strip()]
+            if extras_raw else []
+        )
         from rfconnectorai.pipeline.jerry_pipeline import JerryPipeline
-        jerry_pipeline = JerryPipeline(Path(jerry_dir))
+        jerry_pipeline = JerryPipeline(Path(jerry_dir), extra_model_dirs=extra_dirs)
         print(
             f"[predict] jerry pipeline enabled: dir={jerry_dir} "
+            f"extras={[str(p) for p in extra_dirs]} "
             f"classes={jerry_pipeline.class_names} box_min={jerry_pipeline.box_min}",
             flush=True,
         )

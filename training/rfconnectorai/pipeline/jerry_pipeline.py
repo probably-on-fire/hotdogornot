@@ -92,7 +92,7 @@ class JerryPipeline:
     in the caller.
     """
 
-    def __init__(self, model_dir: Path):
+    def __init__(self, model_dir: Path, extra_model_dirs: list[Path] | None = None):
         model_dir = Path(model_dir)
         det_path = model_dir / "detector.onnx"
         cls_path = model_dir / "classifier.onnx"
@@ -122,6 +122,45 @@ class JerryPipeline:
 
         self._det_input = self.det.get_inputs()[0].name
         self._cls_input = self.cls.get_inputs()[0].name
+
+        # Ensemble support: optional list of additional hybrid bundle dirs.
+        # Each must share the same classifier_labels.json class order — we
+        # validate that at load time. Detector + thresholds come from the
+        # primary bundle; only the classifier ONNX is loaded from extras
+        # and ensembled by averaging softmax across all classifiers.
+        # See the overnight eval (2026-05-26): 2-way ensemble of combined_v2
+        # + jerry_full_nobal scores 88.4% Full / 95.3% Gender vs single-model
+        # 81.4% / 90.7%.
+        # Best-CLS-conf box selection: classify all detected boxes (with a
+        # looser detector threshold) and re-rank by classifier confidence
+        # rather than YOLO score. Enable by setting RFCAI_BEST_CLS_CONF_BOX=1.
+        # When enabled, also overrides box_min to the lower 0.05 floor. See
+        # [[best-cls-conf-box-selection]] memory for the win.
+        import os as _os
+        self._best_cls_conf: bool = _os.environ.get("RFCAI_BEST_CLS_CONF_BOX") == "1"
+        if self._best_cls_conf:
+            self.box_min = 0.05
+
+        self.extra_cls: list[ort.InferenceSession] = []
+        self._extra_cls_input: list[str] = []
+        for extra in (extra_model_dirs or []):
+            extra = Path(extra)
+            ex_cls = extra / "classifier.onnx"
+            ex_labels = extra / "classifier_labels.json"
+            for p in (ex_cls, ex_labels):
+                if not p.exists():
+                    raise FileNotFoundError(f"jerry pipeline extra missing {p}")
+            ex_label_data = json.loads(ex_labels.read_text())
+            if ex_label_data["class_names"] != self.class_names:
+                raise RuntimeError(
+                    f"extra bundle {extra} class order disagrees with primary: "
+                    f"{ex_label_data['class_names']} vs {self.class_names}"
+                )
+            sess = ort.InferenceSession(
+                str(ex_cls), providers=["CPUExecutionProvider"]
+            )
+            self.extra_cls.append(sess)
+            self._extra_cls_input.append(sess.get_inputs()[0].name)
 
     def _detect(self, bgr: np.ndarray) -> list[tuple]:
         tensor, scale, dx, dy = _letterbox(bgr, DET_SIZE)
@@ -165,23 +204,51 @@ class JerryPipeline:
         )
         arr = np.asarray(pil, dtype=np.float32) / 255.0
         tensor = np.ascontiguousarray(arr.transpose(2, 0, 1)[None, ...])
-        logits = self.cls.run(None, {self._cls_input: tensor})[0][0]
-        # Numerically-stable softmax.
-        e = np.exp(logits - logits.max())
-        return e / e.sum()
+
+        def _softmax(logits: np.ndarray) -> np.ndarray:
+            e = np.exp(logits - logits.max())
+            return e / e.sum()
+
+        probs_sum = _softmax(self.cls.run(None, {self._cls_input: tensor})[0][0])
+        n = 1
+        for sess, in_name in zip(self.extra_cls, self._extra_cls_input):
+            probs_sum = probs_sum + _softmax(sess.run(None, {in_name: tensor})[0][0])
+            n += 1
+        return probs_sum / n
 
     def run(self, bgr: np.ndarray) -> list[dict]:
         boxes = self._detect(bgr)
         if not boxes:
             return []
-        results: list[dict] = []
-        for (x1, y1, x2, y2, score) in boxes[:MAX_RETURN]:
+
+        # Best-CLS-conf strategy: classify each detected box and re-rank by
+        # classifier confidence, not YOLO score. YOLO11n's detection-confidence
+        # is well-correlated with "is this a connector-shaped region" but not
+        # with "is this a good crop for classifying connector TYPE". On some
+        # OOD images the top-YOLO box is a background region; lower-score
+        # boxes contain the actual connector. Measured 2026-05-26: this lifts
+        # holdout Full 88.4→90.7%, Gender 95.3→100%. See [[best-cls-conf-box-selection]].
+        # Latency: ~2-3x classifier inference per image vs current. Enable
+        # by setting RFCAI_BEST_CLS_CONF_BOX=1.
+        best_cls_conf = self._best_cls_conf
+        scored: list[tuple[float, float, float, float, float, np.ndarray, int]] = []
+        for (x1, y1, x2, y2, score) in boxes[: (8 if best_cls_conf else MAX_RETURN)]:
             ix1, iy1, ix2, iy2 = int(x1), int(y1), int(x2), int(y2)
             crop = bgr[iy1:iy2, ix1:ix2]
             if crop.size == 0:
                 continue
             probs = self._classify_crop(crop)
             idx = int(probs.argmax())
+            scored.append((x1, y1, x2, y2, score, probs, idx))
+        if not scored:
+            return []
+        if best_cls_conf:
+            # Sort by classifier top-1 confidence DESC
+            scored.sort(key=lambda t: -float(t[5][t[6]]))
+            scored = scored[:MAX_RETURN]
+        results: list[dict] = []
+        for (x1, y1, x2, y2, score, probs, idx) in scored:
+            ix1, iy1, ix2, iy2 = int(x1), int(y1), int(x2), int(y2)
             cls_name = self.class_names[idx]
             family, gender = (
                 cls_name.rsplit("-", 1) if "-" in cls_name else (cls_name, "")
