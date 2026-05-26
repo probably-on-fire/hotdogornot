@@ -34,12 +34,12 @@ const _kMinAcceptedConfidence = 0.65;
 const _kMinBboxFractionOfImage = 0.02;
 
 // Center-crop side as a fraction of min(width, height). The reticle
-// circle has radius 28% of min dim → diameter 56%. We crop slightly
-// looser (60%) to give the server-side detector breathing room. The
+// circle has radius 14% of min dim → diameter 28%. We crop slightly
+// looser (30%) to give the server-side detector breathing room. The
 // user-facing UX is "fit the connector in the circle"; the resulting
 // crop has constant scale at the classifier regardless of phone
 // resolution or how far back the user holds the camera.
-const _kReticleCropFraction = 0.60;
+const _kReticleCropFraction = 0.30;
 
 enum _Mode { photo, video }
 

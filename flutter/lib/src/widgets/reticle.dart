@@ -28,7 +28,7 @@ class _ReticlePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
     final cy = size.height / 2;
-    final r = math.min(size.width, size.height) * 0.28;
+    final r = math.min(size.width, size.height) * 0.14;
     final ringPaint = Paint()
       ..color = Colors.white.withOpacity(0.55)
       ..style = PaintingStyle.stroke

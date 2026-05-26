@@ -23,7 +23,7 @@ const _kGenders = ['M', 'F'];
 // Match the identify-screen reticle crop. Training images get the
 // same crop the classifier will see at inference so the two
 // distributions match.
-const _kReticleCropFraction = 0.60;
+const _kReticleCropFraction = 0.30;
 
 // Hard cap on Contribute video record length. Beyond this iOS screen
 // dimming + cellular variability start eating uploads; the classifier
