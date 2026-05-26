@@ -918,17 +918,28 @@ class _IdentifyScreenState extends State<IdentifyScreen>
           && sortedAll.any((p) => p.confidence >= _kMinAcceptedConfidence);
       final String hint;
       final String subhint;
+      final bool offerVideoBurst;
       if (sortedAll.isEmpty) {
-        hint = 'No connector detected.';
-        subhint = 'Hold the connector face-on, center it, fill the frame.';
+        hint = 'No connector detected';
+        subhint = 'Hold the connector face-on, center it inside the ring, '
+                  'and fill the frame.';
+        offerVideoBurst = false;
       } else if (filteredOutTinyHigh) {
-        hint = 'Connector too small in frame.';
-        subhint = 'Move the camera closer so the connector face fills the frame.';
+        hint = 'Too far away';
+        subhint = 'Move closer so the connector face fills the ring.';
+        offerVideoBurst = false;
       } else {
-        hint = 'No clear connector — best guess was '
-               '${sortedAll.first.className} at '
-               '${(sortedAll.first.confidence * 100).toStringAsFixed(0)}%.';
-        subhint = 'Hold the connector face-on, center it, fill more of the frame.';
+        // Got a detection but below the abstain threshold. Show the
+        // best guess as a hint without confidently asserting it, and
+        // offer the video burst path for tough lookalike cases.
+        final best = sortedAll.first;
+        hint = 'Not sure — best guess was '
+               '${best.className} at '
+               '${(best.confidence * 100).toStringAsFixed(0)}%';
+        subhint = 'Try a slightly different angle or get closer. '
+                  'For tough fine-pitch cases (2.4 / 2.92 / 3.5 mm), the '
+                  'video burst (◉) is more accurate than a single photo.';
+        offerVideoBurst = true;
       }
       return _ResultCard(
         child: Padding(
@@ -938,13 +949,52 @@ class _IdentifyScreenState extends State<IdentifyScreen>
               Text(
                 hint,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 16),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
               Text(
                 subhint,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: Colors.white70),
+                style: const TextStyle(fontSize: 13, color: Colors.white70),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (offerVideoBurst) ...[
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() => _mode = _Mode.video);
+                        _resetToLive();
+                      },
+                      icon: const Icon(Icons.videocam, size: 18),
+                      label: const Text('Try burst'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        side: const BorderSide(color: Colors.white54),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  ElevatedButton.icon(
+                    onPressed: _resetToLive,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    label: const Text('Retake'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 10),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                '(or tap anywhere on the photo)',
+                style: TextStyle(fontSize: 11, color: Colors.white38),
               ),
             ],
           ),

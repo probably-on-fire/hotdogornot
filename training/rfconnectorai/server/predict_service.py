@@ -55,7 +55,10 @@ from rfconnectorai.server.labeler import create_router as create_labeler_router
 DEFAULT_MODEL_DIR = Path("./models/connector_classifier")
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024   # 25 MB; phone frames usually 1-3 MB
 DEFAULT_MAX_VIDEO_BYTES = 200 * 1024 * 1024   # 200 MB; phone clips can be big at 4K
-DEFAULT_VIDEO_FPS = 1.0                       # sample 1 frame/sec — plenty for ID
+DEFAULT_VIDEO_FPS = 3.0                       # sample 3 frames/sec — gives ~5-10
+                                              # frames on a 2s burst clip, enough
+                                              # for softmax-averaged consensus to
+                                              # smooth single-frame variance
 DEFAULT_VIDEO_MAX_FRAMES = 30                 # cap at ~30s of video
 # Pre-filter: each detected crop runs through rembg; if the central
 # foreground silhouette covers less than this fraction, we treat the
@@ -547,8 +550,15 @@ def create_app(config: dict | None = None) -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"ffmpeg not available: {e}")
 
-        best: dict | None = None
-        best_frame_idx: int = -1
+        # Multi-frame consensus: classify each sampled frame, keep the
+        # top-1 prediction's full probability distribution, then average
+        # the distributions across frames. This is more robust than
+        # "pick the single best frame" because (a) one unlucky lighting
+        # frame can't swing the verdict, and (b) the detector picking
+        # the wrong region in 1 of N frames gets out-voted.
+        frame_tops: list[dict] = []
+        best_single_frame_idx: int = -1
+        best_single_conf: float = 0.0
         frames_scanned = 0
         img_w = img_h = 0
         with tempfile.TemporaryDirectory(prefix="predict_video_") as tmp:
@@ -570,17 +580,70 @@ def create_app(config: dict | None = None) -> FastAPI:
                 if img_w == 0:
                     img_h, img_w = bgr.shape[:2]
                 frames_scanned += 1
-                for p in _classify_frame(bgr):
-                    if best is None or p["confidence"] > best["confidence"]:
-                        best = p
-                        best_frame_idx = i
+                preds = _classify_frame(bgr)
+                if not preds:
+                    continue
+                # Each frame contributes its single top prediction to the
+                # consensus. Multi-box averaging across frames is hard
+                # (boxes aren't aligned frame-to-frame); top-1 is the
+                # robust signal we want anyway.
+                top = max(preds, key=lambda p: p["confidence"])
+                frame_tops.append({"frame_idx": i, **top})
+                if top["confidence"] > best_single_conf:
+                    best_single_conf = top["confidence"]
+                    best_single_frame_idx = i
+
+        # Aggregate: softmax-average the per-frame top probability dicts.
+        consensus: list[dict] = []
+        if frame_tops:
+            classes = list(frame_tops[0]["probabilities"].keys())
+            avg_probs = {
+                c: sum(t["probabilities"].get(c, 0.0) for t in frame_tops) / len(frame_tops)
+                for c in classes
+            }
+            top_class = max(avg_probs, key=avg_probs.get)
+            top_conf = float(avg_probs[top_class])
+            family, gender = (
+                top_class.rsplit("-", 1) if "-" in top_class else (top_class, "")
+            )
+            fam_conf = sum(
+                p for c, p in avg_probs.items()
+                if "-" in c and c.rsplit("-", 1)[0] == family
+            )
+            gen_conf = sum(
+                p for c, p in avg_probs.items()
+                if "-" in c and c.rsplit("-", 1)[1] == gender
+            )
+            # Show the bbox from the single most-confident frame —
+            # averaging bboxes across frames doesn't make geometric
+            # sense (the hand moves), and showing the best is what
+            # the user expects.
+            best_single = max(frame_tops, key=lambda t: t["confidence"])
+            consensus = [{
+                "class_name": top_class,
+                "confidence": top_conf,
+                "probabilities": avg_probs,
+                "bbox": best_single["bbox"],
+                "family": family,
+                "gender": gender,
+                "family_confidence": float(fam_conf),
+                "gender_confidence": float(gen_conf),
+                "box_score": float(best_single.get("box_score", 0.0)),
+                "_diag": {
+                    "crop_source": best_single.get("_diag", {}).get(
+                        "crop_source", "video_consensus"),
+                    "n_frames_consensus": len(frame_tops),
+                    "best_single_frame_conf": float(best_single["confidence"]),
+                },
+                "spec": _lookup_spec(top_class),
+            }]
 
         return JSONResponse({
             "image_width": img_w,
             "image_height": img_h,
-            "predictions": [best] if best else [],
+            "predictions": consensus,
             "frames_scanned": frames_scanned,
-            "best_frame_index": best_frame_idx,
+            "best_frame_index": best_single_frame_idx,
         })
 
     # Mount the HTMX-driven training-data labeler at /labeler/.
