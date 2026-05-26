@@ -1,6 +1,6 @@
 # RF Connector AI — Claude session context
 
-You are picking up an active project. Read this first. Everything below is current as of **2026-05-18**.
+You are picking up an active project. Read this first. Everything below is current as of **2026-05-25**.
 
 ## Elevator pitch
 
@@ -8,16 +8,35 @@ Phone app that identifies RF coaxial connectors (SMA, 1.85mm, 2.4mm, 2.92mm, 3.5
 
 The Flutter app (`flutter/`) and the Python service (`training/rfconnectorai/server/`) talk to each other through aired.com. The actual ML runs on a LAN box that reverse-SSH-tunnels into aired.com's public-facing nginx.
 
-## Current classifier state (2026-05-18)
+## Current classifier state (2026-05-25)
 
-Two pipelines live in this repo:
+Three pipelines live in this repo:
 
-- **Legacy (still serving prod):** Hough/edge-density detector + ResNet-18 ONNX classifier. **68.6% Full / 91.4% Gender** on the 35-image carved holdout (`tmp_baseline_eval.md`), ~5-7s/image.
-- **Staged (env-var gated, ready to deploy):** YOLO11n detector + EfficientNetV2-S classifier, ported from the partner repo `trextrader/hotdogornot`. Lives at `training/rfconnectorai/pipeline/jerry_pipeline.py`. **97.1% Full / 100% Gender** on the same holdout (`tmp_jerry_pipeline_eval.py`), ~155ms/image on CPU.
+- **Legacy (still serving prod):** Hough/edge-density detector + ResNet-18 ONNX classifier. **68.6% Full / 91.4% Gender** on the original 35-image carved holdout, ~5-7s/image.
+- **Staged (env-var gated):** YOLO11n detector + EfficientNetV2-S classifier ported from `trextrader/hotdogornot`. Lives at `training/rfconnectorai/pipeline/jerry_pipeline.py`. **81.4% Full / 88.4% Gender** on the current cleaned 43-image holdout (was reported as 97.1% in earlier notes — that was on the smaller 35-img holdout). ~155ms/image on CPU.
+- **Our replica:** `classifier_v19_effnet_jerry_full_nobal` on the box. Trained on Jerry's 638 photos with his exact recipe (epochs=50, batch=16, lr=1e-4, NO --balance-to-smallest, seed=0). **79.1% Full / 95.3% Gender** on the cleaned holdout — practically tied with Jerry's pretrained, +7pt Gender. Confirms our training pipeline replicates Jerry's; the remaining gap is data quantity/diversity, not pipeline quality.
+
+A combined-dataset model (our 511 photos + Jerry's 638 dedupd) is training on the box as of 2026-05-25 — that's the next shot at *beating* Jerry by adding diversity.
 
 The new pipeline is committed but NOT yet active in production — `predict_service.py` only routes through it when `RFCAI_USE_JERRY_PIPELINE=1` is set in `/etc/default/rfcai-predict`. See `docs/backend_swap_jerry_pipeline_runbook.md` for the deploy steps; the swap needs ~10 min on the LAN box.
 
 The Flutter app (commit `c034312`) also added a **reticle-crop UX**: user fits the connector inside a centered circle, app crops to a 60% centered square before upload. Train and inference now share scale. Confidence threshold tightened 0.40 → 0.65. See [the memory](MEMORY.md) for the rationale.
+
+**Holdout was cleaned 2026-05-25:** 5 mislabeled samples (IMG_02xx batch) were moved to their true classes via Sonnet vision audit. Backup at `/tmp/holdout_pre_relabel_2026-05-25/` on the box. See [[holdout-quality-issues]] memory.
+
+**Datasets admin UI deployed 2026-05-25:** `https://aired.com/rfcai/labeler/admin/datasets` for browsing + bulk-editing every dataset on disk. Live but uncommitted locally — see [[datasets-admin-ui]] memory. SFTP'd patches to: `labeler.py`, `templates/labeler/_base.html`, `admin_datasets.html` (new), `admin_dataset_grid.html` (new).
+
+## Investigation session 2026-05-25: "why is Jerry's fork so much better than ours"
+
+Spent a session systematically replicating Jerry's pipeline + isolating the gap. Findings:
+
+- **Pipeline (architecture, preprocessing, training code) is identical** between his fork and ours. Confirmed by diff of his `train.py` vs ours.
+- **Training data is the differentiator**, not the recipe. Our 23K-sample training set was 95% redundant video-frame augmentations of ~600 unique scenes; Jerry's 638 hand-curated photos = 638 unique scenes.
+- **Critical recipe gotchas**: (1) Jerry does NOT use `--balance-to-smallest` on his already-balanced data — using it cost us 12pts. (2) `RandomResizedCrop(scale=(0.55, 1.0))` floor is too high for tight Hough crops — photo-trained models score 16% standalone but 79% in YOLO hybrid. See [[crop-scale-mismatch]] memory.
+- **The 97.1% baseline was stale** — it was on the older 35-img holdout. Both Jerry's pretrained and our replica score ~79-81% on the current 43-img holdout.
+- **6 of remaining ~9 holdout misses are an OOD `IMG_02XX` batch** that neither training set saw. Adding samples like those to training would close most of the remaining gap.
+
+Full recipe + numbers: see [[jerry-replication-recipe]] memory.
 
 ## Immediate goal of this session
 
@@ -201,6 +220,15 @@ docs/
   runbook.md, etc.          Various operational + architectural notes
 ```
 
+## Recent work (2026-05-23 → 2026-05-25)
+
+1. **Jerry replication study** — systematically isolated why Jerry's fork outperformed ours. Trained 7+ model variants. Ended at parity (~79% Full / 95% Gender) with Jerry's pretrained when using his exact recipe + his exact data. Full saga: `docs/session_jerry_replication_2026-05-25.md` + [[jerry-replication-recipe]] memory.
+2. **`train_v19_effnet.py` patched** — added Jerry's exact recipe defaults (epochs=50, batch=16, lr=1e-4, save-best-val-acc checkpoint, crash-safe weights_last.pt per epoch). Standalone trainer at `training/scripts/train_v19_effnet.py`.
+3. **Holdout cleaned** — 5 mislabeled samples (`2_4mm-m.jpeg`, `IMG_0271`, `IMG_0272`, `IMG_0274`, `IMG_0276`) moved to true classes via Sonnet vision audit. The 97.1% Jerry baseline in earlier notes was on a smaller, cleaner 35-img holdout. Current cleaned 43-img holdout has Jerry at 81.4% Full, ours at 79.1% Full.
+4. **Datasets admin UI** — `/labeler/admin/datasets` lists every dataset under `data/`. Per-dataset grid view with multi-select bulk-delete + bulk-move-to-class. Test holdout flagged read-only. Bulk-delete hardlinks to `data/_deleted/` for recovery. SFTP-deployed to box; uncommitted locally. See [[datasets-admin-ui]] memory.
+5. **Sonnet angle-filter pass** — 40 of 92 batches (1,600 of 3,649 crops) classified as side-profile vs head-on. Most video crops are head-on (wrong distribution for app where users photograph side-profile). Halted at 40 batches once jerry_full_nobal proved data composition mattered more than angle-filtering existing videos.
+6. **Models on box** under `/home/rfcai/training/models/`: `classifier_v19_effnet_jerry_full_nobal/` (best replica), `classifier_v19_effnet_photos_only/`, `classifier_v19_effnet_jerry_replica/`, `classifier_v19_effnet_jerry_v3/`, hybrid dirs at `jerry_v19_hybrid_*/`. Combined-dataset training (511 + 638 dedupe) running as of writing.
+
 ## Recent work (2026-05-17 → 2026-05-18)
 
 1. **35-image carved holdout** — moved 5 photo_* files per class from train → holdout for 7 classes via the labeler API (see `tmp_carve.py` + `tmp_carve_execute.py`). Holdout grew 8 → 43. Gaps: 3.5mm-M and 2.4mm-F have no photo_* in train (only synthetic), 2.4mm-M labeler /grid hung on enumeration. Carve scripts kept the `source_backup/` hardlinks so nothing is actually lost.
@@ -224,9 +252,12 @@ docs/
 
 ## Pending work
 
+- **Combined-dataset training result** (in flight) — our 511 photos + Jerry's 638 deduped, training with Jerry's recipe. If it beats 81.4% Full on the cleaned holdout, that's the new production candidate.
+- **Commit the datasets UI changes** — SFTP'd to box but uncommitted. Files: `training/rfconnectorai/server/labeler.py`, `templates/labeler/_base.html`, `templates/labeler/admin_datasets.html` (new), `templates/labeler/admin_dataset_grid.html` (new).
+- **Commit the train_v19_effnet.py patches** — Jerry-recipe defaults + save-best logic. File: `training/scripts/train_v19_effnet.py`.
 - **Deploy Jerry's pipeline to the box** — runbook at `docs/backend_swap_jerry_pipeline_runbook.md`. Needs LAN access to scp ONNX files + set env vars in `/etc/default/rfcai-predict`. Existing `/predict` API contract unchanged — Flutter app gets the win automatically.
 - **Build + test new Flutter APK** — commit `c034312` adds reticle crop, pinch zoom, tighter abstention, bbox overlay. Pull on Mac, `flutter pub get`, `flutter analyze`, `flutter build apk --release` (Android) or `pod install` + Xcode (iOS).
-- **Capture more reticle-cropped training data** — once new APK is on phones, every Contribute upload is a `reticle_crop.jpg`. Prioritize SMA-M (29 train samples post-carve), 3.5mm-M and 2.4mm-F (0 photo_* in train), 2.4mm-M.
+- **Capture more reticle-cropped training data** — once new APK is on phones, every Contribute upload is a `reticle_crop.jpg`. Prioritize 2.4mm-F (now 0 holdout samples after cleanup), 3.5mm-M (only 2 holdout samples), and the IMG_02XX-style camera distribution that both models can't recognize.
 - **Task 9 cleanup pass** (still queued) — remove the HTTP Basic auth fallback from `require_admin`, delete `_require_basic_auth`, remove `LABELER_USER`/`LABELER_PASS` env vars from `/etc/default/rfcai-predict`, add `itsdangerous` to `requirements.txt`/`pyproject.toml`. Do this AFTER iOS smoke-tests Bearer tokens.
 - **iOS smoke test** — actually build and install on iPhone.
 

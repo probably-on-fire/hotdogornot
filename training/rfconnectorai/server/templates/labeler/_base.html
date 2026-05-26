@@ -249,6 +249,7 @@
 
     {% if request.session.get('user_id') %}
     <div class="header-auth">
+      <a href="/rfcai/labeler/admin/datasets" class="header-admin-link">Datasets</a>
       <a href="/rfcai/labeler/admin/users" class="header-admin-link">Admin</a>
       <div class="avatar" title="{{ request.session.get('username', '') }}">
         {{ request.session.get('username', '?')[:1] | upper }}

@@ -657,6 +657,127 @@ def _backup_hardlink(src: Path, cls: str, backup_root: Path) -> None:
         )
 
 
+@dataclass(frozen=True)
+class DatasetEntry:
+    """One browsable dataset surface. `root` is the directory that
+    immediately contains class-named subdirs."""
+    name: str
+    display: str
+    root: Path
+    kind: str
+    read_only: bool
+
+
+def _audit_log_path() -> Path:
+    return _snapshot_root().parent / "dataset_audit.log"
+
+
+def _deleted_root() -> Path:
+    return _snapshot_root().parent / "_deleted"
+
+
+_IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def _has_class_subdirs(p: Path) -> bool:
+    if not p.is_dir():
+        return False
+    for cls in CANONICAL_CLASSES:
+        d = p / cls
+        if d.is_dir():
+            for f in d.iterdir():
+                if f.is_file() and f.suffix.lower() in _IMG_EXTS:
+                    return True
+    return False
+
+
+def _discover_datasets() -> list[DatasetEntry]:
+    """Enumerate every browsable dataset on disk. Fresh on each call so
+    new snapshots appear without a service restart. Stable order:
+    labeled → holdout → snapshots (newest first by mtime)."""
+    out: list[DatasetEntry] = []
+    labeled = _data_root()
+    if _has_class_subdirs(labeled):
+        out.append(DatasetEntry(
+            name="labeled", display="Working labeled (live)",
+            root=labeled, kind="labeled", read_only=False,
+        ))
+    holdout = _test_holdout_root()
+    if _has_class_subdirs(holdout):
+        out.append(DatasetEntry(
+            name="test_holdout", display="Test holdout",
+            root=holdout, kind="holdout", read_only=True,
+        ))
+    snap_root = _snapshot_root()
+    if snap_root.is_dir():
+        snaps: list[tuple[float, DatasetEntry]] = []
+        for p in sorted(snap_root.iterdir()):
+            if not p.is_dir():
+                continue
+            cands: list[tuple[str, Path]] = []
+            if _has_class_subdirs(p):
+                cands.append((p.name, p))
+            for split in ("train", "val", "test"):
+                sp = p / split
+                if _has_class_subdirs(sp):
+                    cands.append((f"{p.name}/{split}", sp))
+            for display, root in cands:
+                slug = display.replace("/", "__")
+                snaps.append((p.stat().st_mtime, DatasetEntry(
+                    name=slug, display=display, root=root,
+                    kind="snapshot", read_only=False,
+                )))
+        snaps.sort(key=lambda t: -t[0])
+        out.extend(d for _, d in snaps)
+    return out
+
+
+def _get_dataset(name: str) -> DatasetEntry:
+    for d in _discover_datasets():
+        if d.name == name:
+            return d
+    raise HTTPException(404, f"dataset {name!r} not found")
+
+
+def _safe_dataset_path(d: DatasetEntry, raw: str) -> Path:
+    try:
+        candidate = Path(raw).resolve()
+    except Exception:
+        raise HTTPException(400, "bad path")
+    try:
+        candidate.relative_to(d.root)
+    except ValueError:
+        raise HTTPException(400, "path outside dataset")
+    return candidate
+
+
+def _dataset_class_counts(d: DatasetEntry) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for cls in CANONICAL_CLASSES:
+        cd = d.root / cls
+        if cd.is_dir():
+            out[cls] = sum(
+                1 for p in cd.iterdir()
+                if p.is_file() and p.suffix.lower() in _IMG_EXTS
+            )
+        else:
+            out[cls] = 0
+    return out
+
+
+def _audit(dataset: str, action: str, count: int,
+           target_cls: str = "", actor: str = "") -> None:
+    try:
+        log = _audit_log_path()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        line = f"{ts}\t{actor}\t{dataset}\t{action}\t{count}\t{target_cls}\n"
+        with log.open("a") as f:
+            f.write(line)
+    except Exception as e:
+        print(f"[dataset_audit] failed: {e}", flush=True)
+
+
 def create_router(classifier=None) -> APIRouter:
     """`classifier`: optional ConnectorClassifier instance. When passed,
     `/upload-video` callers can set `with_predict=true` to also receive
@@ -926,6 +1047,149 @@ def create_router(classifier=None) -> APIRouter:
         deleted_name = target.username if target else f"id-{user_id}"
         qs = urllib.parse.urlencode({"deleted": deleted_name})
         return RedirectResponse(f"/rfcai/labeler/admin/users?{qs}", status_code=303)
+
+    @r.get("/admin/datasets", response_class=HTMLResponse)
+    def admin_datasets_page(request: Request, user=Depends(require_admin)):
+        ds = _discover_datasets()
+        rows = []
+        for d in ds:
+            counts = _dataset_class_counts(d)
+            rows.append({
+                "name": d.name, "display": d.display,
+                "kind": d.kind, "read_only": d.read_only,
+                "total": sum(counts.values()), "counts": counts,
+                "root": str(d.root),
+            })
+        return templates.TemplateResponse(
+            request, "labeler/admin_datasets.html",
+            {"datasets": rows, "classes": CANONICAL_CLASSES, "current_user": user},
+        )
+
+    @r.get("/admin/dataset/{name}", response_class=HTMLResponse)
+    def admin_dataset_grid(
+        request: Request, name: str,
+        cls: str = "", page: int = 1, per_page: int = 100,
+        user=Depends(require_admin),
+    ):
+        d = _get_dataset(name)
+        counts = _dataset_class_counts(d)
+        per_page = max(20, min(per_page, 500))
+        page = max(1, page)
+        if not cls:
+            for c in CANONICAL_CLASSES:
+                if counts.get(c, 0) > 0:
+                    cls = c
+                    break
+        files: list[Path] = []
+        if cls in CANONICAL_CLASSES:
+            cd = d.root / cls
+            if cd.is_dir():
+                files = sorted(
+                    p for p in cd.iterdir()
+                    if p.is_file() and p.suffix.lower() in _IMG_EXTS
+                )
+        n_total = len(files)
+        n_pages = max(1, (n_total + per_page - 1) // per_page)
+        page = min(page, n_pages)
+        start, end = (page - 1) * per_page, page * per_page
+        return templates.TemplateResponse(
+            request, "labeler/admin_dataset_grid.html",
+            {
+                "dataset": {
+                    "name": d.name, "display": d.display,
+                    "kind": d.kind, "read_only": d.read_only,
+                    "root": str(d.root),
+                },
+                "classes": CANONICAL_CLASSES,
+                "counts": counts, "cls": cls,
+                "page": page, "n_pages": n_pages, "per_page": per_page,
+                "n_total": n_total,
+                "files": [{"path": str(p), "name": p.name}
+                          for p in files[start:end]],
+                "current_user": user,
+            },
+        )
+
+    @r.get("/admin/dataset/{name}/img")
+    def admin_dataset_img(name: str, path: str, user=Depends(require_admin)):
+        d = _get_dataset(name)
+        p = _safe_dataset_path(d, path)
+        if not p.exists():
+            raise HTTPException(404, "not found")
+        return FileResponse(str(p))
+
+    @r.post("/admin/dataset/{name}/bulk-delete", response_class=HTMLResponse)
+    def admin_dataset_bulk_delete(
+        name: str,
+        paths: list[str] = Form(...),
+        user=Depends(require_admin),
+    ):
+        d = _get_dataset(name)
+        if d.read_only:
+            raise HTTPException(403, "dataset is read-only")
+        stamp = time.strftime("%Y-%m-%dT%H-%M-%S", time.gmtime())
+        recovery = _deleted_root() / d.name / stamp
+        recovery.mkdir(parents=True, exist_ok=True)
+        n = 0
+        for raw in paths:
+            try:
+                p = _safe_dataset_path(d, raw)
+            except HTTPException:
+                continue
+            if not p.exists():
+                continue
+            try:
+                bdir = recovery / p.parent.name
+                bdir.mkdir(parents=True, exist_ok=True)
+                dst = bdir / p.name
+                if not dst.exists():
+                    os.link(p, dst)
+                p.unlink()
+                n += 1
+            except Exception:
+                continue
+        _audit(d.name, "bulk-delete", n, actor=user.username)
+        return HTMLResponse(
+            f"<div class='success'>Deleted {n} image(s). "
+            f"Recoverable from <code>{recovery}</code></div>"
+        )
+
+    @r.post("/admin/dataset/{name}/bulk-move", response_class=HTMLResponse)
+    def admin_dataset_bulk_move(
+        name: str,
+        paths: list[str] = Form(...),
+        target_cls: str = Form(...),
+        user=Depends(require_admin),
+    ):
+        d = _get_dataset(name)
+        if d.read_only:
+            raise HTTPException(403, "dataset is read-only")
+        if target_cls not in CANONICAL_CLASSES:
+            raise HTTPException(400, f"target_cls {target_cls!r} not canonical")
+        tgt_dir = d.root / target_cls
+        tgt_dir.mkdir(parents=True, exist_ok=True)
+        n = 0
+        for raw in paths:
+            try:
+                p = _safe_dataset_path(d, raw)
+            except HTTPException:
+                continue
+            if not p.exists() or p.parent == tgt_dir:
+                continue
+            try:
+                dst = tgt_dir / p.name
+                k = 1
+                while dst.exists():
+                    dst = tgt_dir / f"{p.stem}_dup{k}{p.suffix}"
+                    k += 1
+                shutil.move(str(p), str(dst))
+                n += 1
+            except Exception:
+                continue
+        _audit(d.name, "bulk-move", n, target_cls=target_cls, actor=user.username)
+        return HTMLResponse(
+            f"<div class='success'>Moved {n} image(s) to <strong>{target_cls}</strong>.</div>"
+        )
 
     @r.post("/delete", response_class=HTMLResponse)
     def delete(path: str = Form(...), user=Depends(require_admin)):

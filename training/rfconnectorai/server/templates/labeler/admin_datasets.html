@@ -1,0 +1,70 @@
+{% extends "labeler/_base.html" %}
+{% block title %}Datasets — RFCAI{% endblock %}
+{% block page_title %}
+  <span class="project">RF Connector AI</span>
+  <span class="sep">·</span>
+  <span class="app">Datasets</span>
+{% endblock %}
+
+{% block content %}
+<style>
+  .ds-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ds-table th { text-align: left; color: var(--muted); font-weight: 500;
+                 padding: 10px 6px; border-bottom: 1px solid var(--border); }
+  .ds-table td { padding: 12px 6px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .ds-table tr:hover td { background: var(--panel-2); }
+  .ds-name { color: var(--accent); text-decoration: none; font-weight: 600; }
+  .ds-name:hover { color: var(--accent-strong); }
+  .ds-root { color: var(--subtle); font-size: 11px; margin-top: 2px;
+             font-family: ui-monospace, monospace; }
+  .ds-ro-tag { color: var(--orange); font-size: 11px; margin-left: 6px; }
+  .ds-kind { color: var(--muted); font-size: 11px;
+             text-transform: uppercase; letter-spacing: 0.5px; }
+  .ds-num-cell { text-align: right; font-variant-numeric: tabular-nums; }
+  .ds-total { font-weight: 600; }
+  .ds-zero { color: var(--subtle); }
+  .ds-cls-h { font-size: 10px; text-align: right; }
+</style>
+
+<main>
+  <h2 style="margin: 0 0 6px 0; font-weight: 500;">Datasets</h2>
+  <p style="color: var(--muted); margin: 0 0 20px 0; font-size: 13px;">
+    Click any dataset to browse and bulk-edit. Read-only datasets cannot be modified.
+  </p>
+
+  <table class="ds-table">
+    <thead>
+      <tr>
+        <th>Dataset</th>
+        <th>Kind</th>
+        <th class="ds-num-cell">Total</th>
+        {% for c in classes %}
+        <th class="ds-cls-h">{{ c }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for d in datasets %}
+      <tr>
+        <td>
+          <a class="ds-name" href="/rfcai/labeler/admin/dataset/{{ d.name }}">{{ d.display }}</a>
+          {% if d.read_only %}<span class="ds-ro-tag">read-only</span>{% endif %}
+          <div class="ds-root">{{ d.root }}</div>
+        </td>
+        <td><span class="ds-kind">{{ d.kind }}</span></td>
+        <td class="ds-num-cell ds-total">{{ d.total }}</td>
+        {% for c in classes %}
+        <td class="ds-num-cell {{ 'ds-zero' if not d.counts[c] }}">{{ d.counts[c] }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if not datasets %}
+  <p style="color: var(--muted); padding: 40px 0; text-align: center;">
+    No datasets found on disk.
+  </p>
+  {% endif %}
+</main>
+{% endblock %}

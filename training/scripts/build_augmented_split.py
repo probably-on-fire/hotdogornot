@@ -95,11 +95,24 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--tar", action="store_true",
                     help="also emit out.tar.gz")
+    ap.add_argument("--filter-manifest", type=Path, default=None,
+                    help="filter_video_crops_*.json — only include crops "
+                         "whose path is in its kept_paths (video-crops only; "
+                         "photo/synthetic stay unfiltered)")
     args = ap.parse_args()
 
     rng = random.Random(args.seed)
     video_crops = collect_video_crop_map(args.videos_dir)
     print(f"sidecar-tracked crops: {len(video_crops)}")
+
+    keep_video_crops: set[Path] | None = None
+    if args.filter_manifest:
+        fm = json.loads(args.filter_manifest.read_text())
+        keep_video_crops = set()
+        for paths in fm.get("kept_paths", {}).values():
+            for p in paths:
+                keep_video_crops.add(Path(p).resolve())
+        print(f"filter manifest: {len(keep_video_crops)} kept video crops")
 
     args.out.mkdir(parents=True, exist_ok=True)
     train_root = args.out / "train"
@@ -130,6 +143,8 @@ def main() -> int:
             if _is_derived(p.stem): continue
             src_vid = video_crops.get(p.resolve())
             if src_vid:
+                if keep_video_crops is not None and p.resolve() not in keep_video_crops:
+                    continue
                 videos[src_vid].append(p)
             else:
                 photos.append(p)

@@ -1,0 +1,221 @@
+{% extends "labeler/_base.html" %}
+{% block title %}{{ dataset.display }} — Datasets — RFCAI{% endblock %}
+{% block htmx_script %}
+  <script src="https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js"></script>
+{% endblock %}
+{% block page_title %}
+  <span class="project">RF Connector AI</span>
+  <span class="sep">·</span>
+  <a href="/rfcai/labeler/admin/datasets"
+     style="color:var(--muted); text-decoration:none;">Datasets</a>
+  <span class="sep">·</span>
+  <span class="app">{{ dataset.display }}</span>
+{% endblock %}
+
+{% block content %}
+<style>
+  .ds-grid {
+    display: grid; gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    margin-top: 14px;
+  }
+  .ds-tile {
+    position: relative;
+    aspect-ratio: 1; border-radius: 8px; overflow: hidden;
+    border: 2px solid var(--border); background: var(--panel-2);
+    cursor: pointer; user-select: none;
+    transition: border-color 0.08s, box-shadow 0.08s;
+  }
+  .ds-tile.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-tint);
+  }
+  .ds-tile.gone { display: none; }
+  .ds-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .ds-tile .name {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.85));
+    color: #fff; font-size: 10px; padding: 14px 6px 4px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .ds-tile .check {
+    position: absolute; top: 6px; left: 6px;
+    width: 18px; height: 18px; border-radius: 4px;
+    background: rgba(0,0,0,0.5); border: 2px solid #fff;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 14px; line-height: 1;
+  }
+  .ds-tile.selected .check { background: var(--accent); border-color: var(--accent); }
+  .ds-tile.selected .check::after { content: "✓"; }
+
+  .ds-controls {
+    position: sticky; top: 48px; z-index: 50;
+    background: rgba(19,23,32,0.95); backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    padding: 12px 20px; margin: 14px -20px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .ds-controls .btn {
+    padding: 6px 12px; font-size: 12px; border-radius: 6px;
+    border: 1px solid var(--border-strong); background: var(--panel-2);
+    color: var(--text); cursor: pointer;
+  }
+  .ds-controls .btn-danger { background: var(--red); color: #fff; border-color: var(--red); }
+  .ds-controls .btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .ds-controls .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .ds-controls select {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border-strong); padding: 6px 8px;
+    border-radius: 6px; font-size: 12px;
+  }
+
+  .pager {
+    margin-top: 18px; color: var(--muted); font-size: 12px;
+    display: flex; gap: 14px; align-items: center; justify-content: center;
+  }
+  .pager a { color: var(--accent); text-decoration: none; }
+  .pager a.disabled { color: var(--subtle); pointer-events: none; }
+
+  .class-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 0 0; }
+  .class-tabs a {
+    padding: 5px 11px; border-radius: 6px;
+    background: var(--panel-2); color: var(--muted);
+    text-decoration: none; font-size: 12px;
+    border: 1px solid var(--border);
+  }
+  .class-tabs a:hover { color: var(--text); border-color: var(--border-strong); }
+  .class-tabs a.active {
+    background: var(--accent-tint); color: var(--accent-strong);
+    border-color: var(--accent);
+  }
+  .class-tabs a .n { color: var(--subtle); margin-left: 5px; font-variant-numeric: tabular-nums; }
+  .class-tabs a.active .n { color: var(--accent); }
+
+  .readonly-banner {
+    background: rgba(251,146,60,0.1); border: 1px solid var(--orange);
+    color: var(--orange); padding: 10px 14px; border-radius: 6px;
+    margin: 14px 0 0 0; font-size: 13px;
+  }
+  .ds-root-line {
+    color: var(--muted); font-size: 11px;
+    font-family: ui-monospace, monospace; margin-top: 4px;
+  }
+  .ds-status {
+    color: var(--muted); font-size: 12px; margin-top: 8px;
+  }
+  #ds-result { margin-top: 10px; font-size: 13px; }
+  #ds-result .success { color: var(--green); }
+  #ds-result code { background: var(--panel-2); padding: 1px 4px; border-radius: 3px;
+                    font-size: 11px; }
+</style>
+
+<main>
+  <div class="ds-root-line">{{ dataset.root }}</div>
+
+  {% if dataset.read_only %}
+  <div class="readonly-banner">
+    ⚠ This dataset is read-only. Bulk-edit operations are disabled.
+  </div>
+  {% endif %}
+
+  <div class="class-tabs">
+    {% for c in classes %}
+    <a href="?cls={{ c }}&page=1" class="{{ 'active' if c == cls else '' }}">
+      {{ c }}<span class="n">{{ counts[c] }}</span>
+    </a>
+    {% endfor %}
+  </div>
+
+  {% if not dataset.read_only %}
+  <div class="ds-controls">
+    <span style="color: var(--muted); font-size: 12px;">
+      <strong id="sel-count">0</strong> selected
+    </span>
+    <button type="button" class="btn" onclick="dsSelectAll(true)">Select all on page</button>
+    <button type="button" class="btn" onclick="dsSelectAll(false)">Clear</button>
+    <span style="flex: 1;"></span>
+
+    <select id="ds-move-target" onchange="dsRefreshUI()">
+      <option value="">Move selected to…</option>
+      {% for c in classes %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+    <button id="ds-move-btn" class="btn btn-primary" disabled
+            hx-post="/rfcai/labeler/admin/dataset/{{ dataset.name }}/bulk-move"
+            hx-vals='js:{paths: dsSelectedPaths(), target_cls: document.getElementById("ds-move-target").value}'
+            hx-target="#ds-result" hx-swap="innerHTML"
+            hx-confirm="Move selected images to the chosen class?">
+      Move
+    </button>
+    <button id="ds-delete-btn" class="btn btn-danger" disabled
+            hx-post="/rfcai/labeler/admin/dataset/{{ dataset.name }}/bulk-delete"
+            hx-vals='js:{paths: dsSelectedPaths()}'
+            hx-target="#ds-result" hx-swap="innerHTML"
+            hx-confirm="Permanently delete selected images? (recoverable from _deleted/)">
+      Delete
+    </button>
+  </div>
+  <div id="ds-result"></div>
+  {% endif %}
+
+  <div class="ds-status">
+    {{ n_total }} image(s) in <strong>{{ cls or '(no class)' }}</strong> ·
+    page {{ page }} of {{ n_pages }} (showing up to {{ per_page }})
+  </div>
+
+  <div class="ds-grid">
+    {% for f in files %}
+    <div class="ds-tile" data-path="{{ f.path }}" onclick="dsToggle(this)">
+      <img loading="lazy"
+           src="/rfcai/labeler/admin/dataset/{{ dataset.name }}/img?path={{ f.path|urlencode }}">
+      <div class="check"></div>
+      <div class="name">{{ f.name }}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if n_pages > 1 %}
+  <div class="pager">
+    <a class="{{ 'disabled' if page <= 1 else '' }}"
+       href="?cls={{ cls }}&page={{ page-1 }}">← prev</a>
+    <span>page {{ page }} of {{ n_pages }}</span>
+    <a class="{{ 'disabled' if page >= n_pages else '' }}"
+       href="?cls={{ cls }}&page={{ page+1 }}">next →</a>
+  </div>
+  {% endif %}
+</main>
+
+<script>
+  function dsToggle(el) {
+    el.classList.toggle('selected');
+    dsRefreshUI();
+  }
+  function dsSelectAll(state) {
+    document.querySelectorAll('.ds-tile:not(.gone)').forEach(t => {
+      if (state) t.classList.add('selected'); else t.classList.remove('selected');
+    });
+    dsRefreshUI();
+  }
+  function dsSelectedPaths() {
+    return Array.from(document.querySelectorAll('.ds-tile.selected:not(.gone)'))
+                .map(t => t.dataset.path);
+  }
+  function dsRefreshUI() {
+    var n = document.querySelectorAll('.ds-tile.selected:not(.gone)').length;
+    var sc = document.getElementById('sel-count');
+    if (sc) sc.textContent = n;
+    var del = document.getElementById('ds-delete-btn');
+    var mv = document.getElementById('ds-move-btn');
+    var tgt = document.getElementById('ds-move-target');
+    if (del) del.disabled = (n === 0);
+    if (mv) mv.disabled = (n === 0 || !tgt || !tgt.value);
+  }
+  document.addEventListener('htmx:afterRequest', function(e) {
+    var id = e.target && e.target.id;
+    if (e.detail.successful && (id === 'ds-delete-btn' || id === 'ds-move-btn')) {
+      document.querySelectorAll('.ds-tile.selected').forEach(t => t.classList.add('gone'));
+      dsRefreshUI();
+    }
+  });
+</script>
+{% endblock %}
