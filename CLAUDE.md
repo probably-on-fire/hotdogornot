@@ -27,6 +27,8 @@ See [[combined-v2-deploy]] memory + `docs/session_jerry_replication_2026-05-25.m
 
 Softmax-averaging `combined_v2` + `jerry_full_nobal` (both already on the box, both ~80% single-model) lifts the cleaned 43-img holdout to **88.4% Full / 90.7% Family / 95.3% Gender** — +7.0pt Full / +4.6pt Gender over the prior single-model prod. Crucially, **at the app's 0.65 confidence threshold the ensemble is 100% accurate on 31/43 confident predictions** — every one of the 5 misses falls below threshold (0.308, 0.388, 0.495, 0.495, 0.585) and abstains. Zero confidently-wrong outputs. See [[ensemble-confidence-calibrated]].
 
+**Update 2026-05-26 ~14:30:** Holdout expanded 43 → 52 (carved 10 photos to bring 2.4mm-F: 0→5, 3.5mm-M: 2→5, 2.4mm-M: 3→5; new training snapshot `combined_v3_2026-05-26`). On the new 52-img holdout the live prod scores **49/52 = 94.2% Full / 100% Gender** (apples-to-apples uncontaminated 42 subset: **92.9% / 100%**). The 3 remaining misses are all OOD-3.5mm cases, all abstain at 0.65. A heavy-augmentation retrain (`combined_v3_heavyaug`) was tested — val_acc 0.936 (best seen) but **collapsed to 71.4% on holdout** ([[heavy-aug-regressed]]); 3-way ensemble with it ties prod, adds nothing. Don't ship the heavy-aug variant.
+
 **Deployment state:**
 - Commit: `17cd1a9 training/server + pipeline: 2-way ensemble support + best-CLS-conf box selection` (pushed to origin/master)
 - Box has the new code via direct SFTP (git pull was blocked by pre-existing uncommitted UI work — same pattern as datasets UI deploy)
