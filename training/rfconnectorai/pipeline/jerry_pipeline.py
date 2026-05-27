@@ -137,7 +137,11 @@ class JerryPipeline:
         # When enabled, also overrides box_min to the lower 0.05 floor. See
         # [[best-cls-conf-box-selection]] memory for the win.
         import os as _os
-        self._best_cls_conf: bool = _os.environ.get("RFCAI_BEST_CLS_CONF_BOX") == "1"
+        # Accept the same truthy strings the rest of predict_service does
+        # ("1", "true", "yes", "on", case-insensitive) so deploys don't
+        # silently fall back to off because someone typed "True" or "yes".
+        _flag = _os.environ.get("RFCAI_BEST_CLS_CONF_BOX", "").strip().lower()
+        self._best_cls_conf: bool = _flag in ("1", "true", "yes", "on")
         if self._best_cls_conf:
             self.box_min = 0.05
 

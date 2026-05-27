@@ -122,6 +122,7 @@ class _ContributeScreenState extends State<ContributeScreen>
   String? _toast;                // transient status pill above the chips
   bool _toastIsError = false;
   Timer? _toastTimer;
+  bool _undoBusy = false;     // serialize undo to avoid concurrent DELETEs
 
   @override
   void initState() {
@@ -250,9 +251,14 @@ class _ContributeScreenState extends State<ContributeScreen>
         (c) => c.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
+      // Cap iOS at veryHigh (~2160p) to avoid 48MP buffers on iPhone Pro
+      // tripping Jetsam OOM on burst photo capture. Android stays on max.
+      final preset = (!kIsWeb && Platform.isIOS)
+          ? ResolutionPreset.veryHigh
+          : ResolutionPreset.max;
       final controller = CameraController(
         rear,
-        ResolutionPreset.max,
+        preset,
         // Audio off so iOS doesn't trigger a mic-permission prompt — the
         // app only needs visuals to identify connectors. We deliberately
         // do NOT declare NSMicrophoneUsageDescription in Info.plist.
@@ -530,12 +536,13 @@ class _ContributeScreenState extends State<ContributeScreen>
       maxWidth: 4032,
     );
     if (pf == null) return;
-    if (kIsWeb) {
-      final bytes = await pf.readAsBytes();
-      unawaited(_uploadBytes(bytes, pf.name));
-    } else {
-      unawaited(_uploadFile(File(pf.path)));
-    }
+    // Apply the same reticle crop as camera captures so gallery-picked
+    // training photos match the scale distribution of camera shots.
+    // Without this, gallery picks would upload full-frame and reintroduce
+    // the crop_scale_mismatch issue for those samples.
+    final raw = await pf.readAsBytes();
+    final cropped = _cropToReticleBytes(raw);
+    unawaited(_uploadBytes(cropped, 'reticle_crop.jpg'));
   }
 
   // Uploads happen async; we capture the class + holdout intent at the
@@ -545,6 +552,11 @@ class _ContributeScreenState extends State<ContributeScreen>
     final cls = _classLabel;
     final isHoldout = _holdout;
     if (mounted) setState(() => _uploadInFlight++);
+    // Hold the wakelock while a photo upload is in flight. iOS will
+    // suspend network tasks aggressively on screen-off; without this,
+    // a user who fires the shutter and pockets the phone loses the
+    // upload. The wakelock is released when the counter hits zero.
+    try { await WakelockPlus.enable(); } catch (_) {}
     try {
       final api = ApiClient(widget.settings, widget.auth);
       final UploadResult result = isHoldout
@@ -571,6 +583,9 @@ class _ContributeScreenState extends State<ContributeScreen>
       _showToast('Upload failed: ${_friendlyError(e)}', error: true);
     } finally {
       if (mounted) setState(() => _uploadInFlight--);
+      if (_uploadInFlight <= 0) {
+        try { await WakelockPlus.disable(); } catch (_) {}
+      }
     }
   }
 
@@ -578,6 +593,9 @@ class _ContributeScreenState extends State<ContributeScreen>
     final cls = _classLabel;
     final isHoldout = _holdout;
     if (mounted) setState(() => _uploadInFlight++);
+    // Same wakelock pattern as _uploadFile — keep the OS from suspending
+    // an in-flight upload when the screen turns off.
+    try { await WakelockPlus.enable(); } catch (_) {}
     try {
       final api = ApiClient(widget.settings, widget.auth);
       final UploadResult result = isHoldout
@@ -603,6 +621,9 @@ class _ContributeScreenState extends State<ContributeScreen>
       _showToast('Upload failed: ${_friendlyError(e)}', error: true);
     } finally {
       if (mounted) setState(() => _uploadInFlight--);
+      if (_uploadInFlight <= 0) {
+        try { await WakelockPlus.disable(); } catch (_) {}
+      }
     }
   }
 
@@ -638,7 +659,11 @@ class _ContributeScreenState extends State<ContributeScreen>
   }
 
   Future<void> _undoLast() async {
-    if (_undoStack.isEmpty) return;
+    // Re-entrancy guard: rapid Undo taps used to fire concurrent DELETEs.
+    // If one failed and we re-added to the stack, ordering could drift
+    // relative to server state. Serializing undo eliminates the race.
+    if (_undoBusy || _undoStack.isEmpty) return;
+    _undoBusy = true;
     final last = _undoStack.removeLast();
     if (mounted) setState(() {});
     try {
@@ -655,6 +680,8 @@ class _ContributeScreenState extends State<ContributeScreen>
     } catch (e) {
       if (mounted) setState(() => _undoStack.add(last));
       _showToast('Undo failed: ${_friendlyError(e)}', error: true);
+    } finally {
+      _undoBusy = false;
     }
   }
 
@@ -1223,7 +1250,10 @@ class _SignInCardState extends State<_SignInCard> {
                       autofocus: true,
                       textInputAction: TextInputAction.next,
                       autocorrect: false,
-                      enableSuggestions: false,
+                      // iOS Password AutoFill + Android Credential Manager:
+                      // tell the platform this is a username so saved
+                      // creds show in the keyboard quick-bar.
+                      autofillHints: const [AutofillHints.username],
                       decoration: const InputDecoration(
                         labelText: 'Username',
                         prefixIcon: Icon(Icons.person_outline, size: 18),
@@ -1234,6 +1264,7 @@ class _SignInCardState extends State<_SignInCard> {
                       controller: _passCtl,
                       obscureText: true,
                       textInputAction: TextInputAction.done,
+                      autofillHints: const [AutofillHints.password],
                       onSubmitted: (_) => _loading ? null : _submit(),
                       decoration: const InputDecoration(
                         labelText: 'Password',

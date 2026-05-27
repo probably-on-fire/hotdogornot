@@ -6,10 +6,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 class Settings {
   Settings._({
     required String relayBaseUrl,
-    required this.deviceToken,
+    required String deviceToken,
     required this.devMode,
     required this.onDeviceMode,
-  }) : _relayBaseUrl = _normalizeRelay(relayBaseUrl);
+  }) : _relayBaseUrl = _normalizeRelay(relayBaseUrl),
+       _deviceToken = deviceToken.trim().isEmpty
+           ? _defaultToken
+           : deviceToken.trim();
 
   // Backing field for relayBaseUrl. We force every write through the
   // normalizing setter so a direct field mutation can't bypass it.
@@ -17,7 +20,15 @@ class Settings {
   String get relayBaseUrl => _relayBaseUrl;
   set relayBaseUrl(String v) => _relayBaseUrl = _normalizeRelay(v);
 
-  String deviceToken;
+  // deviceToken is similarly trimmed — an accidental newline / whitespace
+  // would otherwise ship as part of the X-Device-Token header and the
+  // server would 401 with a cryptic message.
+  String _deviceToken;
+  String get deviceToken => _deviceToken;
+  set deviceToken(String v) {
+    final t = v.trim();
+    _deviceToken = t.isEmpty ? _defaultToken : t;
+  }
   // When true, the Contribute tab and the Advanced (relay/token)
   // panel are visible. Toggled by 7-tap on the version string in About.
   // Default off so end users see only Identify + About.

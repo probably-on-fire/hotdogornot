@@ -490,9 +490,14 @@ def create_app(config: dict | None = None) -> FastAPI:
             probs = {k: float(v) for k, v in pred.probabilities.items()}
             family, gender, fam_conf, gen_conf = _decompose_probabilities(probs)
             spec = _lookup_spec(pred.class_name)
-            print(f"[predict_timing] hough={_t_hough_ms:.0f}ms "
-                  f"per_crop={_per_crop_ms}  total_so_far={(_time.perf_counter()-_t0)*1000:.0f}ms",
-                  flush=True)
+            # Per-crop timing log was firing on every prediction in every
+            # request — hundreds of lines per /predict-video. Gated behind
+            # RFCAI_DEBUG_TIMING=1 so journalctl stays useful in prod.
+            if os.environ.get("RFCAI_DEBUG_TIMING") == "1":
+                print(f"[predict_timing] hough={_t_hough_ms:.0f}ms "
+                      f"per_crop={_per_crop_ms}  "
+                      f"total_so_far={(_time.perf_counter()-_t0)*1000:.0f}ms",
+                      flush=True)
             out.append({
                 # Original fields — kept verbatim for backwards compat
                 # with the Flutter app.
@@ -584,13 +589,24 @@ def create_app(config: dict | None = None) -> FastAPI:
             src = tmpp / f"src{ext}"
             src.write_bytes(data)
             # Hard frame cap via -frames:v keeps long uploads bounded.
-            subprocess.run(
+            ff_proc = subprocess.run(
                 [ff, "-y", "-i", str(src),
                  "-vf", f"fps={video_fps}", "-frames:v", str(video_max_frames),
                  "-q:v", "4", str(tmpp / "f_%04d.jpg")],
                 capture_output=True, check=False,
             )
             frames = sorted(tmpp.glob("f_*.jpg"))
+            # If ffmpeg exits non-zero AND we extracted nothing, surface
+            # the stderr tail in the response + journal. Previously this
+            # path silently returned `predictions: []` and operators had
+            # to guess whether the video was corrupt or just empty.
+            if ff_proc.returncode != 0 and not frames:
+                err_tail = ff_proc.stderr.decode(errors="replace")[-500:]
+                print(f"[predict-video] ffmpeg rc={ff_proc.returncode}: "
+                      f"{err_tail!r}", flush=True)
+                raise HTTPException(
+                    422, f"ffmpeg failed to decode video (rc="
+                         f"{ff_proc.returncode}): {err_tail.strip()[-200:]}")
             for i, fp in enumerate(frames):
                 bgr = cv2.imread(str(fp))
                 if bgr is None:

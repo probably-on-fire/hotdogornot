@@ -184,11 +184,16 @@ class _IdentifyScreenState extends State<IdentifyScreen>
         (c) => c.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
+      // iPhone Pro models return 48 MP at ResolutionPreset.max, which
+      // allocates ~150 MB buffers and trips Jetsam OOM on burst capture.
+      // Cap at `veryHigh` (~2160p) on iOS — plenty of pixels for the
+      // connector face, with much lower memory. Android stays on `max`.
+      final preset = (!kIsWeb && Platform.isIOS)
+          ? ResolutionPreset.veryHigh
+          : ResolutionPreset.max;
       final controller = CameraController(
         rear,
-        // Sensor's native max — connector identification benefits from
-        // the highest possible resolution at the central pin/socket.
-        ResolutionPreset.max,
+        preset,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
@@ -227,8 +232,14 @@ class _IdentifyScreenState extends State<IdentifyScreen>
 
   Future<void> _onShutter() async {
     if (_busy || _shutterBusy) return;
+    // Set the guard SYNCHRONOUSLY before any await so a fast double-tap
+    // landing in the same event-loop tick can't pass through twice. The
+    // setState below makes any in-flight indicator update too.
+    _shutterBusy = true;
     HapticFeedback.lightImpact();
     if (_mode == _Mode.video) {
+      // Dead branch — mode toggle removed — kept as defensive bail-out.
+      _shutterBusy = false;
       await _toggleRecording();
     } else {
       await _capturePhoto();
@@ -238,12 +249,9 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   Future<void> _capturePhoto() async {
     final cam = _cam;
     if (cam != null && cam.value.isInitialized) {
-      // Re-entrancy guard: a fast double-tap on the shutter would
-      // otherwise fire two `takePicture()` calls in flight at once and
-      // the camera plugin throws "Previous capture has not returned".
-      // _busy doesn't help here — it only flips inside the classify
-      // path, after the await chain below has already started.
-      setState(() => _shutterBusy = true);
+      // _shutterBusy was already flipped in _onShutter — just trigger a
+      // rebuild so the shutter button visually reflects busy state.
+      if (mounted) setState(() {});
       try {
         final shot = await cam.takePicture();
         final raw = await File(shot.path).readAsBytes();
