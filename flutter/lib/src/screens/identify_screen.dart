@@ -34,12 +34,15 @@ const _kMinAcceptedConfidence = 0.65;
 const _kMinBboxFractionOfImage = 0.02;
 
 // Center-crop side as a fraction of min(width, height). The reticle
-// circle has radius 14% of min dim → diameter 28%. The upload crop is
-// deliberately MUCH looser (60%) so the server-side YOLO has plenty of
-// surrounding context to find the connector even if the user frames
-// loose. The visual ring is a UX hint, not a hard crop contract.
-// 2026-05-26: this was briefly 0.30 to "match" the smaller ring but
-// caused fine-pitch 3.5mm-F failures because tight framing was lost.
+// circle has radius 28% of min dim → diameter 56%. We crop slightly
+// looser (60%) to give the server-side detector breathing room. The
+// user-facing UX is "fit the connector in the circle"; the resulting
+// crop has constant scale at the classifier regardless of phone
+// resolution or how far back the user holds the camera.
+// 2026-05-27: ring was briefly shrunk to 0.14, which changed user
+// framing behavior — users moved phone back to fill the small ring
+// and the connector ended up at ~5% of the upload, way outside the
+// trained scale distribution. Reverted to original 0.28.
 const _kReticleCropFraction = 0.60;
 
 enum _Mode { photo, video }
