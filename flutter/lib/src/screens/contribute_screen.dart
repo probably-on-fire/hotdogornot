@@ -101,6 +101,11 @@ class _ContributeScreenState extends State<ContributeScreen>
   bool _recording = false;
   DateTime? _recordStartedAt;
   Timer? _recordTicker;          // forces rebuild ~10/sec so the timer label updates
+  // Snapshot of class intent at record-start so a chip-flip mid-record
+  // doesn't redirect the upload to the wrong class.
+  String? _recordingStartCls;
+  String? _recordingStartFamily;
+  String? _recordingStartGender;
   // Skip-if-busy guard on the on-device classifier: only one check runs
   // at a time. Rapid-fire shots get their upload (fine) but skip the
   // post-hoc model agree/disagree toast — prevents OOM under burst
@@ -189,18 +194,30 @@ class _ContributeScreenState extends State<ContributeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final cam = _cam;
-    // Only tear down on real backgrounding. iOS fires `inactive` for
+    // Tear down on hard backgrounding only. iOS fires `inactive` for
     // transient interruptions (control center swipe, incoming call
-    // banner) — disposing there caused a 300-800ms re-init flicker
-    // every time the user pulled down notifications.
+    // banner) — disposing there caused a 300-800ms re-init flicker.
+    // `hidden` (Flutter 3.13+) ALSO means the OS has hidden the surface
+    // and the camera should be released.
     if (state == AppLifecycleState.paused
+        || state == AppLifecycleState.hidden
         || state == AppLifecycleState.detached) {
+      // Clean up an in-flight recording so a tap-tap-background sequence
+      // doesn't leak the ticker or strand `_recording = true`.
+      _recordTicker?.cancel();
+      _recordTicker = null;
       if (cam != null) {
-        cam.dispose();
+        try { cam.dispose(); } catch (_) {/* already disposed */}
         if (mounted) {
-          setState(() => _cam = null);
+          setState(() {
+            _cam = null;
+            _recording = false;
+            _recordStartedAt = null;
+          });
         } else {
           _cam = null;
+          _recording = false;
+          _recordStartedAt = null;
         }
       }
     } else if (state == AppLifecycleState.resumed && widget.isActive) {
@@ -288,6 +305,12 @@ class _ContributeScreenState extends State<ContributeScreen>
       try {
         await cam.startVideoRecording();
         if (!mounted) return;
+        // Snapshot the class intent at RECORD START so a chip-flip
+        // during the recording doesn't retroactively rewrite the upload's
+        // destination (audit P0 #3).
+        _recordingStartCls = _classLabel;
+        _recordingStartFamily = _family;
+        _recordingStartGender = _gender;
         setState(() {
           _recording = true;
           _recordStartedAt = DateTime.now();
@@ -295,26 +318,35 @@ class _ContributeScreenState extends State<ContributeScreen>
         // Tick at ~10Hz to refresh the 0:00 timer label; also auto-stop
         // once we hit the hard cap so users don't accidentally upload
         // multi-minute clips.
-        _recordTicker = Timer.periodic(const Duration(milliseconds: 100), (_) {
-          if (!mounted) return;
-          setState(() {});
+        _recordTicker = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+          if (!mounted) {
+            timer.cancel();
+            return;
+          }
+          // Cancel the timer FIRST on auto-stop so we don't fire the
+          // recursive _toggleRecording() while a second tick is already
+          // queued (audit P0 #1 — double-upload race).
           final started = _recordStartedAt;
           if (_recording && started != null
               && DateTime.now().difference(started).inSeconds >= _kMaxVideoSeconds) {
-            _toggleRecording();   // auto-stop + upload
+            timer.cancel();
+            _recordTicker = null;
+            unawaited(_toggleRecording());   // auto-stop + upload
+            return;
           }
+          setState(() {});
         });
         HapticFeedback.mediumImpact();
       } catch (e) {
         _showToast('Record start failed: ${_friendlyError(e)}', error: true);
       }
     } else {
-      // Stop. The class + holdout intent is captured here so the
-      // user can flip chips for the next clip without retroactively
-      // re-routing the upload that's about to start.
-      final cls = _classLabel;
-      final family = _family;
-      final gender = _gender;
+      // Stop. Use the SNAPSHOT taken at record start, not the current
+      // chip values — the user may have flipped chips between tap-start
+      // and tap-stop, and we want the original intent.
+      final cls = _recordingStartCls ?? _classLabel;
+      final family = _recordingStartFamily ?? _family;
+      final gender = _recordingStartGender ?? _gender;
       try {
         final clip = await cam.stopVideoRecording();
         _recordTicker?.cancel();
@@ -326,6 +358,9 @@ class _ContributeScreenState extends State<ContributeScreen>
         setState(() {
           _recording = false;
           _recordStartedAt = null;
+          _recordingStartCls = null;
+          _recordingStartFamily = null;
+          _recordingStartGender = null;
         });
         HapticFeedback.mediumImpact();
         unawaited(_uploadVideoFile(File(clip.path), family, gender, dur, cls));
@@ -336,6 +371,9 @@ class _ContributeScreenState extends State<ContributeScreen>
           setState(() {
             _recording = false;
             _recordStartedAt = null;
+            _recordingStartCls = null;
+            _recordingStartFamily = null;
+            _recordingStartGender = null;
           });
         }
         _showToast('Record stop failed: ${_friendlyError(e)}', error: true);

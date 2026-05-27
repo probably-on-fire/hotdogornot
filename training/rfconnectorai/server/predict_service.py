@@ -404,6 +404,24 @@ def create_app(config: dict | None = None) -> FastAPI:
                 "available": bool(spec_table),
                 "families_indexed": len(spec_table),
             },
+            # Operator visibility into which prod config is live —
+            # primary model, extras, detector threshold, best-CLS mode.
+            "jerry_pipeline": (
+                {
+                    "active": True,
+                    "primary": os.environ.get("RFCAI_JERRY_MODEL_DIR"),
+                    "extras": [
+                        p.strip() for p in
+                        os.environ.get("RFCAI_JERRY_EXTRA_MODEL_DIRS", "").split(",")
+                        if p.strip()
+                    ],
+                    "box_min": jerry_pipeline.box_min,
+                    "best_cls_conf_box": jerry_pipeline._best_cls_conf,
+                    "classes": jerry_pipeline.class_names,
+                }
+                if jerry_pipeline is not None else
+                {"active": False}
+            ),
         }
 
     def _classify_frame(bgr: np.ndarray) -> list[dict]:

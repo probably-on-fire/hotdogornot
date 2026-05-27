@@ -5,13 +5,18 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// box for the project owner. Edit via SettingsScreen.
 class Settings {
   Settings._({
-    required this.relayBaseUrl,
+    required String relayBaseUrl,
     required this.deviceToken,
     required this.devMode,
     required this.onDeviceMode,
-  });
+  }) : _relayBaseUrl = _normalizeRelay(relayBaseUrl);
 
-  String relayBaseUrl;
+  // Backing field for relayBaseUrl. We force every write through the
+  // normalizing setter so a direct field mutation can't bypass it.
+  String _relayBaseUrl;
+  String get relayBaseUrl => _relayBaseUrl;
+  set relayBaseUrl(String v) => _relayBaseUrl = _normalizeRelay(v);
+
   String deviceToken;
   // When true, the Contribute tab and the Advanced (relay/token)
   // panel are visible. Toggled by 7-tap on the version string in About.
@@ -44,9 +49,9 @@ class Settings {
 
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
-    // Normalize before persisting so a bad value never round-trips.
-    relayBaseUrl = _normalizeRelay(relayBaseUrl);
-    await prefs.setString(_kRelay, relayBaseUrl);
+    // _relayBaseUrl is already normalized by the setter; no need to
+    // re-normalize here.
+    await prefs.setString(_kRelay, _relayBaseUrl);
     await prefs.setString(_kToken, deviceToken);
     await prefs.setBool(_kDevMode, devMode);
     await prefs.setBool(_kOnDevice, onDeviceMode);

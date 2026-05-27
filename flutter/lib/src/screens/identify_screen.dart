@@ -130,8 +130,10 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     // Only tear down on hard backgrounding. On iOS `inactive` fires for any
     // transient interruption (control-center swipe, incoming call banner,
     // screenshot side-button) and disposing here causes a 300-800ms re-init
-    // flicker every time the user pulls down notifications.
+    // flicker every time the user pulls down notifications. `hidden`
+    // (Flutter 3.13+) ALSO means the OS hid the surface — release camera.
     if (state == AppLifecycleState.paused
+        || state == AppLifecycleState.hidden
         || state == AppLifecycleState.detached) {
       // Tear down the controller and forget it. Leaving _cam pointing
       // at a disposed controller would cause _buildPreview to call

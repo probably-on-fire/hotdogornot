@@ -314,6 +314,29 @@ def _extract_video_job(
 
 _SESSION_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
+# Anonymous-upload limits. The /upload-* routes are open to any caller
+# (closed-group project, 2026-05-27). Hard caps below stop a single bad
+# actor from filling the disk via curl. Tune as needed.
+_MAX_UPLOAD_IMAGE_BYTES = 25 * 1024 * 1024     # 25 MB / image
+_MAX_UPLOAD_VIDEO_BYTES = 200 * 1024 * 1024    # 200 MB / video
+_MAX_UPLOAD_IMAGES_PER_REQUEST = 20            # batch cap
+
+
+async def _read_upload_bounded(image: UploadFile, max_bytes: int) -> bytes | None:
+    """Read an UploadFile, returning None if it exceeds the cap.
+    Reads in chunks so an oversized payload doesn't blow up memory."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await image.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 def _resolve_session(raw: str | None) -> str:
     """Validate a client-supplied session token or default to today's UTC date.
@@ -1266,6 +1289,10 @@ def create_router(classifier=None) -> APIRouter:
         Undo flow can stash the server-authoritative path."""
         if cls not in CANONICAL_CLASSES:
             raise HTTPException(400, f"unknown class {cls!r}")
+        if len(images) > _MAX_UPLOAD_IMAGES_PER_REQUEST:
+            raise HTTPException(
+                413, f"too many images ({len(images)} > "
+                     f"{_MAX_UPLOAD_IMAGES_PER_REQUEST})")
         session_tag = _resolve_session(session)
         out_dir = _data_root() / cls
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1286,7 +1313,11 @@ def create_router(classifier=None) -> APIRouter:
             while dst.exists():
                 dst = out_dir / f"photo_{session_tag}_{stem}_dup{n}{ext}"
                 n += 1
-            data = await image.read()
+            data = await _read_upload_bounded(image, _MAX_UPLOAD_IMAGE_BYTES)
+            if data is None:
+                errors.append(f"{image.filename!r} exceeds "
+                              f"{_MAX_UPLOAD_IMAGE_BYTES // (1024*1024)} MB cap")
+                continue
             dst.write_bytes(data)
             saved.append({"cls": cls, "path": str(dst)})
             _backup_hardlink(dst, cls, _source_backup_root())
@@ -1303,6 +1334,10 @@ def create_router(classifier=None) -> APIRouter:
     ):
         if cls not in CANONICAL_CLASSES:
             raise HTTPException(400, f"unknown class {cls!r}")
+        if len(images) > _MAX_UPLOAD_IMAGES_PER_REQUEST:
+            raise HTTPException(
+                413, f"too many images ({len(images)} > "
+                     f"{_MAX_UPLOAD_IMAGES_PER_REQUEST})")
         session_tag = _resolve_session(session)
         out_dir = _test_holdout_root() / cls
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1323,7 +1358,11 @@ def create_router(classifier=None) -> APIRouter:
             while dst.exists():
                 dst = out_dir / f"{session_tag}_{stem}_dup{n}{ext}"
                 n += 1
-            data = await image.read()
+            data = await _read_upload_bounded(image, _MAX_UPLOAD_IMAGE_BYTES)
+            if data is None:
+                errors.append(f"{image.filename!r} exceeds "
+                              f"{_MAX_UPLOAD_IMAGE_BYTES // (1024*1024)} MB cap")
+                continue
             dst.write_bytes(data)
             saved.append({"cls": cls, "path": str(dst)})
             _backup_hardlink(dst, cls, _source_backup_root())
@@ -1383,7 +1422,19 @@ def create_router(classifier=None) -> APIRouter:
             os.environ.get("RFCAI_AUTO_EXTRACT_VIDEOS", "0")
             in ("1", "true", "True", "yes", "on")
         )
-        data = await file.read()
+        # Bounded read so a malicious POST can't push the box to OOM by
+        # streaming a 5GB file into RAM. Cap matches /predict-video's.
+        data = bytearray()
+        while True:
+            chunk = await file.read(256 * 1024)
+            if not chunk:
+                break
+            data.extend(chunk)
+            if len(data) > _MAX_UPLOAD_VIDEO_BYTES:
+                raise HTTPException(
+                    413, f"video exceeds "
+                         f"{_MAX_UPLOAD_VIDEO_BYTES // (1024*1024)} MB cap")
+        data = bytes(data)
         await run_in_threadpool(saved_video.write_bytes, data)
         sidecar = _video_sidecar_path(saved_video)
         uploaded_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

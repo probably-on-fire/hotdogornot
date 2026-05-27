@@ -263,6 +263,7 @@ class ApiClient {
       fields: fields,
       fileField: 'images',
       file: imageFile,
+      timeout: const Duration(seconds: 90),  // photo, not video
     );
     return UploadResult.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
@@ -282,6 +283,7 @@ class ApiClient {
       fileField: 'images',
       bytes: bytes,
       filename: filename,
+      timeout: const Duration(seconds: 90),  // photo, not video
     );
     return UploadResult.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
@@ -300,6 +302,7 @@ class ApiClient {
       fields: fields,
       fileField: 'images',
       file: imageFile,
+      timeout: const Duration(seconds: 90),  // photo, not video
     );
     return UploadResult.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
@@ -319,6 +322,7 @@ class ApiClient {
       fileField: 'images',
       bytes: bytes,
       filename: filename,
+      timeout: const Duration(seconds: 90),  // photo, not video
     );
     return UploadResult.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
@@ -384,9 +388,11 @@ class ApiClient {
     required Map<String, String> fields,
     required String fileField,
     required File file,
+    Duration? timeout,
   }) async {
     return _uploadMultipartBytes(
       url: url,
+      timeout: timeout,
       fields: fields,
       fileField: fileField,
       bytes: await file.readAsBytes(),
@@ -402,16 +408,17 @@ class ApiClient {
     required String fileField,
     required Uint8List bytes,
     required String filename,
+    Duration? timeout,
   }) async {
     final req = http.MultipartRequest('POST', Uri.parse(url));
     req.headers.addAll(_authHeaders);
     req.fields.addAll(fields);
     req.files.add(http.MultipartFile.fromBytes(fileField, bytes, filename: filename));
-    // 10 min: long enough for a 200MB phone video over cellular to upload
-    // AND the server to ffmpeg-extract + Hough-detect + classify + the
-    // relay's httpx round trip. Matches nginx proxy_send/read_timeout
-    // and rfcai-relay httpx client (both 600s).
-    final streamed = await req.send().timeout(const Duration(seconds: 600));
+    // Caller picks the timeout. Photo uploads need ~90s (slow cellular
+    // for a 5MB JPEG); video uploads need ~600s (200MB phone clip +
+    // server-side ffmpeg/extract). Default = 600s for back-compat.
+    final t = timeout ?? const Duration(seconds: 600);
+    final streamed = await req.send().timeout(t);
     final resp = await http.Response.fromStream(streamed);
     if (resp.statusCode == 401) throw const UnauthorizedException();
     if (resp.statusCode != 200) {
