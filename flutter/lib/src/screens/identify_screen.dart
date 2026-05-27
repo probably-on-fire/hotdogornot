@@ -283,43 +283,6 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     }
   }
 
-  /// One-tap burst: switch to video mode, record a fixed ~1.5s clip
-  /// automatically, then upload to /predict-video for multi-frame
-  /// consensus. Used by the "Try burst" button on the low-confidence
-  /// result card. The recording duration is deliberately short — the
-  /// server samples at 3 fps so 1.5s = 4-5 frames of consensus, enough
-  /// to smooth single-frame variance without making the user wait.
-  Future<void> _autoBurst() async {
-    final cam = _cam;
-    if (cam == null || !cam.value.isInitialized) {
-      setState(() => _error = 'Camera not available for video burst on this platform.');
-      return;
-    }
-    if (_recording || _busy) return;
-    setState(() {
-      _mode = _Mode.video;
-      _result = null;
-      _error = null;
-    });
-    try {
-      await cam.startVideoRecording();
-      setState(() => _recording = true);
-      HapticFeedback.mediumImpact();
-      await Future.delayed(const Duration(milliseconds: 1500));
-      if (!mounted) return;
-      final clip = await cam.stopVideoRecording();
-      setState(() => _recording = false);
-      HapticFeedback.lightImpact();
-      await _classifyVideo(File(clip.path));
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _recording = false;
-        _error = 'Burst failed: ${_friendlyError(e)}';
-      });
-    }
-  }
-
   Future<void> _classifyPhotoFile(File f) async {
     setState(() {
       _busy = true;
@@ -659,14 +622,11 @@ class _IdentifyScreenState extends State<IdentifyScreen>
                 ),
               ),
             ),
-          // Mode toggle (photo / video) — hidden while showing a result.
-          if (_result == null && _error == null)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 12,
-              left: 0,
-              right: 0,
-              child: Center(child: _buildModeToggle()),
-            ),
+          // Mode toggle removed 2026-05-27 — photos-only feels good enough
+          // for the current accuracy and avoids the camera-state churn that
+          // came with the auto-burst path. _buildModeToggle + _toggleRecording
+          // + _autoBurst code remains available in git history if we want
+          // to restore video capture later.
           // Bottom shutter (or back-to-live when result is showing).
           Positioned(
             left: 0,
@@ -770,54 +730,6 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     }
     return const Center(
       child: CircularProgressIndicator(color: Colors.white),
-    );
-  }
-
-  Widget _buildModeToggle() {
-    Widget pill(_Mode m, IconData icon, String label) {
-      final selected = _mode == m;
-      return GestureDetector(
-        onTap: _busy || _recording
-            ? null
-            : () => setState(() => _mode = m),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 16,
-                  color: selected ? Colors.black : Colors.white),
-              const SizedBox(width: 6),
-              Text(label,
-                  style: TextStyle(
-                    color: selected ? Colors.black : Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  )),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.55),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          pill(_Mode.photo, Icons.photo_camera, 'Photo'),
-          const SizedBox(width: 4),
-          pill(_Mode.video, Icons.videocam, 'Video'),
-        ],
-      ),
     );
   }
 
@@ -956,28 +868,21 @@ class _IdentifyScreenState extends State<IdentifyScreen>
           && sortedAll.any((p) => p.confidence >= _kMinAcceptedConfidence);
       final String hint;
       final String subhint;
-      final bool offerVideoBurst;
       if (sortedAll.isEmpty) {
         hint = 'No connector detected';
         subhint = 'Hold the connector face-on, center it inside the ring, '
                   'and fill the frame.';
-        offerVideoBurst = false;
       } else if (filteredOutTinyHigh) {
         hint = 'Too far away';
         subhint = 'Move closer so the connector face fills the ring.';
-        offerVideoBurst = false;
       } else {
         // Got a detection but below the abstain threshold. Show the
-        // best guess as a hint without confidently asserting it, and
-        // offer the video burst path for tough lookalike cases.
+        // best guess as a hint without confidently asserting it.
         final best = sortedAll.first;
         hint = 'Not sure — best guess was '
                '${best.className} at '
                '${(best.confidence * 100).toStringAsFixed(0)}%';
-        subhint = 'Try a slightly different angle or get closer. '
-                  'For tough fine-pitch cases (2.4 / 2.92 / 3.5 mm), the '
-                  'video burst (◉) is more accurate than a single photo.';
-        offerVideoBurst = true;
+        subhint = 'Try a slightly different angle or get closer.';
       }
       return _ResultCard(
         child: Padding(
@@ -996,40 +901,16 @@ class _IdentifyScreenState extends State<IdentifyScreen>
                 style: const TextStyle(fontSize: 13, color: Colors.white70),
               ),
               const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (offerVideoBurst) ...[
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        // _autoBurst handles reset-to-live + start + 1.5s
-                        // record + stop + send to /predict-video. No
-                        // second tap required.
-                        _autoBurst();
-                      },
-                      icon: const Icon(Icons.videocam, size: 18),
-                      label: const Text('Try burst'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white54),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 10),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                  ],
-                  ElevatedButton.icon(
-                    onPressed: _resetToLive,
-                    icon: const Icon(Icons.refresh, size: 18),
-                    label: const Text('Retake'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 10),
-                    ),
-                  ),
-                ],
+              ElevatedButton.icon(
+                onPressed: _resetToLive,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retake'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 10),
+                ),
               ),
               const SizedBox(height: 4),
               const Text(
