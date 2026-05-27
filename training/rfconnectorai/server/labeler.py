@@ -961,8 +961,9 @@ def create_router(classifier=None) -> APIRouter:
         request.session["username"] = user.username
         return RedirectResponse(next, status_code=303)
 
-    @r.post("/logout")
+    @r.api_route("/logout", methods=["GET", "POST"])
     def logout(request: Request):
+        # GET allowed so a plain link/bookmark works; POST kept for forms.
         from fastapi.responses import RedirectResponse
         request.session.clear()
         return RedirectResponse("/rfcai/labeler/", status_code=303)
