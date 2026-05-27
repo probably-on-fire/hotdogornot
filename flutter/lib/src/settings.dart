@@ -35,7 +35,7 @@ class Settings {
   static Future<Settings> load() async {
     final prefs = await SharedPreferences.getInstance();
     return Settings._(
-      relayBaseUrl: prefs.getString(_kRelay) ?? _defaultRelay,
+      relayBaseUrl: _normalizeRelay(prefs.getString(_kRelay)),
       deviceToken: prefs.getString(_kToken) ?? _defaultToken,
       devMode: prefs.getBool(_kDevMode) ?? false,
       onDeviceMode: prefs.getBool(_kOnDevice) ?? false,
@@ -44,10 +44,27 @@ class Settings {
 
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
+    // Normalize before persisting so a bad value never round-trips.
+    relayBaseUrl = _normalizeRelay(relayBaseUrl);
     await prefs.setString(_kRelay, relayBaseUrl);
     await prefs.setString(_kToken, deviceToken);
     await prefs.setBool(_kDevMode, devMode);
     await prefs.setBool(_kOnDevice, onDeviceMode);
+  }
+
+  /// Guard the relay URL: empty / whitespace-only / no scheme falls back
+  /// to the default so the next HTTP request doesn't crash with
+  /// `ArgumentError: No host specified in URI /predict`.
+  static String _normalizeRelay(String? raw) {
+    final s = (raw ?? '').trim();
+    if (s.isEmpty) return _defaultRelay;
+    // Must parse + have a scheme + host. Reject anything weird (e.g.
+    // 'aired.com', 'http://' alone, just '/' etc.).
+    Uri? u;
+    try { u = Uri.parse(s); } catch (_) { return _defaultRelay; }
+    if (!(u.hasScheme && u.host.isNotEmpty)) return _defaultRelay;
+    // Strip any trailing slash so '$relayBaseUrl/predict' doesn't double.
+    return s.endsWith('/') ? s.substring(0, s.length - 1) : s;
   }
 
   String get predictUrl => '$relayBaseUrl/predict';

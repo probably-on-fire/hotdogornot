@@ -77,6 +77,8 @@ class _IdentifyScreenState extends State<IdentifyScreen>
 
   _Mode _mode = _Mode.photo;
   bool _busy = false;       // capture / classify in flight
+  bool _shutterBusy = false; // re-entrancy guard ONLY around takePicture; clears
+                             // before _busy flips, so double-taps are debounced
   bool _recording = false;  // video record in progress
   String? _error;
   PredictResponse? _result;
@@ -125,8 +127,12 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final cam = _cam;
-    if (state == AppLifecycleState.inactive
-        || state == AppLifecycleState.paused) {
+    // Only tear down on hard backgrounding. On iOS `inactive` fires for any
+    // transient interruption (control-center swipe, incoming call banner,
+    // screenshot side-button) and disposing here causes a 300-800ms re-init
+    // flicker every time the user pulls down notifications.
+    if (state == AppLifecycleState.paused
+        || state == AppLifecycleState.detached) {
       // Tear down the controller and forget it. Leaving _cam pointing
       // at a disposed controller would cause _buildPreview to call
       // .value.isInitialized on a dead object on the next frame.
@@ -218,7 +224,7 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   }
 
   Future<void> _onShutter() async {
-    if (_busy) return;
+    if (_busy || _shutterBusy) return;
     HapticFeedback.lightImpact();
     if (_mode == _Mode.video) {
       await _toggleRecording();
@@ -230,13 +236,21 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   Future<void> _capturePhoto() async {
     final cam = _cam;
     if (cam != null && cam.value.isInitialized) {
+      // Re-entrancy guard: a fast double-tap on the shutter would
+      // otherwise fire two `takePicture()` calls in flight at once and
+      // the camera plugin throws "Previous capture has not returned".
+      // _busy doesn't help here — it only flips inside the classify
+      // path, after the await chain below has already started.
+      setState(() => _shutterBusy = true);
       try {
         final shot = await cam.takePicture();
         final raw = await File(shot.path).readAsBytes();
         final cropped = _cropToReticleBytes(raw);
         await _classifyPhotoBytes(cropped, 'reticle_crop.jpg');
       } catch (e) {
-        setState(() => _error = 'Capture failed: $e');
+        if (mounted) setState(() => _error = 'Capture failed: ${_friendlyError(e)}');
+      } finally {
+        if (mounted) setState(() => _shutterBusy = false);
       }
       return;
     }
@@ -443,17 +457,20 @@ class _IdentifyScreenState extends State<IdentifyScreen>
         } else {
           await api.uploadTrainingPhotoBytes(bytes!, cls);
         }
+        // Dedup: a user mashing Save 5x/sec would otherwise queue 5
+        // overlapping snackbars. Always replace the current one.
+        messenger?.removeCurrentSnackBar();
         messenger?.showSnackBar(SnackBar(
           content: Text('✓ Added $cls to training'),
           duration: const Duration(seconds: 2),
           behavior: SnackBarBehavior.floating,
         ));
       } catch (e) {
-        final s = e.toString();
-        final friendly = (s.contains('401') || s.contains('not signed in') ||
-                          s.contains('Unauthorized'))
-            ? 'Sign in on the Contribute tab to save training photos.'
-            : 'Save failed: ${_friendlyError(e)}';
+        // Uploads are anonymous now (server change 2026-05-27); 401 here
+        // would mean an unrelated route. Treat all failures with the
+        // same _friendlyError surface.
+        final friendly = 'Save failed: ${_friendlyError(e)}';
+        messenger?.removeCurrentSnackBar();
         messenger?.showSnackBar(SnackBar(
           content: Text(friendly),
           duration: const Duration(seconds: 4),
@@ -484,20 +501,30 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   /// Map raw exception/_ApiError chatter to short user-readable messages.
   String _friendlyError(Object e) {
     final s = e.toString();
+    if (s.contains('cameraPermission') || s.contains('CameraPermission')) {
+      return 'Camera access is off — enable it in Settings.';
+    }
+    if (s.contains('Previous capture has not returned')
+        || s.contains('captureFailed')) {
+      return 'Camera busy — wait a beat then try again.';
+    }
+    if (s.contains('No host specified')) {
+      return 'Relay URL is empty — fix it on the About screen.';
+    }
     if (s.contains('SocketException') || s.contains('Failed host lookup')) {
-      return 'No connection — check Wi-Fi and the relay URL in Settings.';
+      return 'No connection — check Wi-Fi.';
     }
     if (s.contains('TimeoutException') || s.contains('timed out')) {
-      return 'Server took too long — try again or pick a smaller image.';
+      return 'Upload or server slow — try again, or move closer to Wi-Fi.';
     }
     if (s.contains('HandshakeException') || s.contains('CERTIFICATE')) {
-      return 'TLS handshake failed — relay URL may be wrong.';
+      return 'TLS handshake failed — check the connection.';
     }
     if (s.contains('ApiError 401')) {
-      return 'Auth failed — check device token in Settings.';
+      return 'Sign in expired — open the Contribute tab to sign in again.';
     }
     if (s.contains('ApiError 403')) {
-      return 'Forbidden — token may have been rotated.';
+      return 'Forbidden — your account may have been disabled.';
     }
     if (s.contains('ApiError 413')) {
       return 'Image too large for the server.';
@@ -505,8 +532,11 @@ class _IdentifyScreenState extends State<IdentifyScreen>
     if (s.contains('ApiError 422')) {
       return 'Server rejected the image format.';
     }
+    if (s.contains('ApiError 502') || s.contains('ApiError 504')) {
+      return 'Server is unreachable right now — try again.';
+    }
     if (s.contains('ApiError 503')) {
-      return 'Classifier not loaded yet on the server — wait and retry.';
+      return 'Classifier warming up — wait ~30s and retry.';
     }
     if (s.contains('ApiError')) {
       return 'Server error — try again.';
@@ -825,23 +855,42 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   Widget _buildResultPanel() {
     if (_error != null) {
       return _ResultCard(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Icon(Icons.error_outline, color: Colors.redAccent),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Identification failed',
-                      style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text(_error!,
-                      style: const TextStyle(
-                          color: Colors.white70, fontSize: 13)),
-                ],
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.error_outline, color: Colors.redAccent),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Identification failed',
+                          style: TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 4),
+                      Text(_error!,
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 13)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Center(
+              child: ElevatedButton.icon(
+                onPressed: _resetToLive,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retake'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 10),
+                ),
               ),
             ),
           ],

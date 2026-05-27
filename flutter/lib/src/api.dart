@@ -209,7 +209,10 @@ class ApiClient {
     final req = http.MultipartRequest('POST', Uri.parse(settings.predictUrl));
     req.headers['X-Device-Token'] = settings.deviceToken;
     req.files.add(http.MultipartFile.fromBytes('image', bytes, filename: filename));
-    final streamed = await req.send().timeout(const Duration(seconds: 30));
+    // 60s: slow-cellular ~3-4MB JPEG upload can eat 20s+ before the
+    // classifier even starts; 30s surfaced as "server too long" when the
+    // real bottleneck was the user's uplink.
+    final streamed = await req.send().timeout(const Duration(seconds: 60));
     final resp = await http.Response.fromStream(streamed);
     if (resp.statusCode != 200) {
       throw _ApiError(resp.statusCode, resp.body);

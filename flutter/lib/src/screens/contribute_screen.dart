@@ -190,8 +190,12 @@ class _ContributeScreenState extends State<ContributeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final cam = _cam;
-    if (state == AppLifecycleState.inactive
-        || state == AppLifecycleState.paused) {
+    // Only tear down on real backgrounding. iOS fires `inactive` for
+    // transient interruptions (control center swipe, incoming call
+    // banner) — disposing there caused a 300-800ms re-init flicker
+    // every time the user pulled down notifications.
+    if (state == AppLifecycleState.paused
+        || state == AppLifecycleState.detached) {
       if (cam != null) {
         cam.dispose();
         if (mounted) {
@@ -233,20 +237,17 @@ class _ContributeScreenState extends State<ContributeScreen>
       final controller = CameraController(
         rear,
         ResolutionPreset.max,
-        // iOS AVCaptureMovieFileOutput fails to write video when audio
-        // is disabled; the audio track is ignored server-side.
-        // Audio off so iOS doesn't show a mic permission prompt — the
-        // app only needs visuals to identify connectors. The earlier
-        // record-fails bug was actually a permission race, not an audio
-        // requirement; prepareForVideoRecording() below is the real fix.
+        // Audio off so iOS doesn't trigger a mic-permission prompt — the
+        // app only needs visuals to identify connectors. We deliberately
+        // do NOT declare NSMicrophoneUsageDescription in Info.plist.
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
       await controller.initialize();
-      // Pre-configure the AVCaptureSession for video so iOS prompts for
-      // mic permission up front; otherwise the first Record tap throws
-      // because the permission dialog races with startVideoRecording().
-      try { await controller.prepareForVideoRecording(); } catch (_) {}
+      // prepareForVideoRecording() removed 2026-05-27: it initializes
+      // AVAudioSession on iOS which can trigger the mic-permission UI
+      // even with enableAudio:false on some plugin versions. Not needed —
+      // startVideoRecording succeeds without prep when audio is off.
       try { await controller.setFocusMode(FocusMode.auto); } catch (_) {}
       double zMin = 1.0, zMax = 1.0;
       try {
