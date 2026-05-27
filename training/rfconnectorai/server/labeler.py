@@ -1254,7 +1254,10 @@ def create_router(classifier=None) -> APIRouter:
         cls: str = Form(...),
         session: str = Form(""),
         images: list[UploadFile] = File(...),
-        user=Depends(require_admin),
+        # NOTE: anonymous uploads allowed. We're a small closed group right
+        # now and want the Flutter Identify-screen 'Confirm' flow to work
+        # without a sign-in step. Re-add `user=Depends(require_admin)` here
+        # if the project opens up and spam becomes a concern.
     ):
         """Drop phone photos directly into the training set for a class.
 
@@ -1296,7 +1299,7 @@ def create_router(classifier=None) -> APIRouter:
         cls: str = Form(...),
         session: str = Form(""),
         images: list[UploadFile] = File(...),
-        user=Depends(require_admin),
+        # Anonymous uploads allowed; see /upload-train for context.
     ):
         if cls not in CANONICAL_CLASSES:
             raise HTTPException(400, f"unknown class {cls!r}")
@@ -1341,7 +1344,7 @@ def create_router(classifier=None) -> APIRouter:
         # background task finishes.
         with_predict: bool = Form(False),
         file: UploadFile = File(...),
-        user=Depends(require_admin),
+        # Anonymous uploads allowed; see /upload-train for context.
     ):
         if family not in CANONICAL_FAMILIES:
             raise HTTPException(400, f"unknown family {family!r}")
