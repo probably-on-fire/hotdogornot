@@ -41,7 +41,7 @@
     a { color: var(--accent); text-decoration: none; }
     a:hover { color: var(--accent-strong); }
 
-    /* ── Header ───────────────────────────────────────────────── */
+    /* ── Header (always visible) ──────────────────────────────── */
     header {
       position: sticky; top: 0; z-index: 100;
       padding: 0 24px;
@@ -90,14 +90,52 @@
       padding: 0 24px;
     }
 
-    /* ── Hero ─────────────────────────────────────────────────── */
+    /* ── Public (logged-out) view ─────────────────────────────── */
+    .public-view {
+      min-height: calc(100vh - 52px);
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 64px 0;
+      gap: 0;
+    }
+    .public-mark {
+      width: 160px; height: 160px;
+      margin-bottom: 36px;
+      filter: drop-shadow(0 8px 32px rgba(0, 0, 0, 0.5));
+    }
+    .public-links {
+      display: flex; gap: 12px; flex-wrap: wrap; justify-content: center;
+    }
+    .pub-link {
+      display: inline-flex; align-items: center;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 15px; font-weight: 600;
+      text-decoration: none;
+      transition: background 120ms, border-color 120ms, transform 80ms;
+    }
+    .pub-link.primary {
+      background: var(--accent); color: #fff;
+    }
+    .pub-link.primary:hover {
+      background: var(--accent-strong); color: #fff; transform: translateY(-1px);
+    }
+    .pub-link.secondary {
+      background: var(--panel); color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .pub-link.secondary:hover {
+      background: var(--panel-2); border-color: var(--border-strong);
+      transform: translateY(-1px);
+    }
+
+    /* ── Hero (private) ───────────────────────────────────────── */
     .hero {
       padding: 80px 0 56px;
       display: flex; flex-direction: column; align-items: center;
       text-align: center;
-      gap: 0;
     }
-    /* Large brand mark in hero — actual AI Red logo */
     .hero-mark {
       width: 120px; height: 120px;
       margin-bottom: 28px;
@@ -153,9 +191,7 @@
     }
 
     /* ── Stats banner ─────────────────────────────────────────── */
-    .stats-section {
-      padding: 0 0 56px;
-    }
+    .stats-section { padding: 0 0 56px; }
     .stats-banner {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -166,35 +202,23 @@
       display: flex; align-items: center; justify-content: center;
       box-shadow: var(--shadow-lg);
     }
-    /* Loading state */
     .stats-banner[data-loading="true"] .skeleton {
       display: inline-block;
       color: var(--subtle);
       font-size: 14px;
     }
-    /* Loaded state */
     .stat-num {
       font-size: 28px; font-weight: 800;
       color: var(--accent);
       letter-spacing: -0.5px;
       margin: 0 6px;
     }
-    .stat-label {
-      font-size: 15px;
-      color: var(--muted);
-      margin: 0 4px;
-    }
-    /* Fallback link */
-    .stats-banner a {
-      font-size: 14px;
-      color: var(--accent);
-    }
+    .stat-label { font-size: 15px; color: var(--muted); margin: 0 4px; }
+    .stats-banner a { font-size: 14px; color: var(--accent); }
     .stats-banner a:hover { color: var(--accent-strong); }
 
     /* ── About ────────────────────────────────────────────────── */
-    .about-section {
-      padding: 0 0 64px;
-    }
+    .about-section { padding: 0 0 64px; }
     .section-label {
       font-size: 11px; font-weight: 700;
       text-transform: uppercase; letter-spacing: 0.7px;
@@ -216,7 +240,6 @@
     }
     .about-section p:last-child { margin-bottom: 0; }
 
-    /* ── Divider ──────────────────────────────────────────────── */
     hr.divider {
       border: none;
       border-top: 1px solid var(--border);
@@ -237,35 +260,32 @@
       gap: 16px;
       flex-wrap: wrap;
     }
-    .footer-links {
-      display: flex; gap: 20px; flex-wrap: wrap;
-    }
+    .footer-links { display: flex; gap: 20px; flex-wrap: wrap; }
     .footer-links a {
       font-size: 12px; color: var(--subtle);
       text-decoration: none;
       transition: color 100ms;
     }
     .footer-links a:hover { color: var(--muted); }
-    .footer-wordmark {
-      font-size: 12px; color: var(--subtle);
-      white-space: nowrap;
-    }
+    .footer-wordmark { font-size: 12px; color: var(--subtle); white-space: nowrap; }
     .footer-wordmark strong { color: var(--muted); }
 
-    /* ── Responsive ───────────────────────────────────────────── */
     @media (max-width: 480px) {
+      .public-mark { width: 96px; height: 96px; margin-bottom: 28px; }
       .hero { padding: 52px 0 40px; }
       .hero-mark { width: 60px; height: 60px; border-radius: 16px; }
       .stats-banner { padding: 20px; }
       .stat-num { font-size: 22px; }
     }
+
+    /* Auth-gated visibility. Defaults: show public, hide private.
+       JS flips these once /rfcai/labeler/auth/whoami responds. */
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
-  <!-- Subtle background glow — purely decorative -->
   <div class="page-glow" aria-hidden="true"></div>
 
-  <!-- ── Header ──────────────────────────────────────────────── -->
   <header>
     <img class="brand-mark" src="/logo-transparent.webp" alt="AI Red logo"
          width="28" height="28">
@@ -273,96 +293,117 @@
     <a href="/rfcai/labeler/login" class="header-signin">Sign in</a>
   </header>
 
-  <div class="page-content">
-
-    <!-- ── Hero ──────────────────────────────────────────────── -->
-    <section class="hero">
-      <img class="hero-mark" src="/logo-transparent.webp" alt="AI Red logo"
-           width="120" height="120">
-
-      <p class="hero-eyebrow">Open project</p>
-      <h1 class="hero-headline">RF Connector AI</h1>
-      <p class="hero-tagline">
-        Identify RF connectors from your phone camera.
-        Open dataset. On-device classifier. Mobile-first.
-      </p>
-      <div class="hero-ctas">
-        <a href="/rfcai/labeler/" class="cta-primary">Explore Training Data</a>
-        <a href="/rfcai/labeler/login" class="cta-secondary">Sign in to Contribute</a>
-      </div>
-    </section>
-
-    <!-- ── Live stats banner ──────────────────────────────────── -->
-    <section class="stats-section">
-      <div class="stats-banner" id="stats" data-loading="true">
-        <span class="skeleton">Loading project stats…</span>
-      </div>
-    </section>
-
-    <hr class="divider">
-
-    <!-- ── About ─────────────────────────────────────────────── -->
-    <section class="about-section">
-      <p class="section-label">About the project</p>
-      <h2>What is RF Connector AI?</h2>
-      <p>
-        RF Connector AI (RFCAI) is an open training-data project for
-        fine-grained visual classification of radio-frequency connectors — the
-        SMA, N-type, BNC, TNC, SMP, and other small hardware pieces that live on
-        the end of RF cables. The goal is a lightweight, on-device model that
-        runs in real time on a smartphone camera, so technicians in the field can
-        identify an unfamiliar connector in seconds.
-      </p>
-      <p>
-        The dataset is collected via a mobile-first Flutter app and a web-based
-        labeling tool. Anyone with access can contribute images, review labels, and
-        trigger training runs. The current on-device classifier is exported to
-        ONNX and runs via Unity Sentis on iOS and Android. A public Streamlit demo
-        is available at
-        <a href="/demo/">/demo/</a>.
-        To contribute images or help review labels,
-        <a href="/rfcai/labeler/login">sign in</a> or get in touch with
-        <a href="mailto:chris@aired.com">chris@aired.com</a>.
-      </p>
-    </section>
-
-  </div><!-- /.page-content -->
-
-  <!-- ── Footer ──────────────────────────────────────────────── -->
-  <footer>
-    <div class="footer-inner">
-      <nav class="footer-links" aria-label="Footer links">
-        <a href="/rfcai/labeler/">Labeler</a>
-        <a href="/rfcai/labeler/login">Sign in</a>
-        <a href="/screen.html">Screen sharing</a>
-        <a href="/demo/">Streamlit demo</a>
-      </nav>
-      <span class="footer-wordmark">Powered by <strong>aired.com</strong></span>
+  <!-- ── Public (logged-out) view: logo + screenshare + sign-in ─ -->
+  <main id="public-view" class="public-view">
+    <img class="public-mark" src="/logo-transparent.webp"
+         alt="AI Red logo" width="160" height="160">
+    <div class="public-links">
+      <a href="/demo/" class="pub-link primary">Screen sharing</a>
+      <a href="/rfcai/labeler/login" class="pub-link secondary">Sign in</a>
     </div>
-  </footer>
+  </main>
 
-  <!-- ── Live stats fetch ───────────────────────────────────── -->
+  <!-- ── Private (logged-in) view: hero + stats + about ───────── -->
+  <main id="private-view" hidden>
+    <div class="page-content">
+      <section class="hero">
+        <img class="hero-mark" src="/logo-transparent.webp" alt="AI Red logo"
+             width="120" height="120">
+        <p class="hero-eyebrow">Open project</p>
+        <h1 class="hero-headline">RF Connector AI</h1>
+        <p class="hero-tagline">
+          Identify RF connectors from your phone camera.
+          Open dataset. On-device classifier. Mobile-first.
+        </p>
+        <div class="hero-ctas">
+          <a href="/rfcai/labeler/" class="cta-primary">Explore Training Data</a>
+          <a href="/rfcai/labeler/login" class="cta-secondary">Sign in to Contribute</a>
+        </div>
+      </section>
+
+      <section class="stats-section">
+        <div class="stats-banner" id="stats" data-loading="true">
+          <span class="skeleton">Loading project stats…</span>
+        </div>
+      </section>
+
+      <hr class="divider">
+
+      <section class="about-section">
+        <p class="section-label">About the project</p>
+        <h2>What is RF Connector AI?</h2>
+        <p>
+          RF Connector AI (RFCAI) is an open training-data project for
+          fine-grained visual classification of radio-frequency connectors — the
+          SMA, N-type, BNC, TNC, SMP, and other small hardware pieces that live on
+          the end of RF cables. The goal is a lightweight, on-device model that
+          runs in real time on a smartphone camera, so technicians in the field can
+          identify an unfamiliar connector in seconds.
+        </p>
+        <p>
+          The dataset is collected via a mobile-first Flutter app and a web-based
+          labeling tool. Anyone with access can contribute images, review labels, and
+          trigger training runs. The current on-device classifier is exported to
+          ONNX and runs via Unity Sentis on iOS and Android. A public Streamlit demo
+          is available at
+          <a href="/demo/">/demo/</a>.
+          To contribute images or help review labels,
+          <a href="/rfcai/labeler/login">sign in</a> or get in touch with
+          <a href="mailto:chris@aired.com">chris@aired.com</a>.
+        </p>
+      </section>
+    </div>
+
+    <footer>
+      <div class="footer-inner">
+        <nav class="footer-links" aria-label="Footer links">
+          <a href="/rfcai/labeler/">Labeler</a>
+          <a href="/rfcai/labeler/login">Sign in</a>
+          <a href="/screen.html">Screen sharing</a>
+          <a href="/demo/">Streamlit demo</a>
+        </nav>
+        <span class="footer-wordmark">Powered by <strong>aired.com</strong></span>
+      </div>
+    </footer>
+  </main>
+
   <script>
+    // Auth gate: ask the labeler whether the caller has a valid session.
+    // 200 -> reveal the rich landing; 401/anything else -> stay on the
+    // minimal public view. Same-origin fetch carries the session cookie.
     (function () {
-      var el = document.getElementById('stats');
-      fetch('/rfcai/labeler/stats')
-        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-        .then(function (data) {
-          var train = (data && data.train) ? data.train : {};
-          var total = Object.values(train).reduce(function (a, b) { return a + b; }, 0);
-          var nClasses = Object.values(train).filter(function (c) { return c > 0; }).length;
-          el.dataset.loading = 'false';
-          el.innerHTML =
-            '<span class="stat-num">' + total.toLocaleString() + '</span>' +
-            '<span class="stat-label">training samples across</span>' +
-            '<span class="stat-num">' + nClasses + '</span>' +
-            '<span class="stat-label">connector classes</span>';
-        })
-        .catch(function () {
-          el.dataset.loading = 'false';
-          el.innerHTML =
-            '<a href="/rfcai/labeler/">Open the labeler to see stats →</a>';
-        });
+      var publicView = document.getElementById('public-view');
+      var privateView = document.getElementById('private-view');
+      function showPrivate() {
+        publicView.hidden = true;
+        privateView.hidden = false;
+        loadStats();
+      }
+      function loadStats() {
+        var el = document.getElementById('stats');
+        if (!el) return;
+        fetch('/rfcai/labeler/stats')
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+          .then(function (data) {
+            var train = (data && data.train) ? data.train : {};
+            var total = Object.values(train).reduce(function (a, b) { return a + b; }, 0);
+            var nClasses = Object.values(train).filter(function (c) { return c > 0; }).length;
+            el.dataset.loading = 'false';
+            el.innerHTML =
+              '<span class="stat-num">' + total.toLocaleString() + '</span>' +
+              '<span class="stat-label">training samples across</span>' +
+              '<span class="stat-num">' + nClasses + '</span>' +
+              '<span class="stat-label">connector classes</span>';
+          })
+          .catch(function () {
+            el.dataset.loading = 'false';
+            el.innerHTML =
+              '<a href="/rfcai/labeler/">Open the labeler to see stats →</a>';
+          });
+      }
+      fetch('/rfcai/labeler/auth/whoami', { credentials: 'same-origin' })
+        .then(function (r) { if (r.ok) showPrivate(); })
+        .catch(function () { /* stay on public view */ });
     })();
   </script>
 </body>
