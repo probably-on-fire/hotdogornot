@@ -501,15 +501,28 @@ class _IdentifyScreenState extends State<IdentifyScreen>
   /// Map raw exception/_ApiError chatter to short user-readable messages.
   String _friendlyError(Object e) {
     final s = e.toString();
-    if (s.contains('cameraPermission') || s.contains('CameraPermission')) {
+    // camera 0.11+ renamed the permission-denied code from
+    // `cameraPermission` -> `CameraAccessDenied` (plus a *WithoutPrompt
+    // variant). Match both so the friendly copy fires on either plugin
+    // version.
+    if (s.contains('CameraAccessDenied')
+        || s.contains('cameraPermission')
+        || s.contains('CameraPermission')) {
       return 'Camera access is off — enable it in Settings.';
     }
-    if (s.contains('Previous capture has not returned')
-        || s.contains('captureFailed')) {
+    if (s.contains('Previous capture has not returned')) {
       return 'Camera busy — wait a beat then try again.';
     }
     if (s.contains('No host specified')) {
       return 'Relay URL is empty — fix it on the About screen.';
+    }
+    // The labeler upload routes used to raise UnauthorizedException with
+    // toString() == 'not signed in'. Predict + uploads are anonymous now
+    // (server change 2026-05-27); any 'not signed in' left in the wild
+    // means a stats / undo / admin route, which the Contribute tab gates.
+    if (s.contains('not signed in')
+        || s.contains('UnauthorizedException')) {
+      return 'Sign in on the Contribute tab to access that feature.';
     }
     if (s.contains('SocketException') || s.contains('Failed host lookup')) {
       return 'No connection — check Wi-Fi.';
@@ -521,7 +534,9 @@ class _IdentifyScreenState extends State<IdentifyScreen>
       return 'TLS handshake failed — check the connection.';
     }
     if (s.contains('ApiError 401')) {
-      return 'Sign in expired — open the Contribute tab to sign in again.';
+      // /predict is X-Device-Token auth; 401 here means token is wrong,
+      // not user-fixable. Don't blame the user.
+      return 'Server rejected device token — please report.';
     }
     if (s.contains('ApiError 403')) {
       return 'Forbidden — your account may have been disabled.';

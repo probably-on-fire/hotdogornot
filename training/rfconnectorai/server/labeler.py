@@ -1391,7 +1391,8 @@ def create_router(classifier=None) -> APIRouter:
             "video_filename": saved_video.name,
             "original_filename": original_filename,
             "uploaded_at": uploaded_at,
-            "uploaded_by": getattr(user, "username", None),
+            # Anonymous since 2026-05-27 (eab3961). Was getattr(user, "username", None).
+            "uploaded_by": None,
             "family": family,
             "gender": gender,
             "target_class": target_cls,

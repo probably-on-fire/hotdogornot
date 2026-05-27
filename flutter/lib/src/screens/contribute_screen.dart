@@ -118,8 +118,6 @@ class _ContributeScreenState extends State<ContributeScreen>
   bool _toastIsError = false;
   Timer? _toastTimer;
 
-  bool get _isSignedIn => widget.auth.isSignedIn;
-
   @override
   void initState() {
     super.initState();
@@ -129,7 +127,8 @@ class _ContributeScreenState extends State<ContributeScreen>
     // detect auth flips via widget diffing. Subscribe to the
     // ChangeNotifier directly instead.
     widget.auth.addListener(_onAuthChanged);
-    if (widget.isActive && _isSignedIn) _initCamera();
+    // Camera works anonymously now; no _isSignedIn gate.
+    if (widget.isActive) _initCamera();
   }
 
   @override
@@ -146,7 +145,7 @@ class _ContributeScreenState extends State<ContributeScreen>
         _cam = null;
       }
     } else if (!oldWidget.isActive && widget.isActive) {
-      if (_cam == null && !_camInitInFlight && _isSignedIn) _initCamera();
+      if (_cam == null && !_camInitInFlight) _initCamera();
     }
   }
 
@@ -204,7 +203,7 @@ class _ContributeScreenState extends State<ContributeScreen>
           _cam = null;
         }
       }
-    } else if (state == AppLifecycleState.resumed && widget.isActive && _isSignedIn) {
+    } else if (state == AppLifecycleState.resumed && widget.isActive) {
       if (_cam == null && !_camInitInFlight) _initCamera();
     }
   }
@@ -621,9 +620,6 @@ class _ContributeScreenState extends State<ContributeScreen>
     }
   }
 
-  Future<void> _runOnDeviceCheck(File f, String cls) =>
-      _runOnDeviceCheckBytes(null, cls, file: f);
-
   Future<void> _runOnDeviceCheckBytes(Uint8List? bytes, String cls,
       {File? file}) async {
     // Skip if a previous check is still running. Rapid-fire shutter taps
@@ -667,6 +663,27 @@ class _ContributeScreenState extends State<ContributeScreen>
     }
   }
 
+  void _showSignInSheet() {
+    // Pops the same sign-in card as a modal sheet. After successful
+    // sign-in the AuthService notifier fires `_onAuthChanged` which
+    // rebuilds the top bar (now showing the user pill). The sheet
+    // dismisses itself via Navigator.pop inside the card on success.
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(ctx).viewInsets.bottom,
+        ),
+        child: _SignInCard(
+          auth: widget.auth,
+          onSignedIn: () => Navigator.of(ctx).maybePop(),
+        ),
+      ),
+    );
+  }
+
   void _showSignOutDialog() {
     showDialog<void>(
       context: context,
@@ -700,10 +717,12 @@ class _ContributeScreenState extends State<ContributeScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (!_isSignedIn) {
-      return _SignInCard(auth: widget.auth);
-    }
-
+    // 2026-05-27: uploads on the server are now anonymous, so the
+    // Contribute camera no longer requires a sign-in. Undo + per-class
+    // stats still hit auth-gated routes; those are surfaced as friendly
+    // errors when tapped without auth, and a "Sign in" pill in the top
+    // bar opens the sign-in card as a modal sheet when the user wants
+    // to enable them.
     final bottomInset = MediaQuery.of(context).padding.bottom;
     return Scaffold(
       backgroundColor: Colors.black,
@@ -720,7 +739,7 @@ class _ContributeScreenState extends State<ContributeScreen>
           // Reticle is the visual contract: user fits the connector
           // inside, we crop to its inscribing square at capture time
           // (photo) or guides the user's framing during video record.
-          if (_cam != null && _cam!.value.isInitialized && _isSignedIn)
+          if (_cam != null && _cam!.value.isInitialized)
             const IgnorePointer(child: ReticleOverlay(hint: 'FIT IN CIRCLE')),
           // Recording indicator + timer along the top center.
           if (_recording)
@@ -880,6 +899,7 @@ class _ContributeScreenState extends State<ContributeScreen>
 
   Widget _buildTopBar() {
     final username = widget.auth.username;
+    final isSignedIn = username != null && username.isNotEmpty;
     return Row(
       children: [
         GestureDetector(
@@ -890,7 +910,7 @@ class _ContributeScreenState extends State<ContributeScreen>
           ),
         ),
         const Spacer(),
-        if (username != null && username.isNotEmpty)
+        if (isSignedIn)
           GestureDetector(
             onTap: _showSignOutDialog,
             child: Container(
@@ -908,6 +928,33 @@ class _ContributeScreenState extends State<ContributeScreen>
                   Text(
                     username,
                     style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          GestureDetector(
+            onTap: _showSignInSheet,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.login, size: 13, color: Colors.white70),
+                  SizedBox(width: 5),
+                  Text(
+                    'Sign in',
+                    style: TextStyle(
                       color: Colors.white,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -1034,10 +1081,16 @@ class _ContributeScreenState extends State<ContributeScreen>
   }
 }
 
-/// Sign-in card shown when [AuthService.isSignedIn] is false.
+/// Sign-in card. Used to be the entire Contribute screen when not
+/// signed in; now an optional modal opened from the "Sign in" pill in
+/// the top bar (uploads are anonymous since 2026-05-27; sign-in only
+/// gates Undo and per-class stats).
 class _SignInCard extends StatefulWidget {
-  const _SignInCard({required this.auth});
+  const _SignInCard({required this.auth, this.onSignedIn});
   final AuthService auth;
+  /// Optional callback fired after a successful sign-in (used by the
+  /// modal-sheet caller to dismiss itself).
+  final VoidCallback? onSignedIn;
 
   @override
   State<_SignInCard> createState() => _SignInCardState();
@@ -1070,10 +1123,21 @@ class _SignInCardState extends State<_SignInCard> {
     try {
       await widget.auth.signIn(username: user, password: pass);
       // AuthService notifies listeners → ContributeScreen rebuilds.
+      // If we were opened as a modal sheet, dismiss ourselves.
+      widget.onSignedIn?.call();
     } on AuthFailed catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      // Don't dump raw exception text on the user. Map common shapes
+      // to short copy.
+      final raw = e.toString();
+      final friendly = raw.contains('SocketException')
+              || raw.contains('Failed host lookup')
+          ? "Couldn't reach the server — check Wi-Fi."
+          : raw.contains('TimeoutException')
+              ? 'Server slow to answer — try again.'
+              : raw.length > 140 ? '${raw.substring(0, 140)}…' : raw;
+      if (mounted) setState(() => _error = friendly);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
