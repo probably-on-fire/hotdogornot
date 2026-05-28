@@ -28,7 +28,11 @@ class _ReticlePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final cx = size.width / 2;
     final cy = size.height / 2;
-    final r = math.min(size.width, size.height) * 0.28;
+    // 0.14 = visual ring half the size of the original 0.28. The upload
+    // crop fraction (`_kReticleCropFraction = 0.60`) is INTENTIONALLY
+    // untouched — the reticle is decorative; what gets sent to the model
+    // is the same 60%-of-min-dim square regardless of ring size.
+    final r = math.min(size.width, size.height) * 0.14;
     final ringPaint = Paint()
       ..color = Colors.white.withOpacity(0.55)
       ..style = PaintingStyle.stroke
