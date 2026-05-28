@@ -1,14 +1,14 @@
 digraph ConnectorIDReadmeArchitecture {
   graph [
-    label="Connector ID - High-Level Architecture";
+    label="Connector ID - Production Pipeline (2026-05-28)";
     labelloc=t;
-    fontsize=24;
+    fontsize=22;
     fontname="Arial Bold";
     bgcolor="#f7f9fc";
-    pad=0.25;
+    pad=0.3;
     rankdir=TB;
-    ranksep=0.55;
-    nodesep=0.40;
+    ranksep=0.5;
+    nodesep=0.4;
     splines=spline;
     outputorder=edgesfirst;
   ];
@@ -18,7 +18,7 @@ digraph ConnectorIDReadmeArchitecture {
     style="rounded,filled";
     fontname="Arial";
     fontsize=12;
-    margin="0.12,0.08";
+    margin="0.14,0.10";
     color="#2f3b52";
     penwidth=1.5;
   ];
@@ -28,80 +28,103 @@ digraph ConnectorIDReadmeArchitecture {
     fontsize=10;
     color="#56677a";
     arrowsize=0.8;
-    penwidth=1.5;
+    penwidth=1.4;
   ];
 
+  // --- Client side ---
   camera [
-    label="Camera / Gallery\nphoto, video, desktop file";
+    label="Camera (Flutter app)\nphoto or video";
     shape=folder;
     fillcolor="#efe6ff:#fbf8ff";
     gradientangle=90;
   ];
 
-  app [
-    label="Flutter App\nmobile now, desktop planned";
-    shape=component;
+  reticle [
+    label="On-device crop\ncentered 60%-min-dim square\n(training = inference scale)";
+    fillcolor="#efe6ff:#fbf8ff";
+    gradientangle=90;
+  ];
+
+  // --- API boundary ---
+  api [
+    label="FastAPI /predict\n(legacy response shape preserved)";
+    fillcolor="#d9ecff:#f7fbff";
+    gradientangle=90;
+  ];
+
+  // --- Inference path ---
+  detector [
+    label="YOLO11n detector\nsingle 'connector' class";
     fillcolor="#cfe6ff:#f8fbff";
     gradientangle=90;
   ];
 
-  api [
-    label="FastAPI Service\n/predict remains compatible";
-    fillcolor="#d9ecff:#f7fbff";
+  bestbox [
+    label="Best-CLS-conf box selection\nclassify all detections,\npick highest classifier conf";
+    fillcolor="#cfe6ff:#f8fbff";
     gradientangle=90;
   ];
 
-  current [
-    label="Current Baseline\nHough crop + rembg gate\nResNet-18 classifier";
-    fillcolor="#d9ecff:#f7fbff";
+  reticlefilter [
+    label="Reticle-region filter\ndrop off-center detections,\nfallback to center crop";
+    fillcolor="#cfe6ff:#f8fbff";
     gradientangle=90;
   ];
 
-  planned [
-    label="Roadmap Vision Pipeline\nobject detector + multi-head attributes\nmeasurement assist + abstention";
-    fillcolor="#fff1cc:#fffaf0";
+  classifier [
+    label="EfficientNetV2-S\nat 384x384, PIL.BILINEAR\ntrained on distance-varied data";
+    fillcolor="#cfe6ff:#f8fbff";
     gradientangle=90;
   ];
 
+  // --- Output side ---
   specs [
-    label="Taxonomy + Spec Lookup\nconnectors.yaml\nfamily, polarity, gender, specs";
+    label="connectors.yaml\nfamily, gender, polarity,\nfrequency, impedance, coupling";
     shape=folder;
     fillcolor="#e5f7e7:#f8fff8";
+    gradientangle=90;
+  ];
+
+  response [
+    label="JSON response\nclass, confidence, bbox,\nfamily, gender, spec";
+    fillcolor="#fff1cc:#fffaf0";
     gradientangle=90;
   ];
 
   result [
-    label="Result Card\nconnector type, confidence,\nwarnings, alternatives, specs";
+    label="Result card (Flutter)\ntop-1 with confidence,\nabstains below 0.65";
     fillcolor="#fff1cc:#fffaf0";
     gradientangle=90;
   ];
 
-  feedback [
-    label="Data Feedback Loop\nContribute captures -> training data\nholdout set -> evaluation reports";
+  // --- Data loop ---
+  contribute [
+    label="Contribute tab (Flutter)\nuser-classified captures\n-> labeler API";
     shape=folder;
     fillcolor="#e5f7e7:#f8fff8";
     gradientangle=90;
   ];
 
-  deploy [
-    label="Deployment Targets\nserver fallback now\nONNX / TFLite / Core ML planned";
-    shape=component;
-    fillcolor="#efe6ff:#fbf8ff";
+  train [
+    label="Training snapshots\n+ holdout evaluation";
+    shape=folder;
+    fillcolor="#e5f7e7:#f8fff8";
     gradientangle=90;
   ];
 
-  { rank=same; current; planned; }
+  // --- Wiring ---
+  camera -> reticle [label="shutter"];
+  reticle -> api [label="POST image"];
+  api -> detector [label="bgr frame"];
+  detector -> bestbox;
+  bestbox -> reticlefilter;
+  reticlefilter -> classifier;
+  classifier -> specs [label="top class"];
+  specs -> response [label="enrich"];
+  response -> result [label="display"];
+  result -> contribute [label="confirm/relabel", style=dashed, color="#5a9b62"];
+  contribute -> train [label="upload", style=dashed, color="#5a9b62"];
+  train -> classifier [label="periodic retrain", style=dashed, color="#5a9b62"];
 
-  camera -> app [label="capture"];
-  app -> api [label="POST image/video"];
-  api -> current [label="preserved path"];
-  api -> planned [label="new path", style=dashed, color="#b98200"];
-  current -> result [label="old fields"];
-  planned -> specs [label="family + attributes", style=dashed, color="#b98200"];
-  specs -> result [label="spec summary", color="#5a9b62"];
-  result -> app [label="display + correction"];
-  app -> feedback [label="confirmed/corrected captures", color="#5a9b62"];
-  feedback -> planned [label="train/evaluate", style=dashed, color="#5a9b62"];
-  planned -> deploy [label="approved models", style=dashed, color="#8c67aa"];
-  deploy -> api [label="serve"];
+  { rank=same; bestbox; reticlefilter; }
 }

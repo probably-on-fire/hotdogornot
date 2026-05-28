@@ -12,7 +12,7 @@ Powered by [aired.com](https://aired.com)
 
 </div>
 
-![Connector ID system architecture](docs/Readme_System_Architecture.png)
+![Connector ID system architecture](docs/README_ARCHITECTURE.png)
 
 ---
 
