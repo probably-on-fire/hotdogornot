@@ -1,130 +1,193 @@
-digraph ConnectorIDReadmeArchitecture {
+digraph ConnectorIDArchitecture {
   graph [
-    label="Connector ID - Production Pipeline (2026-05-28)";
-    labelloc=t;
-    fontsize=22;
-    fontname="Arial Bold";
-    bgcolor="#f7f9fc";
-    pad=0.3;
-    rankdir=TB;
-    ranksep=0.5;
-    nodesep=0.4;
-    splines=spline;
-    outputorder=edgesfirst;
+    label = <<FONT POINT-SIZE="26" COLOR="#f1f5f9"><B>Connector ID</B></FONT> <FONT POINT-SIZE="18" COLOR="#94a3b8">— Production Pipeline (2026-05-28)</FONT>>;
+    labelloc = t;
+    labeljust = c;
+    fontname = "Helvetica";
+    bgcolor = "#0a0e1a";
+    pad = 0.4;
+    rankdir = LR;
+    ranksep = 0.6;
+    nodesep = 0.35;
+    splines = spline;
+    outputorder = edgesfirst;
+    fontcolor = "#f1f5f9";
   ];
 
   node [
-    shape=box;
-    style="rounded,filled";
-    fontname="Arial";
-    fontsize=12;
-    margin="0.14,0.10";
-    color="#2f3b52";
-    penwidth=1.5;
+    shape = box;
+    style = "rounded,filled";
+    fontname = "Helvetica";
+    fontsize = 12;
+    fontcolor = "#f8fafc";
+    color = "#1e293b";
+    penwidth = 1.5;
+    margin = "0.18,0.12";
+    height = 0.4;
   ];
 
   edge [
-    fontname="Arial";
-    fontsize=10;
-    color="#56677a";
-    arrowsize=0.8;
-    penwidth=1.4;
+    fontname = "Helvetica";
+    fontsize = 10;
+    color = "#64748b";
+    fontcolor = "#94a3b8";
+    arrowsize = 0.8;
+    penwidth = 1.5;
   ];
 
-  // --- Client side ---
-  camera [
-    label="Camera (Flutter app)\nphoto or video";
-    shape=folder;
-    fillcolor="#efe6ff:#fbf8ff";
-    gradientangle=90;
-  ];
+  // ============================================================
+  // CLIENT
+  // ============================================================
+  subgraph cluster_client {
+    label = <<FONT POINT-SIZE="13" COLOR="#a78bfa"><B>FLUTTER CLIENT</B></FONT>>;
+    style = "rounded,filled";
+    fillcolor = "#13182a";
+    color = "#312e54";
+    penwidth = 1.5;
+    fontname = "Helvetica";
+    margin = 16;
 
-  reticle [
-    label="On-device crop\ncentered 60%-min-dim square\n(training = inference scale)";
-    fillcolor="#efe6ff:#fbf8ff";
-    gradientangle=90;
-  ];
+    camera [
+      label = <<B>Camera</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">photo or video frame</FONT>>;
+      shape = folder;
+      fillcolor = "#3b1f6b";
+      color = "#7c3aed";
+    ];
 
-  // --- API boundary ---
-  api [
-    label="FastAPI /predict\n(legacy response shape preserved)";
-    fillcolor="#d9ecff:#f7fbff";
-    gradientangle=90;
-  ];
+    reticle [
+      label = <<B>On-device reticle crop</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">centered 60% min-dim square<BR/>training scale = inference scale</FONT>>;
+      fillcolor = "#3b1f6b";
+      color = "#7c3aed";
+    ];
 
-  // --- Inference path ---
-  detector [
-    label="YOLO11n detector\nsingle 'connector' class";
-    fillcolor="#cfe6ff:#f8fbff";
-    gradientangle=90;
-  ];
+    result [
+      label = <<B>Result card</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">top-1 + confidence<BR/>abstains below 0.65</FONT>>;
+      fillcolor = "#3b1f6b";
+      color = "#7c3aed";
+    ];
 
-  bestbox [
-    label="Best-CLS-conf box selection\nclassify all detections,\npick highest classifier conf";
-    fillcolor="#cfe6ff:#f8fbff";
-    gradientangle=90;
-  ];
+    contribute [
+      label = <<B>Contribute tab</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">user-classified captures<BR/>→ labeler API</FONT>>;
+      shape = folder;
+      fillcolor = "#3b1f6b";
+      color = "#7c3aed";
+    ];
+  }
 
-  reticlefilter [
-    label="Reticle-region filter\ndrop off-center detections,\nfallback to center crop";
-    fillcolor="#cfe6ff:#f8fbff";
-    gradientangle=90;
-  ];
+  // ============================================================
+  // SERVER — inference path
+  // ============================================================
+  subgraph cluster_server {
+    label = <<FONT POINT-SIZE="13" COLOR="#67e8f9"><B>INFERENCE SERVICE</B></FONT>>;
+    style = "rounded,filled";
+    fillcolor = "#0a1726";
+    color = "#0e7490";
+    penwidth = 1.5;
+    fontname = "Helvetica";
+    margin = 16;
 
-  classifier [
-    label="EfficientNetV2-S\nat 384x384, PIL.BILINEAR\ntrained on distance-varied data";
-    fillcolor="#cfe6ff:#f8fbff";
-    gradientangle=90;
-  ];
+    api [
+      label = <<B>FastAPI  /predict</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">legacy response shape preserved<BR/>X-Device-Token auth</FONT>>;
+      fillcolor = "#0c4a6e";
+      color = "#38bdf8";
+    ];
 
-  // --- Output side ---
-  specs [
-    label="connectors.yaml\nfamily, gender, polarity,\nfrequency, impedance, coupling";
-    shape=folder;
-    fillcolor="#e5f7e7:#f8fff8";
-    gradientangle=90;
-  ];
+    detector [
+      label = <<B>YOLO11n detector</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">single "connector" class<BR/>mAP50 ≈ 0.979</FONT>>;
+      fillcolor = "#155e75";
+      color = "#22d3ee";
+    ];
 
-  response [
-    label="JSON response\nclass, confidence, bbox,\nfamily, gender, spec";
-    fillcolor="#fff1cc:#fffaf0";
-    gradientangle=90;
-  ];
+    bestbox [
+      label = <<B>Best-CLS-conf box selection</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">classify every detection,<BR/>pick the one with highest<BR/>classifier confidence</FONT>>;
+      fillcolor = "#155e75";
+      color = "#22d3ee";
+    ];
 
-  result [
-    label="Result card (Flutter)\ntop-1 with confidence,\nabstains below 0.65";
-    fillcolor="#fff1cc:#fffaf0";
-    gradientangle=90;
-  ];
+    reticlefilter [
+      label = <<B>Reticle-region filter</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">drop off-center detections<BR/>fallback to center crop</FONT>>;
+      fillcolor = "#155e75";
+      color = "#22d3ee";
+    ];
 
-  // --- Data loop ---
-  contribute [
-    label="Contribute tab (Flutter)\nuser-classified captures\n-> labeler API";
-    shape=folder;
-    fillcolor="#e5f7e7:#f8fff8";
-    gradientangle=90;
-  ];
+    classifier [
+      label = <<B>EfficientNetV2-S  @ 384²</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">combined_v7 (distance-varied)<BR/>PIL.BILINEAR preprocessing</FONT>>;
+      fillcolor = "#155e75";
+      color = "#22d3ee";
+    ];
 
-  train [
-    label="Training snapshots\n+ holdout evaluation";
-    shape=folder;
-    fillcolor="#e5f7e7:#f8fff8";
-    gradientangle=90;
-  ];
+    specs [
+      label = <<B>connectors.yaml</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">family, gender, polarity<BR/>frequency, impedance, coupling</FONT>>;
+      shape = folder;
+      fillcolor = "#064e3b";
+      color = "#34d399";
+    ];
 
-  // --- Wiring ---
-  camera -> reticle [label="shutter"];
-  reticle -> api [label="POST image"];
-  api -> detector [label="bgr frame"];
+    response [
+      label = <<B>JSON response</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">class, confidence, bbox<BR/>family, gender, spec</FONT>>;
+      fillcolor = "#7c2d12";
+      color = "#fb923c";
+    ];
+
+    // Keep best-CLS-conf + reticle-filter side-by-side inside this cluster
+    { rank = same; bestbox; reticlefilter; }
+    // Keep spec lookup + JSON response side-by-side inside this cluster
+    { rank = same; specs; response; }
+  }
+
+  // ============================================================
+  // DATA LOOP
+  // ============================================================
+  subgraph cluster_data {
+    label = <<FONT POINT-SIZE="13" COLOR="#fbbf24"><B>DATA FEEDBACK LOOP</B></FONT>>;
+    style = "rounded,filled";
+    fillcolor = "#1a1308";
+    color = "#854d0e";
+    penwidth = 1.5;
+    fontname = "Helvetica";
+    margin = 16;
+
+    labeler [
+      label = <<B>Labeler service</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">aired.com/rfcai/labeler<BR/>browse + bulk-edit datasets</FONT>>;
+      shape = folder;
+      fillcolor = "#713f12";
+      color = "#facc15";
+    ];
+
+    snapshot [
+      label = <<B>Training snapshot</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">e.g. combined_v7_2026-05-28<BR/>3,804 samples</FONT>>;
+      shape = folder;
+      fillcolor = "#713f12";
+      color = "#facc15";
+    ];
+
+    train [
+      label = <<B>Train &amp; eval</B><BR/><FONT POINT-SIZE="10" COLOR="#cbd5e1">EffNetV2-S, scale (0.20, 1.0)<BR/>holdouts: close52, phone-v2, today</FONT>>;
+      fillcolor = "#713f12";
+      color = "#facc15";
+    ];
+  }
+
+  // ============================================================
+  // WIRING — primary inference path
+  // ============================================================
+  camera -> reticle [label = " shutter"];
+  reticle -> api [label = " POST image", penwidth = 2.0, color = "#94a3b8"];
+  api -> detector [label = " bgr frame"];
   detector -> bestbox;
   bestbox -> reticlefilter;
   reticlefilter -> classifier;
-  classifier -> specs [label="top class"];
-  specs -> response [label="enrich"];
-  response -> result [label="display"];
-  result -> contribute [label="confirm/relabel", style=dashed, color="#5a9b62"];
-  contribute -> train [label="upload", style=dashed, color="#5a9b62"];
-  train -> classifier [label="periodic retrain", style=dashed, color="#5a9b62"];
+  classifier -> specs [label = " top class"];
+  specs -> response [label = " enrich"];
+  response -> result [label = " HTTP 200", penwidth = 2.0, color = "#94a3b8"];
 
-  { rank=same; bestbox; reticlefilter; }
+  // ============================================================
+  // WIRING — data feedback loop
+  // ============================================================
+  result -> contribute [label = " confirm /\l relabel", style = dashed, color = "#fbbf24", fontcolor = "#fbbf24"];
+  contribute -> labeler [label = " POST capture", style = dashed, color = "#fbbf24", fontcolor = "#fbbf24"];
+  labeler -> snapshot [label = " carve", style = dashed, color = "#fbbf24", fontcolor = "#fbbf24"];
+  snapshot -> train [label = " batches", style = dashed, color = "#fbbf24", fontcolor = "#fbbf24"];
+  train -> classifier [label = " new weights", style = dashed, color = "#fbbf24", fontcolor = "#fbbf24"];
+
 }
