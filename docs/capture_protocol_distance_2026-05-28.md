@@ -1,7 +1,10 @@
 # Realistic-distance capture protocol — fine-pitch RF connectors
 
 **Date:** 2026-05-28
+**Status:** Executed by user 2026-05-28 night — ~263 new uploads collected, combined_v7 snapshot built, v7 retrain queued.
 **Goal:** Collect realistic-distance training shots for the six fine-pitch classes so the classifier stops being confidently-wrong on phone-app usage. The 2026-05-27 phone-realistic eval established this is a data gap, not a calibration problem — inference-time tricks (ensemble disagreement, reticle-region forcing, TTA) cannot recover these cases because the two ensemble members independently agree on the wrong answer at high confidence.
+
+**CRITICAL: digital zoom is NOT a substitute for physical distance.** When the user did the original 2026-05-27 capture session at one physical distance with varying digital zoom levels, the resulting "realistic-distance" training data did not match the inference distribution (real arm's-length captures, often without zoom). Digital zoom upscales sensor pixels — sharp/smooth output. Physical distance uses fewer sensor pixels at native resolution — different sharpness/noise/perspective characteristics. The 2026-05-28 capture session corrected this by varying physical distance, NOT zoom. See [[distance-vs-digital-zoom-training-data]] memory.
 
 ## What to capture
 

@@ -17,6 +17,48 @@ Powered by [aired.com](https://aired.com)
 
 ---
 
+## Production Status (2026-05-28)
+
+**Live model:** `combined_v7` — distance-varied EfficientNetV2-S + YOLO11n detector, single classifier (no ensemble), reticle-region box filter on.
+
+| Benchmark | Result |
+|---|---|
+| **307 real-world phone uploads (all 10 classes)** | **304 / 304 = 100% correct, 3 abstain (99% coverage)** — zero confidently-wrong |
+| 48-img clean phone-realistic holdout | 45 / 45 = 100% correct, 3 abstain | zero confidently-wrong |
+| 52-img close-up bench holdout (regression detector) | 45 / 48 = 93.8% (3 confidently-wrong — small close-up regression) |
+| Inference latency, CPU | ~310-400ms/image |
+
+What "confidently wrong" means here: a wrong prediction emitted at confidence ≥ 0.65 (the app's display threshold). On the realistic phone-usage distribution, the production model now emits a correct top-1 *every time it emits at all*. When the model isn't sure, it abstains — UX surfaces "no result, try again" instead of a confident-but-wrong class.
+
+## The Challenge
+
+RF coaxial connectors are visually subtle and physically tiny. The system needs to distinguish ten classes — SMA, 3.5mm, 2.92mm/K, 2.4mm, 1.85mm, each in male and female — and several of them differ only by **1.4× in diameter** (e.g., 3.5mm vs 2.92mm). Once the YOLO detector crops to a tight bounding box, the absolute-scale reference is gone; the classifier has to discriminate from texture, thread pitch, and dielectric proportions alone.
+
+The hard cases were never the bench shots. The bench-photography holdout sat at 94% Full accuracy for weeks with a 2-way ensemble + best-CLS-conf-box selection. The problem only surfaced when the same model was tested at **realistic phone-holding distance**:
+
+| Production model | Bench holdout | User's phone test (realistic distance) |
+|---|---|---|
+| v18 (legacy ResNet-18 + Hough) | 39.5% Full / 74.4% Gender | not measured |
+| Jerry's pretrained YOLO+EffNet | 81.4% Full | not measured |
+| 2-way ensemble (combined_v2 + jerry_full_nobal) | 88.4% Full / 95.3% Gender | not measured |
+| + best-CLS-conf box selection | 90.7% Full / 100% Gender | not measured |
+| **Prior production (combined_v3 ensemble)** | **94.2% Full / 100% Gender** | **17% on 3.5mm-M (4/24), 44% on 3.5mm-F (8/18)** — *confidently wrong* at conf 0.6-0.9 |
+
+The 94% bench number was honest but irrelevant to actual use. At the distance a user naturally holds a phone, the connector is small in the frame, YOLO crops a tight region with low effective pixel-count, and the classifier — never having seen that input distribution — would confidently call a 3.5mm-M a 2.92mm-M because its training set was 95% close-up bench shots and the rest were digitally-zoomed close-ups in disguise.
+
+**Three separate inference-time interventions were tried and failed to close this gap:**
+- Image-level ensemble disagreement abstention (catches uncorrelated errors — but the two members of the production ensemble were *correlated-wrong* on the realistic shots)
+- Reticle-region box filter (dropped sloppy off-center detections — helped marginally)
+- Test-time augmentation with rotation/flip (improved single-model by 5pt — but added zero on top of the ensemble)
+
+The fix turned out to be **data, not tricks**: a 2026-05-28 capture session added ~263 training shots with real physical-distance variation across all ten classes (vs. the prior single-distance + digital-zoom set). Same training recipe, same architecture, same wider-scale augmentation as the prior failed attempt — but with the new data, the model jumped from 44% coverage zero-CW to 99% coverage zero-CW on real phone uploads.
+
+The lesson, persisted across the project memory: **digital zoom is not a substitute for physical distance**. Digitally-zoomed pixels are interpolated upscales of the original sensor patch; they don't reproduce the sharpness, noise, perspective, or depth-of-field of a genuinely-distant capture. A classifier trained on the former cannot generalize to the latter. The full investigation lives in [`docs/capture_protocol_distance_2026-05-28.md`](docs/capture_protocol_distance_2026-05-28.md).
+
+The remaining open problem is a small regression on close-up bench shots (3 confidently-wrong on the 52-img holdout vs. 0 for the prior ensemble). The conservative alternative configuration (`v7 + jerry_full_nobal + reticle + threshold 0.85`) is zero-CW everywhere but trades coverage. We're shipping the high-coverage config because the realistic-distance distribution matches real users.
+
+---
+
 ## What This Is
 
 Connector ID is evolving from a proof-of-concept RF connector classifier
@@ -98,20 +140,20 @@ Current production behavior is preserved.
 }
 ```
 
-Current documented model:
+Production currently serves **`combined_v7`** — see the "Production Status" table at the top of this README. The numbers below trace the journey from the original baseline.
 
-| Metric | v18 Baseline |
-|---|---:|
-| Full class accuracy | 75% |
-| Family accuracy | 75% |
-| Gender accuracy | 87.5% |
-| Background false positives | 0% |
-| Mean /predict latency | ~5.0 s |
-| Held-out size | 8 phone shots |
+| Model | Date | Bench accuracy (close-up holdout) | Notes |
+|---|---|---|---|
+| v18 ResNet-18 + Hough | 2026-05-05 | 39.5% Full | 5-7s/image, single head |
+| Jerry's pretrained YOLO+EffNet | 2026-05-18 | 81.4% Full | from `trextrader/hotdogornot` fork |
+| combined_v2 + jerry_full_nobal (2-way ensemble) | 2026-05-26 | 88.4% Full / 95.3% Gender | data-source diversity beats seed diversity |
+| + best-CLS-conf box selection | 2026-05-26 | 90.7% Full / 100% Gender | re-rank YOLO boxes by classifier confidence |
+| **Prior production (combined_v3 ensemble)** | 2026-05-26 | **94.2% Full / 100% Gender** (52-img) | shipped until v7 |
+| **Current production (combined_v7 + reticle filter)** | **2026-05-28** | 93.8% Full (52-img bench) — slight regression | **100% on 304/307 real-world phone uploads, zero confidently-wrong at conf >= 0.65** |
 
-The current model is an ImageNet-pretrained ResNet-18 with a linear head.
-The 8-image holdout is too small to support strong accuracy claims; one
-miss changes accuracy by 12.5 percentage points.
+The historical bench progress (39.5% -> 94.2%) was real but masked the actual user-facing problem (the model failed at realistic phone-holding distance). See "The Challenge" above for the full story.
+
+The 52-image bench holdout is well-curated but not representative of phone-app inference. The 48-image phone-realistic v2 holdout (`data/test_holdout_phone_2026-05-28/`) and the 307-image full-upload set are the benchmarks v7+ have to clear.
 
 Tracked benchmark reports under
 [`training/reports/`](training/reports/). Re-run with

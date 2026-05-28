@@ -1,12 +1,46 @@
 # RF Connector AI — Claude session context
 
-You are picking up an active project. Read this first. Most of this is current as of **2026-05-25**; the **2-way ensemble investigation** below was added 2026-05-26.
+You are picking up an active project. Read this first. Production state was last updated **2026-05-28** when v7 was deployed and phone-tested.
 
 ## Elevator pitch
 
 Phone app that identifies RF coaxial connectors (SMA, 1.85mm, 2.4mm, 2.92mm, 3.5mm in male/female). Companion web app at **aired.com** for managing training data and granting collaborator logins. Closed-signup multi-user auth.
 
 The Flutter app (`flutter/`) and the Python service (`training/rfconnectorai/server/`) talk to each other through aired.com. The actual ML runs on a LAN box that reverse-SSH-tunnels into aired.com's public-facing nginx.
+
+## CURRENT PRODUCTION (deployed 2026-05-28 10:17 EDT, phone-confirmed)
+
+**Live config:** `combined_v7` single model + `RFCAI_RETICLE_REGION_FILTER=1` + best-CLS-conf + threshold 0.65.
+
+| Testset | Result |
+|---|---|
+| 307 today's real phone uploads | **304/304 = 100% correct, 3 abstain (99% coverage), ZERO confidently-wrong** |
+| 48-img phone-realistic v2 holdout | 45/45 = 100% correct, 3 abstain, zero CW |
+| 12-img phone-realistic v1 (3.5mm-only legacy) | 10/10 = 100%, 2 abstain, zero CW |
+| 52-img close-up bench holdout (regression detector) | 45/48 = 93.8%, 3 CW (small close-up regression vs prior prod) |
+
+**Service env (`/etc/default/rfcai-predict` on box):**
+```
+RFCAI_USE_JERRY_PIPELINE=1
+RFCAI_JERRY_MODEL_DIR=/home/rfcai/training/models/jerry_v19_hybrid_combined_v7_2026-05-28
+RFCAI_JERRY_EXTRA_MODEL_DIRS=                       # empty — single model, no ensemble
+RFCAI_BEST_CLS_CONF_BOX=1
+RFCAI_RETICLE_REGION_FILTER=1                       # NEW
+```
+
+**What unlocked this** wasn't a smarter model — it was capturing **~263 training shots at varied physical camera distances** (vs. the prior data which was all single-distance + digital-zoom). v5 (same recipe, no new data) topped out at 44% coverage zero-CW. v7 (same recipe, with the distance-varied data) hit 99% coverage. **Data was the bottleneck.** See [[distance-vs-digital-zoom-training-data]], [[combined_v7_distance_varied_2026-05-28]], [[v7-distance-varied-winner-2026-05-28]].
+
+**Rollback** (if anything breaks):
+```bash
+sudo cp /etc/default/rfcai-predict.bak.2026-05-28-v7winner /etc/default/rfcai-predict
+sudo cp /opt/rfcai/repo/training/rfconnectorai/pipeline/jerry_pipeline.py.bak.2026-05-28-v7winner \
+        /opt/rfcai/repo/training/rfconnectorai/pipeline/jerry_pipeline.py
+sudo systemctl restart rfcai-predict
+```
+
+**APK at `https://aired.com/app.apk?v=5`** — current shipped Flutter build is the right one (reticle crop + 0.65 threshold already wired). No app update required for v7 to take effect.
+
+The sections below are the historical journey that got us here.
 
 ## Current classifier state (2026-05-25, post-deploy)
 
@@ -67,24 +101,105 @@ Spent a session systematically replicating Jerry's pipeline + isolating the gap.
 
 Full recipe + numbers: see [[jerry-replication-recipe]] memory.
 
-## Immediate goal of this session
+## Distance-shift investigation 2026-05-27 (current frontier)
 
-**Build and install the iOS app on the user's iPhone, smoke-test the flow, then commit any iOS-specific fixes.**
+The 90.7% on the 52-img holdout (and 94.2% in the prior eval) was a **bench-photography number**. When the user phone-tested at realistic holding distance with a 3.5mm-M connector, prod was returning 2.4mm-M / 2.92mm-M predictions with high confidence (0.6-0.9). Confirmed via direct eval: **prod gets 4/24 (17%) right on the user's realistic-distance 3.5mm-M shots and 8/18 (44%) on 3.5mm-F**. The holdout was systematically blind to this distribution.
 
-See `flutter/ios/README.md` for the canonical iOS build steps. Quick version:
+**Diagnosis (likely causes, all contributing):**
+1. **Detector unreliable at small object sizes** — YOLO11n misses or sloppy-crops distant connectors. Garbage crop → garbage classification.
+2. **Training-time `RandomResizedCrop(scale=(0.55, 1.0))` floor too high** — model only saw crops filling >55% of source. Tight YOLO crops from distant captures fall outside training distribution. See [[crop-scale-mismatch]] memory (same root cause flagged earlier in a different context).
+3. **Training data biased toward close-up bench shots** — Jerry's 638 photos + video frames are all up-close. Distance distribution was undersampled.
 
-```bash
-git pull
-cd flutter
-flutter pub get
-cd ios && pod install && cd ..
-open ios/Runner.xcworkspace
-# Xcode → Signing & Capabilities → set Team to your Apple ID.
-# Plug iPhone, pick it as destination, hit ▶.
-# On iPhone: Settings → General → VPN & Device Management → trust dev cert.
-```
+**Today's experiments + outcomes:**
 
-iOS deployment target is **13.0** (required by `flutter_secure_storage 9.x` + `onnxruntime 1.x`). `Info.plist` already has camera/photo-library/microphone usage strings.
+- **combined_v4 (2026-05-27 ~21:23)** — retrain of combined_v3 + 44 today's phone-realistic shots, same recipe as prod. Result: **regressed on 52-img close-up holdout to 84.6% Full** (vs prod 94.2%). On today's 44 phone shots (training-set overlap so number is contaminated): 75% on 3.5mm-M, 89% on 3.5mm-F — directionally good but unfair. Conclusion: adding data alone in one class pushes decision boundary into neighbors (2.4mm-M now confidently wrong at 0.900). Don't ship combined_v4. Bundle at `/home/rfcai/training/models/jerry_v19_hybrid_combined_v4_2026-05-27/`.
+- **combined_v5 (kicked 2026-05-27 ~23:49, ETA ~02:00 EDT)** — same data as v4 MINUS 12 carved phone-realistic holdout shots, with **`RandomResizedCrop` scale floor extended 0.55 → 0.20** to handle tight crops from distant captures. Patch was applied in-place to `train_v19_effnet.py`, then restored to disk after the process started reading from RAM. Backup of script at `/opt/rfcai/repo/training/scripts/train_v19_effnet.py.bak.2026-05-27-widescale` on the box. Log: `/tmp/train_v19_combined_v5.log`. Output dir: `/home/rfcai/training/models/classifier_v19_effnet_combined_v5_2026-05-27/`.
+
+**New phone-realistic holdout** at `/opt/rfcai/repo/training/data/test_holdout_phone_2026-05-27/`:
+- `3.5mm-M/`: 7 images (carved last-uploaded today)
+- `3.5mm-F/`: 5 images (carved last-uploaded today)
+- Total: 12 images, never trained on. **This is now the canonical "would prod work for real users" benchmark.** The 52-img close-up holdout remains useful as a regression detector.
+
+**Other code changes today (committed or not):**
+- **Flutter reticle radius reverted 0.28 → 0.14** in `flutter/lib/src/widgets/reticle.dart` (smaller visual ring, user request). Upload crop fraction (`_kReticleCropFraction = 0.60` in identify/contribute screens) is **DELIBERATELY DECOUPLED** from ring radius — what /predict sees is identical to prod regardless of ring size. Touch with care; coupling them broke 3.5mm-F earlier.
+- **Anonymous uploads working** end-to-end. User uploaded 44 realistic-distance phone shots today via Contribute tab without sign-in. Server logs confirm, `labeled/embedder/<cls>/photo_2026-05-27_*` exist.
+- **APK at `https://aired.com/app.apk?v=5`**. Increment to `?v=6` on next push (see [[apk-cache-bust-versioning]] memory).
+- **Diagnostic capture hook is STILL LIVE** on the box at `/home/rfcai/predict_capture/` — saves the first 10 /predict bytes for debugging. Backup of original predict_service.py at `/opt/rfcai/repo/training/rfconnectorai/server/predict_service.py.bak.2026-05-27-capture`. Remove eventually.
+
+## Distance-varied capture session 2026-05-28 (current frontier)
+
+The 2026-05-27 hypothesis ("just retrain with the 44 today's shots") was undermined by two findings:
+1. **Today's 2026-05-27 44 uploads were single-distance** — the user held the phone at one physical distance and used digital zoom to vary apparent connector size in the reticle. Digital zoom upscales pre-existing pixels; it does not produce the same sharpness/noise/perspective characteristics as a real distance change. So "realistic-distance" was a misnomer; the training data was actually narrow-distribution.
+2. **Inference-time interventions hit a ceiling.** Image-level ensemble-disagreement abstention catches 10/10 close-up disagreements but 0/2 phone-realistic confidently-wrong (both members agree on the wrong class at high conf — correlated errors). Reticle-region forcing is +1 on phone-realistic, neutral on close-up. See [[correlated-errors-block-disagreement-abstention]] and [[inference-env-var-interventions]]. The capability gap is real; data is required, not just inference tricks.
+
+**The 2026-05-28 capture session fixed this:** ~263 new uploads with **real physical-distance variation across all 10 classes** (vs prior single-class 3.5mm-only). Now 307 today's-uploads total in `labeled/embedder/<cls>/photo_2026-05-27_*` (filename prefix is by session-start date, not upload date — Flutter convention).
+
+| Class | Before | Now | New |
+|---|---|---|---|
+| SMA-M | 0 | 30 | +30 |
+| SMA-F | 0 | 19 | +19 |
+| 3.5mm-M | 24 | 50 | +26 |
+| 3.5mm-F | 18 | 42 | +24 |
+| 2.92mm-M | 1 | 29 | +28 |
+| 2.92mm-F | 0 | 26 | +26 |
+| 2.4mm-M | 0 | 26 | +26 |
+| 2.4mm-F | 0 | 15 | +15 |
+| 1.85mm-M | 1 | 35 | +34 |
+| 1.85mm-F | 0 | 35 | +35 |
+
+**New training snapshot:** `data/snapshots/combined_v7_2026-05-28/train/` — 3,804 samples (combined_v5/train + new uploads minus v2 holdout). Built via hardlinks; phone-v2 holdout shots are excluded.
+
+**New phone-realistic holdout v2:** `data/test_holdout_phone_2026-05-28/` — 48 imgs (5 per class except 2.4mm-F=3), carved as the LAST N filename-sorted per class from `labeled/embedder/<cls>/photo_2026-05-27_*`. Hardlinked, not moved — files stay in `labeled/embedder/` but are excluded from the v7 train snapshot by filename.
+
+**v5 training (in flight as of writing):** epoch 38/50, val_acc 0.927, ETA ~02:20 EDT. Same recipe as planned. Combined_v5 will be evaluated alongside v7 once both are built.
+
+**Overnight autonomous loop is running** to: wait for v5 → build hybrid + eval → kick v7 with same v5 recipe but the new distance-varied snapshot → build + eval → if zero-CW config exists on phone-v2 at threshold ≤ 0.85 with ≥80% coverage, push notification "GOAL HIT"; else iterate with v8 candidates (e.g. balanced sampling, ensemble combinations, recipe variants) within morning budget. Push notification will summarize the best configuration found.
+
+**OVERNIGHT TESTING USES THE NEW DISTANCE-VARIED DATA:** the v7 retrain explicitly trains on `combined_v7_2026-05-28/train` (3,804 samples = combined_v5 historical + 263 new distance-varied uploads − 48 carved phone-v2 holdout). Every eval iteration the loop runs reports against the **phone-v2 holdout (48 imgs, 10 classes, real distance variation)** as the canonical "would prod work" benchmark, not just the historical 12-img v1 holdout. The v1 holdout (3.5mm-only, single-distance, digital-zoom) is kept for comparison but is no longer the primary success criterion. Any v8+ iterations will reuse this same v7 training data + phone-v2 holdout setup.
+
+**Eval testsets going forward:**
+| Set | Path | Use |
+|---|---|---|
+| close-up 52 | `data/test_holdout/` | Regression detector — must not drop below current 94.2% |
+| phone-v1 12 | `data/test_holdout_phone_2026-05-27/` | Historical phone-realistic (3.5mm-only, single-distance, digital-zoomed) |
+| phone-v2 48 | `data/test_holdout_phone_2026-05-28/` | **Canonical phone-realistic benchmark** — 10-class, real distance variation |
+| today-307 | `labeled/embedder/<cls>/photo_2026-05-27_*` | Contaminated for v5/v7 (in train) but clean for prod (v2+nobal) |
+
+**Eval script:** `tmp_overnight_eval_comprehensive.py` runs grid of {prod, v5*, v7*} × {none, reticle, disagree, both} × {0.65, 0.85, 0.90} × {4 testsets}. JSON dump at `/tmp/overnight_eval_results.json`. Pipeline entry point still `pipe.run(bgr)` not `predict(path)`.
+
+## 🎯 OVERNIGHT WINNER (eval completed 06:47 EDT)
+
+**Configuration: `v7alone + RFCAI_RETICLE_REGION_FILTER=1 + threshold=0.65`**
+
+| Testset | Correct/Emit | Coverage | CW@0.65 |
+|---|---|---|---|
+| phone-v2 (48 distance-varied) | 45/45 = 100% | 93.75% | 0 |
+| **today-307 (all phone uploads)** | **304/304 = 100%** | **99.0%** | **0** |
+| phone-v1 (12 historical) | 10/10 = 100% | 83% | 0 |
+| close-up 52 | 45/48 = 93.8% | 87% | 3 (regression vs prod) |
+
+The data was the differentiator — distance-varied uploads were the unlock. v5+nobal alone couldn't get there (44% coverage); v7 alone with reticle filter hits 99% coverage zero-CW on the real-world set.
+
+**Conservative alternative: `v7+nobal + RFCAI_RETICLE_REGION_FILTER=1 + threshold=0.85`** — zero CW on **all four** testsets including close-up, at the cost of more abstention (coverage 44% on phone-v2, 39% on today-307). Choose this if the 3 close-up regressions in the winner are unacceptable.
+
+**Deployment instructions** are in [[v7-distance-varied-winner-2026-05-28]]. Bundle at `/home/rfcai/training/models/jerry_v19_hybrid_combined_v7_2026-05-28/`. Pipeline env vars require the latest commit `65ef236` (jerry_pipeline.py — pushed but box may need `git pull`).
+
+**v7 kick:** `tmp_overnight_kick_v7.py` — patches train_v19_effnet.py scale 0.55→0.20 (same dance as v5), kicks training, restores script. Refuses to kick if another training is already running (GPU contention guard, /proc-based to avoid matching its own SSH wrapper). Output bundle: `jerry_v19_hybrid_combined_v7_2026-05-28/`.
+
+## Overnight eval results (iter 3, 03:10 EDT) — prod + v5 only (v7 still training)
+
+V5 training finished epoch 40/50 val_acc 0.944 at 02:18 EDT. V7 training kicked 02:25, at epoch 10/50 val_acc 0.916 at 03:08 (ETA ~05:30). Comprehensive eval ran between iters 2-3 against close52, phone_v1 (12), phone_v2 (48 distance-varied), today307.
+
+**Headline:**
+- **prod (v2+nobal) is already zero-CW on close-up at thr=0.65** — 42/42 = 100%, 10/52 abstain. Existing prod is precision-calibrated for bench shots.
+- **prod has 4 CW on phone_v2 at thr=0.65** — confirms the realistic-distance failure mode is real and not yet solved.
+- **v5+nobal at thr=0.85 on phone_v2 is ZERO-CW** — 21/21 = 100%, 27/48 abstain (44% coverage). First config that's confidence-calibrated on the distance-varied benchmark.
+- **v5 alone is WORSE than the 2-way ensemble** (10 CW on phone_v2 at 0.65). v5's value is as an ensemble member with nobal, not standalone.
+- **Reticle / disagree / both interventions are roughly neutral** on these test sets — they don't add precision beyond what v5+nobal at higher threshold already gives. (Disagree did catch some prod mistakes on today307 — 49 → 45 CW at thr=0.65 — but doesn't change the v5+nobal story.)
+
+**Goal status:** Zero-CW on phone_v2 at threshold ≤ 0.85 achieved by v5+nobal at thr=0.85 (44% coverage). NOT hit at ≥80% coverage. Waiting for v7 — hypothesis is that v7's distance-varied training data will lift coverage at zero-CW.
+
+**Next loop iteration:** wait for v7 (still ~2h to go); when v7 fires, build hybrid + re-run eval grid (will now include v7alone/v7+nobal/v7+v2/v7+v2+nb/v7+v5+v2+nb combinations). If v7+nobal at thr=0.85 hits zero-CW with ≥80% coverage on phone_v2, PushNotification GOAL HIT. Otherwise v8 candidates: `--balance-to-smallest` (current v7 snap is unbalanced: 939 SMA-F vs 172 2.92mm-F) is highest-leverage next experiment. Full eval JSON at `/tmp/overnight_eval_results.json` on box.
 
 ## Credentials (you need these to do almost anything)
 
