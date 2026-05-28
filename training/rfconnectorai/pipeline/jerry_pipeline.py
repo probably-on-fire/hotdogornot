@@ -140,10 +140,28 @@ class JerryPipeline:
         # Accept the same truthy strings the rest of predict_service does
         # ("1", "true", "yes", "on", case-insensitive) so deploys don't
         # silently fall back to off because someone typed "True" or "yes".
-        _flag = _os.environ.get("RFCAI_BEST_CLS_CONF_BOX", "").strip().lower()
-        self._best_cls_conf: bool = _flag in ("1", "true", "yes", "on")
+        def _truthy(name: str) -> bool:
+            return _os.environ.get(name, "").strip().lower() in ("1","true","yes","on")
+        self._best_cls_conf: bool = _truthy("RFCAI_BEST_CLS_CONF_BOX")
         if self._best_cls_conf:
             self.box_min = 0.05
+
+        # Reticle-region box filter: drop YOLO boxes whose center is outside
+        # the central 60%-min-dim square (the Flutter reticle crop region).
+        # Catches sloppy right-edge / corner detections on full-frame uploads;
+        # mostly a no-op on already-reticle-cropped phone uploads. If no boxes
+        # survive, fall back to the reticle square itself as a synthetic box
+        # so the classifier still runs. Off by default (preserves prod inference).
+        self._reticle_filter: bool = _truthy("RFCAI_RETICLE_REGION_FILTER")
+
+        # Ensemble-disagreement abstention: when running an ensemble (extras
+        # set), skip any candidate box where the per-model top-1 classes
+        # disagree. If all boxes are dropped, return [] (the existing
+        # "no prediction" path). Catches uncorrelated errors; does NOT help
+        # when models are correlated-wrong (measured 2026-05-28 phone-realistic
+        # eval: 0 of 2 confidently-wrong cases were caught). No-op for single
+        # model. Off by default.
+        self._disagree_abstain: bool = _truthy("RFCAI_ENSEMBLE_DISAGREE_ABSTAIN")
 
         self.extra_cls: list[ort.InferenceSession] = []
         self._extra_cls_input: list[str] = []
@@ -198,9 +216,32 @@ class JerryPipeline:
             boxes.append((x1, y1, x2, y2, float(sc[i])))
 
         boxes.sort(key=lambda b: -b[4])
-        return _nms(boxes, NMS_IOU_THRESHOLD)
+        nms_boxes = _nms(boxes, NMS_IOU_THRESHOLD)
 
-    def _classify_crop(self, bgr_crop: np.ndarray) -> np.ndarray:
+        if self._reticle_filter and nms_boxes:
+            orig_h, orig_w = bgr.shape[:2]
+            side = 0.6 * min(orig_w, orig_h)
+            rx1 = (orig_w - side) / 2.0
+            ry1 = (orig_h - side) / 2.0
+            rx2 = rx1 + side
+            ry2 = ry1 + side
+            kept = [b for b in nms_boxes
+                    if rx1 <= (b[0]+b[2])/2 <= rx2
+                    and ry1 <= (b[1]+b[3])/2 <= ry2]
+            if not kept:
+                # Synthetic fallback: the reticle square itself. Score 0.5
+                # so it sorts behind real high-confidence YOLO boxes when
+                # they exist, but ahead of the empty-result path.
+                kept = [(rx1, ry1, rx2, ry2, 0.5)]
+            return kept
+        return nms_boxes
+
+    def _classify_crop(self, bgr_crop: np.ndarray) -> tuple[np.ndarray, list[np.ndarray]]:
+        # Returns (averaged_probs, per_model_probs). per_model_probs has one
+        # full softmax array per ensemble member (always >= 1; primary at
+        # index 0). The disagreement-abstention path in run() needs the full
+        # arrays so each model can pick its own best-CLS-conf box; the
+        # regular path only uses the averaged probs.
         # PIL.BILINEAR to match training-time preprocessing (see _letterbox).
         rgb = cv2.cvtColor(bgr_crop, cv2.COLOR_BGR2RGB)
         pil = Image.fromarray(rgb).resize(
@@ -213,12 +254,13 @@ class JerryPipeline:
             e = np.exp(logits - logits.max())
             return e / e.sum()
 
-        probs_sum = _softmax(self.cls.run(None, {self._cls_input: tensor})[0][0])
-        n = 1
+        per_model: list[np.ndarray] = [
+            _softmax(self.cls.run(None, {self._cls_input: tensor})[0][0])
+        ]
         for sess, in_name in zip(self.extra_cls, self._extra_cls_input):
-            probs_sum = probs_sum + _softmax(sess.run(None, {in_name: tensor})[0][0])
-            n += 1
-        return probs_sum / n
+            per_model.append(_softmax(sess.run(None, {in_name: tensor})[0][0]))
+        avg = sum(per_model) / len(per_model)
+        return avg, per_model
 
     def run(self, bgr: np.ndarray) -> list[dict]:
         boxes = self._detect(bgr)
@@ -235,17 +277,44 @@ class JerryPipeline:
         # Latency: ~2-3x classifier inference per image vs current. Enable
         # by setting RFCAI_BEST_CLS_CONF_BOX=1.
         best_cls_conf = self._best_cls_conf
+        # scored carries the averaged-probs path (what we emit).
+        # per_box_per_model carries the per-model arrays for the disagreement
+        # check — same length as scored, same order.
         scored: list[tuple[float, float, float, float, float, np.ndarray, int]] = []
+        per_box_per_model: list[list[np.ndarray]] = []
         for (x1, y1, x2, y2, score) in boxes[: (8 if best_cls_conf else MAX_RETURN)]:
             ix1, iy1, ix2, iy2 = int(x1), int(y1), int(x2), int(y2)
             crop = bgr[iy1:iy2, ix1:ix2]
             if crop.size == 0:
                 continue
-            probs = self._classify_crop(crop)
+            probs, per_model_probs = self._classify_crop(crop)
             idx = int(probs.argmax())
             scored.append((x1, y1, x2, y2, score, probs, idx))
+            per_box_per_model.append(per_model_probs)
         if not scored:
             return []
+
+        # Image-level ensemble-disagreement abstention. Each model picks its
+        # OWN best box (the one with highest top-1 confidence under that
+        # model's classifier), then we compare those independent top-1s.
+        # This is strictly stronger than per-box agreement: it catches the
+        # case where the two models pick different best boxes AND emit
+        # different classes (the standalone subclass eval, 2026-05-28,
+        # caught 10/10 close-up image-level disagreements vs 4/10 under
+        # per-box agreement). No-op for single-model deploys.
+        if self._disagree_abstain and per_box_per_model and len(per_box_per_model[0]) > 1:
+            num_models = len(per_box_per_model[0])
+            per_model_top1: list[int] = []
+            for m_idx in range(num_models):
+                best_box = max(
+                    range(len(per_box_per_model)),
+                    key=lambda b: float(per_box_per_model[b][m_idx].max()),
+                )
+                per_model_top1.append(
+                    int(per_box_per_model[best_box][m_idx].argmax())
+                )
+            if len(set(per_model_top1)) > 1:
+                return []
         if best_cls_conf:
             # Sort by classifier top-1 confidence DESC
             scored.sort(key=lambda t: -float(t[5][t[6]]))
