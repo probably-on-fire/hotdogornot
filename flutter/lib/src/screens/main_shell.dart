@@ -6,10 +6,11 @@ import 'about_screen.dart';
 import 'contribute_screen.dart';
 import 'identify_screen.dart';
 
-/// Bottom-nav shell with three tabs: Identify, Contribute, About.
-/// The About screen's Advanced (relay/token) panel is still gated
-/// behind a 7-tap dev-mode unlock so end users don't accidentally
-/// edit settings.
+/// Bottom-nav shell. End users see Identify + About. When dev mode is
+/// flipped on (7-tap version line on the About screen) the Contribute
+/// tab also appears between them, and the About screen reveals an
+/// Advanced (relay/token) panel so end users don't accidentally edit
+/// settings.
 class MainShell extends StatefulWidget {
   const MainShell({super.key});
 
@@ -62,24 +63,26 @@ class _MainShellState extends State<MainShell> {
       );
     }
 
-    // Three tabs: Identify (slot 0), Contribute (slot 1), About (slot 2).
-    // Each camera-bearing screen gets isActive so it can dispose its
-    // CameraController when not the selected tab — Android allows only
-    // one CameraController on the hardware at a time.
+    // Dev mode adds the Contribute tab between Identify and About.
+    // Identify is always slot 0, About is the last slot, Contribute (if
+    // present) is slot 1. Each camera-bearing screen gets isActive so
+    // it can dispose its CameraController when not the selected tab —
+    // Android allows only one CameraController on the hardware at a time.
     //
     // Contribute is wrapped in AnimatedBuilder so sign-in state changes
     // reactively swap the camera UI vs the sign-in card without
     // requiring the whole shell to rebuild.
     final pages = <Widget>[
       IdentifyScreen(settings: settings, isActive: _index == 0),
-      AnimatedBuilder(
-        animation: auth,
-        builder: (context, _) => ContributeScreen(
-          settings: settings,
-          auth: auth,
-          isActive: _index == 1,
+      if (settings.devMode)
+        AnimatedBuilder(
+          animation: auth,
+          builder: (context, _) => ContributeScreen(
+            settings: settings,
+            auth: auth,
+            isActive: _index == 1,
+          ),
         ),
-      ),
       AboutScreen(
         settings: settings,
         onDevModeChanged: _onDevModeChanged,
@@ -92,11 +95,12 @@ class _MainShellState extends State<MainShell> {
         selectedIcon: Icon(Icons.camera_alt),
         label: 'Identify',
       ),
-      const NavigationDestination(
-        icon: Icon(Icons.upload_outlined),
-        selectedIcon: Icon(Icons.upload),
-        label: 'Contribute',
-      ),
+      if (settings.devMode)
+        const NavigationDestination(
+          icon: Icon(Icons.upload_outlined),
+          selectedIcon: Icon(Icons.upload),
+          label: 'Contribute',
+        ),
       const NavigationDestination(
         icon: Icon(Icons.info_outline),
         selectedIcon: Icon(Icons.info),
