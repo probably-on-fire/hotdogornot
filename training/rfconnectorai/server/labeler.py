@@ -33,6 +33,7 @@ import subprocess
 import tempfile
 import time
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -624,6 +625,64 @@ def require_admin(request: Request) -> _auth.User:
 
 
 # ---------------------------------------------------------------------------
+# Contact form (anonymous): honeypot + time-trap + IP rate-limit + Resend
+# ---------------------------------------------------------------------------
+
+# In-memory rate limit. Reset on service restart. Fine for low-volume form.
+_contact_rate_limit: dict[str, list[float]] = {}
+
+
+def _contact_rate_count(ip: str, now: float) -> int:
+    """Returns count of submissions from this IP in the last hour."""
+    cutoff = now - 3600
+    times = [t for t in _contact_rate_limit.get(ip, []) if t >= cutoff]
+    _contact_rate_limit[ip] = times
+    return len(times)
+
+
+def _contact_send_email(name: str, email: str, message: str, ip: str) -> tuple[bool, str]:
+    """Send via Resend API. Returns (ok, error_message)."""
+    api_key = os.environ.get("RFCAI_RESEND_API_KEY", "").strip()
+    if not api_key:
+        return (False, "email service not configured (RFCAI_RESEND_API_KEY)")
+    from_addr = os.environ.get("RFCAI_CONTACT_FROM",
+                               "AI Red <onboarding@resend.dev>")
+    to_addr = os.environ.get("RFCAI_CONTACT_TO", "chris@aired.com")
+    subject = f"[AI Red] {name}"
+    text = (
+        f"From:    {name} <{email}>\n"
+        f"IP:      {ip}\n"
+        f"When:    {datetime.now(timezone.utc).isoformat()}\n"
+        f"\n"
+        f"{message}\n"
+        f"\n"
+        f"---\n"
+        f"Sent via the aired.com contact form. Reply directly to reach the sender.\n"
+    )
+    payload = {
+        "from": from_addr,
+        "to": [to_addr],
+        "reply_to": email,
+        "subject": subject,
+        "text": text,
+    }
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return (200 <= r.status < 300, f"resend status {r.status}")
+    except Exception as e:
+        return (False, f"resend send failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
 
@@ -802,6 +861,73 @@ def create_router(classifier=None) -> APIRouter:
             "train": _real_capture_counts(_data_root()),
             "holdout": _real_capture_counts(_test_holdout_root()),
         }
+
+    @r.post("/contact")
+    async def contact(
+        request: Request,
+        name: str = Form(""),
+        email: str = Form(""),
+        message: str = Form(""),
+        website: str = Form(""),       # honeypot — humans don't see/fill
+        elapsed_ms: int = Form(0),     # ms since page load, client-recorded
+    ):
+        """Anonymous contact form submission. Spam protection:
+        1. Honeypot field 'website' — bots fill it; humans don't see it.
+           Honeypot trips => silent 200 (don't tell the bot it failed).
+        2. Time-trap — page must have been visible for >=3s. Bots submit
+           instantly.
+        3. IP rate limit — max 3 successful submissions per IP per hour.
+        4. Field validation — name non-empty, email contains @, message
+           10-5000 chars."""
+        # Honeypot — silent success so the bot doesn't retry
+        if website.strip():
+            return JSONResponse({"ok": True})
+        # Time-trap
+        if elapsed_ms < 3000:
+            return JSONResponse(
+                {"ok": False, "error": "Please take a moment to fill the form."},
+                status_code=400,
+            )
+        # Validate
+        name = (name or "").strip()[:200]
+        email = (email or "").strip().lower()[:200]
+        message = (message or "").strip()[:5000]
+        if not name or not email or not message:
+            return JSONResponse(
+                {"ok": False, "error": "Please fill in all fields."},
+                status_code=400,
+            )
+        if "@" not in email or "." not in email.split("@")[-1]:
+            return JSONResponse(
+                {"ok": False, "error": "Please use a valid email address."},
+                status_code=400,
+            )
+        if len(message) < 10:
+            return JSONResponse(
+                {"ok": False, "error": "Tell us a bit more — 10+ characters."},
+                status_code=400,
+            )
+        # Rate limit
+        ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        if _contact_rate_count(ip, now) >= 3:
+            return JSONResponse(
+                {"ok": False, "error": "You've sent a few already — try later."},
+                status_code=429,
+            )
+        # Send
+        ok, err = _contact_send_email(name, email, message, ip)
+        if not ok:
+            # Log the failure but don't leak internals to the form
+            print(f"[contact] send failed for {email} from {ip}: {err}", flush=True)
+            return JSONResponse(
+                {"ok": False, "error": "Couldn't send right now. Email chris@aired.com directly."},
+                status_code=500,
+            )
+        # Only record on success so failed sends don't burn the rate budget
+        _contact_rate_limit.setdefault(ip, []).append(now)
+        print(f"[contact] sent from {email} ({name}) at {ip}", flush=True)
+        return JSONResponse({"ok": True})
 
     @r.get("/", response_class=HTMLResponse)
     def index(request: Request):

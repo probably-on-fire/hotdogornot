@@ -282,27 +282,78 @@
 
     /* Contact */
     .contact {
-      text-align: center;
       padding: 72px 0;
       border-top: 1px solid var(--border);
     }
+    .contact-head { text-align: center; max-width: 560px; margin: 0 auto 32px; }
     .contact h2 {
       font-size: clamp(24px, 3vw, 32px); font-weight: 700;
       color: var(--text);
       margin: 0 0 14px;
       letter-spacing: -0.4px;
     }
-    .contact p {
+    .contact-head p {
       font-size: 16px; color: var(--muted);
       line-height: 1.6;
-      max-width: 520px;
-      margin: 0 auto 28px;
+      margin: 0;
     }
-    .contact-email {
-      font-size: 17px; font-weight: 600;
-      color: var(--accent);
+    .contact-form {
+      max-width: 540px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: 12px;
     }
-    .contact-email:hover { color: var(--accent-strong); }
+    .cf-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 540px) { .cf-row { grid-template-columns: 1fr; } }
+    .contact-form input[type="text"],
+    .contact-form input[type="email"],
+    .contact-form textarea {
+      width: 100%;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 11px 14px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14.5px;
+      transition: border-color 120ms, background 120ms;
+    }
+    .contact-form input::placeholder,
+    .contact-form textarea::placeholder { color: var(--subtle); }
+    .contact-form input:focus,
+    .contact-form textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      background: var(--panel-2);
+    }
+    .contact-form textarea { resize: vertical; min-height: 120px; line-height: 1.55; }
+    .contact-form button {
+      align-self: flex-start;
+      padding: 11px 22px;
+      background: var(--accent); color: #fff;
+      border: none; border-radius: 8px;
+      font-size: 14.5px; font-weight: 600;
+      cursor: pointer;
+      transition: background 120ms;
+    }
+    .contact-form button:hover { background: var(--accent-strong); }
+    .contact-form button:disabled { opacity: .55; cursor: not-allowed; }
+    .cf-status {
+      margin: 0; min-height: 18px;
+      font-size: 13.5px; color: var(--muted);
+      transition: color 120ms;
+    }
+    .cf-status.ok { color: var(--green); }
+    .cf-status.err { color: #f88; }
+    .cf-honeypot {
+      position: absolute; left: -9999px; top: -9999px;
+      width: 1px; height: 1px; overflow: hidden;
+    }
+    .contact-fallback {
+      text-align: center;
+      margin-top: 22px;
+      font-size: 13px; color: var(--subtle);
+    }
+    .contact-fallback a { color: var(--muted); }
+    .contact-fallback a:hover { color: var(--accent); }
 
     /* ── Footer ───────────────────────────────────────────────── */
     footer {
@@ -463,14 +514,72 @@
 
     <div class="contact" id="contact">
       <div class="container-narrow">
-        <h2>Have a visual problem off-the-shelf AI can&rsquo;t handle?</h2>
-        <p>
-          Tell us what you&rsquo;re working on. We&rsquo;ll tell you whether it&rsquo;s a fit and
-          what it would take.
+        <div class="contact-head">
+          <h2>Have a visual problem off-the-shelf AI can&rsquo;t handle?</h2>
+          <p>Tell us what you&rsquo;re working on. We&rsquo;ll tell you if it&rsquo;s a fit and what it would take.</p>
+        </div>
+
+        <form id="contact-form" class="contact-form" novalidate>
+          <!-- Honeypot: hidden from humans, often filled by bots -->
+          <div class="cf-honeypot" aria-hidden="true">
+            <label>Website (leave blank)
+              <input type="text" name="website" tabindex="-1" autocomplete="off">
+            </label>
+          </div>
+          <input type="hidden" name="elapsed_ms" id="cf-elapsed" value="0">
+
+          <div class="cf-row">
+            <input type="text" name="name" placeholder="Your name" required maxlength="200" autocomplete="name">
+            <input type="email" name="email" placeholder="Email" required maxlength="200" autocomplete="email">
+          </div>
+          <textarea name="message" rows="5" placeholder="What are you trying to build? A sentence or two is fine." required minlength="10" maxlength="5000"></textarea>
+
+          <button type="submit" id="cf-submit">Send message</button>
+          <p id="cf-status" class="cf-status" aria-live="polite"></p>
+        </form>
+
+        <p class="contact-fallback">
+          or email <a href="mailto:chris@aired.com">chris@aired.com</a> directly.
         </p>
-        <a href="mailto:chris@aired.com" class="contact-email">chris@aired.com</a>
       </div>
     </div>
+
+    <script>
+      (function () {
+        var loaded = Date.now();
+        var form = document.getElementById('contact-form');
+        var status = document.getElementById('cf-status');
+        var elapsed = document.getElementById('cf-elapsed');
+        var submit = document.getElementById('cf-submit');
+        if (!form || !status || !elapsed || !submit) return;
+        form.addEventListener('submit', async function (e) {
+          e.preventDefault();
+          elapsed.value = String(Date.now() - loaded);
+          submit.disabled = true;
+          status.textContent = 'Sending…';
+          status.className = 'cf-status';
+          var fd = new FormData(form);
+          var data, errMsg;
+          try {
+            var r = await fetch('/rfcai/labeler/contact', { method: 'POST', body: fd });
+            try { data = await r.json(); } catch (_) { data = null; }
+            if (data && data.ok) {
+              status.textContent = '✓ Sent. We’ll be in touch.';
+              status.className = 'cf-status ok';
+              form.reset();
+              loaded = Date.now();
+              return;
+            }
+            errMsg = (data && data.error) || 'Couldn’t send. Try emailing chris@aired.com directly.';
+          } catch (err) {
+            errMsg = 'Network error. Try emailing chris@aired.com directly.';
+          }
+          status.textContent = errMsg;
+          status.className = 'cf-status err';
+          submit.disabled = false;
+        });
+      })();
+    </script>
   </main>
 
   <footer>
