@@ -304,49 +304,6 @@
     }
     .contact-email:hover { color: var(--accent-strong); }
 
-    /* ── PRIVATE view (collaborator landing) ─────────────────── */
-    .private-view-section { padding: 80px 0 32px; }
-    .priv-hero {
-      text-align: center;
-      padding: 0 0 32px;
-    }
-    .priv-hero img {
-      width: 88px; height: 88px;
-      margin-bottom: 22px;
-      filter: drop-shadow(0 8px 32px rgba(0,0,0,0.5));
-    }
-    .priv-hero h1 {
-      font-size: clamp(28px, 4vw, 38px);
-      font-weight: 800;
-      letter-spacing: -0.6px;
-      margin: 0 0 12px;
-    }
-    .priv-hero p {
-      font-size: 16px; color: var(--muted);
-      max-width: 520px; margin: 0 auto 24px;
-      line-height: 1.55;
-    }
-    .priv-ctas { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
-    .priv-stats {
-      margin: 32px 0 0;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 22px 28px;
-      text-align: center;
-      min-height: 70px;
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: var(--shadow-lg);
-    }
-    .priv-stats[data-loading="true"] .skeleton {
-      color: var(--subtle); font-size: 14px;
-    }
-    .priv-stats .stat-num {
-      font-size: 26px; font-weight: 800; color: var(--accent);
-      letter-spacing: -0.5px; margin: 0 6px;
-    }
-    .priv-stats .stat-label { font-size: 14px; color: var(--muted); margin: 0 4px; }
-
     /* ── Footer ───────────────────────────────────────────────── */
     footer {
       border-top: 1px solid var(--border);
@@ -367,7 +324,6 @@
     .footer-wordmark { font-size: 12px; color: var(--subtle); white-space: nowrap; }
     .footer-wordmark strong { color: var(--muted); }
 
-    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
@@ -517,30 +473,6 @@
     </div>
   </main>
 
-  <!-- ────────────────────────────────────────────────────────────
-       PRIVATE view — collaborators signed into the labeler.
-       Auth JS toggles this on once /labeler/auth/whoami returns 200.
-       ──────────────────────────────────────────────────────────── -->
-  <main id="private-view" hidden>
-    <div class="container-narrow private-view-section">
-      <div class="priv-hero">
-        <img src="/logo-transparent.webp" alt="AI Red logo" width="88" height="88">
-        <h1>RF Connector AI &mdash; collaborator hub</h1>
-        <p>
-          Browse the training dataset, contribute new images, or open the demo.
-          You&rsquo;re signed in.
-        </p>
-        <div class="priv-ctas">
-          <a href="/rfcai/labeler/" class="cta-primary">Open the labeler</a>
-          <a href="/demo/" class="cta-secondary">Streamlit demo</a>
-        </div>
-      </div>
-      <div class="priv-stats" id="stats" data-loading="true">
-        <span class="skeleton">Loading project stats&hellip;</span>
-      </div>
-    </div>
-  </main>
-
   <footer>
     <div class="footer-inner">
       <nav class="footer-links" aria-label="Footer links">
@@ -553,44 +485,5 @@
     </div>
   </footer>
 
-  <script>
-    // Auth gate: ask the labeler whether the caller has a valid session.
-    // 200 -> reveal the private collaborator view + load stats.
-    // 401/anything else -> stay on the public business landing.
-    (function () {
-      var publicView = document.getElementById('public-view');
-      var privateView = document.getElementById('private-view');
-      function showPrivate() {
-        publicView.hidden = true;
-        privateView.hidden = false;
-        loadStats();
-      }
-      function loadStats() {
-        var el = document.getElementById('stats');
-        if (!el) return;
-        fetch('/rfcai/labeler/stats')
-          .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-          .then(function (data) {
-            var train = (data && data.train) ? data.train : {};
-            var total = Object.values(train).reduce(function (a, b) { return a + b; }, 0);
-            var nClasses = Object.values(train).filter(function (c) { return c > 0; }).length;
-            el.dataset.loading = 'false';
-            el.innerHTML =
-              '<span class="stat-num">' + total.toLocaleString() + '</span>' +
-              '<span class="stat-label">training samples across</span>' +
-              '<span class="stat-num">' + nClasses + '</span>' +
-              '<span class="stat-label">connector classes</span>';
-          })
-          .catch(function () {
-            el.dataset.loading = 'false';
-            el.innerHTML =
-              '<a href="/rfcai/labeler/">Open the labeler to see stats &rarr;</a>';
-          });
-      }
-      fetch('/rfcai/labeler/auth/whoami', { credentials: 'same-origin' })
-        .then(function (r) { if (r.ok) showPrivate(); })
-        .catch(function () { /* stay on public view */ });
-    })();
-  </script>
 </body>
 </html>
