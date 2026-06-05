@@ -458,33 +458,6 @@
           commodity phone hardware and abstain rather than guess wrong.
         </p>
 
-        <p class="case-label" style="margin-top:24px">Challenges we&rsquo;re working through</p>
-        <ul class="case-list">
-          <li><strong>Fine-pitch class confusion</strong> &mdash; when the visual
-            difference between two classes is smaller than the camera&rsquo;s effective
-            resolving power. Sonnet-grade vision models can&rsquo;t distinguish them
-            either; only carefully-captured training data helps.</li>
-          <li><strong>Distance variation</strong> &mdash; early training data was
-            all close-up bench shots. Real users hold the phone wherever they want.
-            Digital zoom is not a substitute for physical-distance variation in the
-            capture set.</li>
-          <li><strong>Class imbalance vs data volume</strong> &mdash; some classes
-            had 6&times; more samples than others. Naive balancing (cap to smallest)
-            cost more accuracy than the imbalance itself.</li>
-          <li><strong>Calibration over coverage</strong> &mdash; the app shows
-            &ldquo;no result, try again&rdquo; below a confidence threshold rather than
-            risk a confident wrong answer. Picking the threshold and shaping the
-            model around it is its own design problem.</li>
-        </ul>
-
-        <p class="case-label" style="margin-top:24px">What we&rsquo;ve built so far</p>
-        <ul class="case-list">
-          <li>2-way EfficientNetV2-S softmax ensemble exported to ONNX, runs end-to-end on phone CPU</li>
-          <li>A reticle-crop UX that forces training and inference to share the same scale</li>
-          <li>A capture protocol + Flutter app that biases new data toward whichever classes are currently confused</li>
-          <li>Web-based labeling tools, snapshot-based training, and a Sonnet vision audit pass for label-quality sanity checks</li>
-        </ul>
-
         <p class="case-label" style="margin-top:28px">Where we are right now</p>
         <div class="case-metrics">
           <div class="metric">
