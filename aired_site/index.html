@@ -545,38 +545,84 @@
     </div>
 
     <script>
+      // Contact form -> FormSubmit.co (zero-setup email forwarder).
+      // Client-side spam pre-filter:
+      //   - honeypot 'website' field (hidden, bots fill it)
+      //   - time-trap (must take >= 3s from page-load to submit)
+      //   - basic field validation
+      // If any pre-filter fails, we never hit FormSubmit -> they don't see junk.
       (function () {
+        var FORMSUBMIT_URL = 'https://formsubmit.co/ajax/chris@aired.com';
         var loaded = Date.now();
         var form = document.getElementById('contact-form');
         var status = document.getElementById('cf-status');
         var elapsed = document.getElementById('cf-elapsed');
         var submit = document.getElementById('cf-submit');
         if (!form || !status || !elapsed || !submit) return;
+
+        function fail(msg) {
+          status.textContent = msg;
+          status.className = 'cf-status err';
+          submit.disabled = false;
+        }
+
         form.addEventListener('submit', async function (e) {
           e.preventDefault();
-          elapsed.value = String(Date.now() - loaded);
+          var elapsedMs = Date.now() - loaded;
+          elapsed.value = String(elapsedMs);
           submit.disabled = true;
           status.textContent = 'Sending…';
           status.className = 'cf-status';
-          var fd = new FormData(form);
-          var data, errMsg;
+
+          var name = (form.elements.name.value || '').trim();
+          var email = (form.elements.email.value || '').trim();
+          var message = (form.elements.message.value || '').trim();
+          var honeypot = (form.elements.website.value || '').trim();
+
+          // Honeypot: bot filled it. Silently "succeed" so they move on.
+          if (honeypot) {
+            status.textContent = '✓ Sent. We’ll be in touch.';
+            status.className = 'cf-status ok';
+            form.reset();
+            return;
+          }
+          // Time-trap
+          if (elapsedMs < 3000) return fail('Please take a moment to fill the form.');
+          // Field validation
+          if (!name || !email || !message) return fail('Please fill in all fields.');
+          if (email.indexOf('@') < 0 || email.split('@')[1].indexOf('.') < 0)
+            return fail('Please use a valid email address.');
+          if (message.length < 10) return fail('Tell us a bit more — 10+ characters.');
+
+          // Post to FormSubmit. _captcha disables their built-in captcha (we
+          // pre-filter client-side); _subject + _template shape the email.
+          var payload = {
+            name: name,
+            email: email,
+            message: message,
+            _subject: '[AI Red] Contact from ' + name,
+            _template: 'table',
+            _captcha: 'false',
+          };
           try {
-            var r = await fetch('/rfcai/labeler/contact', { method: 'POST', body: fd });
-            try { data = await r.json(); } catch (_) { data = null; }
-            if (data && data.ok) {
+            var r = await fetch(FORMSUBMIT_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+              body: JSON.stringify(payload),
+            });
+            var data = null;
+            try { data = await r.json(); } catch (_) {}
+            if (r.ok && data && (data.success === 'true' || data.success === true)) {
               status.textContent = '✓ Sent. We’ll be in touch.';
               status.className = 'cf-status ok';
               form.reset();
               loaded = Date.now();
               return;
             }
-            errMsg = (data && data.error) || 'Couldn’t send. Try emailing chris@aired.com directly.';
+            return fail((data && data.message) || 'Couldn’t send. Try emailing chris@aired.com directly.');
           } catch (err) {
-            errMsg = 'Network error. Try emailing chris@aired.com directly.';
+            return fail('Network error. Try emailing chris@aired.com directly.');
           }
-          status.textContent = errMsg;
-          status.className = 'cf-status err';
-          submit.disabled = false;
         });
       })();
     </script>
