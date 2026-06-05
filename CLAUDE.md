@@ -1,6 +1,6 @@
 # RF Connector AI — Claude session context
 
-You are picking up an active project. Read this first. Production state was last updated **2026-05-28** when v7 was deployed and phone-tested.
+You are picking up an active project. Read this first. Production state was last updated **2026-06-05** when the **v7+v10 ensemble** was deployed.
 
 ## Elevator pitch
 
@@ -8,37 +8,51 @@ Phone app that identifies RF coaxial connectors (SMA, 1.85mm, 2.4mm, 2.92mm, 3.5
 
 The Flutter app (`flutter/`) and the Python service (`training/rfconnectorai/server/`) talk to each other through aired.com. The actual ML runs on a LAN box that reverse-SSH-tunnels into aired.com's public-facing nginx.
 
-## CURRENT PRODUCTION (deployed 2026-05-28 10:17 EDT, phone-confirmed)
+## CURRENT PRODUCTION (deployed 2026-06-05 13:59 EDT — v7+v10 ensemble)
 
-**Live config:** `combined_v7` single model + `RFCAI_RETICLE_REGION_FILTER=1` + best-CLS-conf + threshold 0.65.
+**Live config:** `combined_v7` × `combined_v10_2026-06-03` 2-way softmax ensemble + `RFCAI_RETICLE_REGION_FILTER=1` + `RFCAI_BEST_CLS_CONF_BOX=1` + threshold 0.65.
 
-| Testset | Result |
-|---|---|
-| 307 today's real phone uploads | **304/304 = 100% correct, 3 abstain (99% coverage), ZERO confidently-wrong** |
-| 48-img phone-realistic v2 holdout | 45/45 = 100% correct, 3 abstain, zero CW |
-| 12-img phone-realistic v1 (3.5mm-only legacy) | 10/10 = 100%, 2 abstain, zero CW |
-| 52-img close-up bench holdout (regression detector) | 45/48 = 93.8%, 3 CW (small close-up regression vs prior prod) |
+| Testset | v7+v10 (NEW PROD) | v7+v9 (previous) | Win |
+|---|---|---|---|
+| **today's 410 phone uploads** | **381/381 = 100% correct, 0 CW, 29 abst** | 369/378, **9 CW** | **-9 CW** |
+| **hard 2.92mm-F (36 user-corrected shots)** | **25/25 = 100%, 0 CW, 11 abst** | 11/19, **8 CW** | **-8 CW** |
+| phone-v2 holdout (48) | 42/42 = 100%, 0 CW, 6 abst | 45/45 = 100%, 0 CW, 3 abst | tied on CW (3 more abst) |
+| close-up 52 | 41/43 = 95.3%, 2 CW, 10 abst | 38/40, 2 CW, 13 abst | tied on CW (3 fewer abst) |
 
 **Service env (`/etc/default/rfcai-predict` on box):**
 ```
 RFCAI_USE_JERRY_PIPELINE=1
 RFCAI_JERRY_MODEL_DIR=/home/rfcai/training/models/jerry_v19_hybrid_combined_v7_2026-05-28
-RFCAI_JERRY_EXTRA_MODEL_DIRS=                       # empty — single model, no ensemble
+RFCAI_JERRY_EXTRA_MODEL_DIRS=/home/rfcai/training/models/jerry_v19_hybrid_combined_v10_2026-06-03
 RFCAI_BEST_CLS_CONF_BOX=1
-RFCAI_RETICLE_REGION_FILTER=1                       # NEW
+RFCAI_RETICLE_REGION_FILTER=1
 ```
 
-**What unlocked this** wasn't a smarter model — it was capturing **~263 training shots at varied physical camera distances** (vs. the prior data which was all single-distance + digital-zoom). v5 (same recipe, no new data) topped out at 44% coverage zero-CW. v7 (same recipe, with the distance-varied data) hit 99% coverage. **Data was the bottleneck.** See [[distance-vs-digital-zoom-training-data]], [[combined_v7_distance_varied_2026-05-28]], [[v7-distance-varied-winner-2026-05-28]].
+**What unlocked v10:** the user's 36 distance-varied 2.92mm-F captures on 2026-06-03 (15 in first batch, 21 reticle-crops in second). v9 had been trained too early to see them and was confidently misclassifying them as 3.5mm-F at 0.92-0.95 conf. v10 was trained on combined_v10_2026-06-03 (3,738 samples = v9 + 39 new corrections) with the same recipe (scale=0.20, lr 1e-4, batch 16, 50 epochs, seed 0). v10 alone fixed 7 of 8 hard 2.92mm-F cases; pairing it with v7 brought CW to **zero on every realistic-distance test set**.
 
-**Rollback** (if anything breaks):
+**Why ensemble (not v10 alone):** v10 alone has 1 CW on phone-v2 and 4 on today; v7 stabilizes those. The ensemble inherits v7's phone-v2 strength + v10's fine-pitch capability.
+
+**What also helped:** a Sonnet vision audit on 2026-06-04 of all 4 female training classes (1,020 imgs across 2.92mm-F, 3.5mm-F, 2.4mm-F, 1.85mm-F) found **0 wrong-gender mislabels** — confirmed the data was already clean and the bug was a data-volume gap on 2.92mm-F, not a label-noise issue. 12 JUNK files were removed (wood-grain-only, severely blurred). See `docs/v10_deploy_2026-06-05.md`.
+
+**Rollback** (one env-var flip):
 ```bash
-sudo cp /etc/default/rfcai-predict.bak.2026-05-28-v7winner /etc/default/rfcai-predict
-sudo cp /opt/rfcai/repo/training/rfconnectorai/pipeline/jerry_pipeline.py.bak.2026-05-28-v7winner \
-        /opt/rfcai/repo/training/rfconnectorai/pipeline/jerry_pipeline.py
+sudo cp /etc/default/rfcai-predict.bak.2026-06-05-v7v10winner /etc/default/rfcai-predict
 sudo systemctl restart rfcai-predict
 ```
 
-**APK at `https://aired.com/app.apk?v=5`** — current shipped Flutter build is the right one (reticle crop + 0.65 threshold already wired). No app update required for v7 to take effect.
+Earlier backups: `.bak.2026-06-03-v7v9winner` (v7+v9), `.bak.2026-05-28-v7winner` (v7 single).
+
+**APK at `https://aired.com/app.apk?v=5`** — no app update needed. The `/predict` API contract is unchanged; phones get the v10 win automatically on next request.
+
+---
+
+## Previous production (2026-06-03 → 2026-06-05) — v7+v9 ensemble
+
+Deployed 2026-06-03 05:01 EDT. Held prod for 2 days. Strictly better than v7-alone (today's-uploads CW dropped 11→1; close-up CW dropped 3→2). Replaced by v7+v10 after user reported 2.92mm-F confidently-wrong issues that v9 couldn't fix (it had been trained on stale data).
+
+## Previous production (2026-05-28 → 2026-06-03) — v7 single model
+
+`combined_v7` single-model (no extras). Hit 99% coverage zero-CW on 307 phone uploads after the 2026-05-28 distance-varied capture session unlocked it. Held prod for ~6 days. Pre-deploy backup at `.bak.2026-05-28-v7winner`.
 
 The sections below are the historical journey that got us here.
 
