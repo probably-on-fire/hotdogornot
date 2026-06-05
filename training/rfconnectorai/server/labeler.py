@@ -42,7 +42,6 @@ import numpy as np
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 from rfconnectorai.data_fetch.connector_crops import detect_connector_crops_hough
@@ -575,42 +574,25 @@ def _real_capture_counts(root: Path) -> dict[str, int]:
 # Auth
 # ---------------------------------------------------------------------------
 
-_security = HTTPBasic()
-
-
-def _require_basic_auth(creds: HTTPBasicCredentials = Depends(_security)) -> str:
-    user = os.environ.get("LABELER_USER", "")
-    pwd = os.environ.get("LABELER_PASS", "")
-    if not user or not pwd:
-        raise HTTPException(503, "labeler auth not configured (set LABELER_USER and LABELER_PASS)")
-    if not (secrets.compare_digest(creds.username, user)
-            and secrets.compare_digest(creds.password, pwd)):
-        raise HTTPException(
-            401, "invalid credentials",
-            headers={"WWW-Authenticate": "Basic realm=labeler"},
-        )
-    return creds.username
-
 
 def require_admin(request: Request) -> _auth.User:
     """Auth dependency for admin-only routes.
 
     Accepts either:
-      1. A valid session cookie (set by /labeler/login)
-      2. HTTP Basic Authorization header (for the Flutter app and
-         curl users — credentials validated against the users DB,
-         not the LABELER_USER/PASS env vars)
+      1. A valid session cookie (set by /labeler/login), or
+      2. Bearer token in the Authorization header (Flutter app, curl).
 
-    Returns the authenticated User on success.
-    Raises HTTPException(401) on failure.
+    On failure: redirect HTML GET requests to /login; return 401 JSON
+    for API requests. Crucially, we do NOT send WWW-Authenticate: Basic
+    — that header is what makes browsers pop up the native OS-style
+    username/password dialog. Browsers without auth get a clean redirect
+    to our styled login page instead.
     """
     db_path = _users_db_path()
 
     # Try session first.
     sess_user_id = request.session.get("user_id")
     if sess_user_id is not None:
-        # Confirm the user still exists (admin may have deleted them
-        # since they logged in).
         for u in _auth.list_users(db_path):
             if u.id == sess_user_id:
                 return u
@@ -618,33 +600,27 @@ def require_admin(request: Request) -> _auth.User:
         request.session.clear()
 
     # Try Bearer token next.
-    auth_header_lower = (request.headers.get("authorization") or "").lower()
-    if auth_header_lower.startswith("bearer "):
-        token = request.headers["authorization"].split(None, 1)[1].strip()
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(None, 1)[1].strip()
         user = _auth.authenticate_token(db_path, token)
         if user is not None:
             return user
 
-    # Fall back to HTTP Basic.
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.lower().startswith("basic "):
-        import base64
-        try:
-            decoded = base64.b64decode(auth_header.split(None, 1)[1]).decode("utf-8")
-            username, _, password = decoded.partition(":")
-        except Exception:
-            decoded = None
-            username = password = ""
-        if username:
-            user = _auth.authenticate(db_path, username, password)
-            if user is not None:
-                return user
-
-    raise HTTPException(
-        status_code=401,
-        detail="login required",
-        headers={"WWW-Authenticate": 'Basic realm="labeler"'},
-    )
+    # Unauthed. Browser GET → redirect to login. Everything else → 401 JSON.
+    accept = (request.headers.get("accept") or "").lower()
+    wants_html = "text/html" in accept and request.method == "GET"
+    if wants_html:
+        next_url = request.url.path
+        if request.url.query:
+            next_url += "?" + request.url.query
+        from urllib.parse import quote
+        raise HTTPException(
+            status_code=307,
+            detail="login required",
+            headers={"Location": f"/rfcai/labeler/login?next={quote(next_url)}"},
+        )
+    raise HTTPException(status_code=401, detail="login required")
 
 
 # ---------------------------------------------------------------------------

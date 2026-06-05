@@ -404,8 +404,30 @@
         btn.disabled = true;
         setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1200);
       } catch (err) {
-        // clipboard API may be blocked on http (LAN). Fallback: prompt.
-        window.prompt('Share link', url);
+        // Clipboard API blocked (often the case on http LAN). Show the URL
+        // inline next to the button as a selectable, click-to-select field
+        // so the user can copy manually. No window.prompt popup.
+        let host = btn.parentElement.querySelector('.copy-fallback');
+        if (!host) {
+          host = document.createElement('input');
+          host.type = 'text';
+          host.className = 'copy-fallback';
+          host.readOnly = true;
+          host.style.cssText = 'margin-left:8px;font-size:11px;padding:2px 6px;'
+            + 'background:var(--panel-2,#1b202c);color:var(--text,#e6ecf5);'
+            + 'border:1px solid var(--border,#2b3344);border-radius:4px;'
+            + 'min-width:240px;font-family:ui-monospace,monospace;';
+          host.addEventListener('focus', function () { this.select(); });
+          btn.parentElement.appendChild(host);
+        }
+        host.value = url;
+        host.focus();
+        host.select();
+        btn.textContent = 'Copy from box →';
+        setTimeout(function () {
+          if (host && host.parentElement) host.remove();
+          btn.textContent = 'Copy link';
+        }, 8000);
       }
     });
 

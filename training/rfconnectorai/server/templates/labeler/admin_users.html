@@ -178,10 +178,11 @@
               {% if u.id != current_user.id %}
               <form class="delete-form" method="post"
                     action="/rfcai/labeler/admin/users/{{ u.id }}/delete">
-                <button class="btn btn-danger"
+                <button class="btn btn-danger delete-user-btn"
                         style="padding:4px 10px; font-size:12px;"
                         type="submit"
-                        onclick="return confirm('Delete user {{ u.username }}?')">Delete</button>
+                        data-username="{{ u.username }}"
+                        data-confirm-text="Click again to delete {{ u.username }}">Delete</button>
               </form>
               {% else %}
               <span class="subtle" style="font-size:12px;">you</span>
@@ -214,4 +215,46 @@
       </form>
     </div>
   </main>
+
+  <script>
+    // Two-click delete confirmation — replaces window.confirm().
+    // First click: button switches to red "Click again to delete X" + arms a 4s timer.
+    // Second click within 4s: submits normally.
+    // Click elsewhere or timeout: reverts.
+    (function () {
+      let armed = null;
+      let timer = null;
+      function disarm(btn) {
+        if (!btn) return;
+        btn.textContent = btn.dataset.origText;
+        btn.classList.remove('armed');
+        btn.style.background = '';
+        btn.style.borderColor = '';
+        if (armed === btn) armed = null;
+        if (timer) { clearTimeout(timer); timer = null; }
+      }
+      document.body.addEventListener('click', function (e) {
+        const btn = e.target.closest('.delete-user-btn');
+        // Click somewhere else — disarm any armed button.
+        if (!btn) {
+          if (armed) disarm(armed);
+          return;
+        }
+        // Click on an unarmed button — arm it, swallow the submit.
+        if (btn !== armed) {
+          e.preventDefault();
+          if (armed) disarm(armed);
+          armed = btn;
+          if (!btn.dataset.origText) btn.dataset.origText = btn.textContent;
+          btn.textContent = btn.dataset.confirmText || 'Click again to delete';
+          btn.classList.add('armed');
+          btn.style.background = 'var(--danger, #b91c1c)';
+          btn.style.borderColor = 'var(--danger, #b91c1c)';
+          timer = setTimeout(function () { disarm(btn); }, 4000);
+          return;
+        }
+        // Second click — let the form submit normally.
+      }, true);
+    })();
+  </script>
 {% endblock %}
