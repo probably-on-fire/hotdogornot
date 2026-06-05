@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /rfcai/
+Disallow: /rfcai-box/
+Disallow: /compare185/
+Disallow: /audit-2026-06-03/
+Disallow: /suspect-3p5mmM-2026-06-03/
+Disallow: /privacy/
+
+Sitemap: https://aired.com/sitemap.xml
