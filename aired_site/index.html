@@ -254,6 +254,31 @@
     .case-link {
       font-size: 13px; color: var(--accent); font-weight: 600;
     }
+    .case-list {
+      margin: 10px 0 0;
+      padding: 0 0 0 22px;
+      list-style: none;
+    }
+    .case-list li {
+      position: relative;
+      font-size: 14.5px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 10px;
+      padding-left: 4px;
+    }
+    .case-list li::before {
+      content: "";
+      position: absolute;
+      left: -16px;
+      top: 9px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.7;
+    }
+    .case-list li strong { color: var(--text); font-weight: 600; }
 
     /* Contact */
     .contact {
@@ -408,37 +433,72 @@
     </div>
 
     <div class="container-narrow section" id="work">
-      <p class="section-eyebrow">Case study</p>
-      <h2 class="section-title">RF Connector AI</h2>
+      <p class="section-eyebrow">Current work</p>
+      <h2 class="section-title">Identifying RF connectors from a phone camera</h2>
       <p class="section-lede">
-        A mobile classifier that identifies 10 RF coaxial connector types
-        (SMA, 1.85mm, 2.4mm, 2.92mm, 3.5mm &times; M/F) from a phone camera.
-        Sub-millimeter visual differences. Designed for technicians in the field.
+        A working example of the kind of problem we take on. Live, iterating,
+        and instructive about how this category of model actually behaves in
+        practice.
       </p>
       <div class="case">
-        <p class="case-label">Live in production</p>
-        <h3>From 39% to 100% on real phone uploads</h3>
+        <p class="case-label">The problem</p>
+        <h3>Ten classes that look almost the same.</h3>
         <p>
-          Started with a Hough-transform + ResNet-18 pipeline at 39% top-1.
-          Iterated through architecture, data, and ensembling. Today the
-          production model is a 2-way EfficientNetV2-S softmax ensemble running
-          end-to-end on the user&rsquo;s phone.
+          SMA, 1.85mm, 2.4mm, 2.92mm, and 3.5mm RF coaxial connectors &times;
+          male/female. Some pairs differ by 0.6mm of physical size &mdash; invisible
+          without a reference scale. Photos vary by distance, lighting, finger
+          occlusion, and the angle of a hex nut. The model has to run on
+          commodity phone hardware and abstain rather than guess wrong.
         </p>
+
+        <p class="case-label" style="margin-top:24px">Challenges we&rsquo;re working through</p>
+        <ul class="case-list">
+          <li><strong>Fine-pitch class confusion</strong> &mdash; when the visual
+            difference between two classes is smaller than the camera&rsquo;s effective
+            resolving power. Sonnet-grade vision models can&rsquo;t distinguish them
+            either; only carefully-captured training data helps.</li>
+          <li><strong>Distance variation</strong> &mdash; early training data was
+            all close-up bench shots. Real users hold the phone wherever they want.
+            Digital zoom is not a substitute for physical-distance variation in the
+            capture set.</li>
+          <li><strong>Class imbalance vs data volume</strong> &mdash; some classes
+            had 6&times; more samples than others. Naive balancing (cap to smallest)
+            cost more accuracy than the imbalance itself.</li>
+          <li><strong>Calibration over coverage</strong> &mdash; the app shows
+            &ldquo;no result, try again&rdquo; below a confidence threshold rather than
+            risk a confident wrong answer. Picking the threshold and shaping the
+            model around it is its own design problem.</li>
+        </ul>
+
+        <p class="case-label" style="margin-top:24px">What we&rsquo;ve built so far</p>
+        <ul class="case-list">
+          <li>2-way EfficientNetV2-S softmax ensemble exported to ONNX, runs end-to-end on phone CPU</li>
+          <li>A reticle-crop UX that forces training and inference to share the same scale</li>
+          <li>A capture protocol + Flutter app that biases new data toward whichever classes are currently confused</li>
+          <li>Web-based labeling tools, snapshot-based training, and a Sonnet vision audit pass for label-quality sanity checks</li>
+        </ul>
+
+        <p class="case-label" style="margin-top:28px">Where we are right now</p>
         <div class="case-metrics">
           <div class="metric">
             <span class="num">100%</span>
-            <div class="label">accuracy on recent phone uploads</div>
+            <div class="label">accuracy on the most recent 410 phone uploads</div>
           </div>
           <div class="metric">
             <span class="num">0</span>
-            <div class="label">confidently-wrong outputs</div>
+            <div class="label">confidently-wrong outputs (the metric we care about)</div>
           </div>
           <div class="metric">
             <span class="num">~420ms</span>
             <div class="label">per inference on commodity CPU</div>
           </div>
         </div>
-        <div class="case-links">
+        <p style="font-size:13.5px;color:var(--subtle);text-align:center;margin:14px 0 0;">
+          Started at 39% accuracy with the first prototype. Honest about the
+          long tail of edge cases still in front of us.
+        </p>
+
+        <div class="case-links" style="margin-top:24px">
           <a class="case-link" href="/demo/">Try the demo &rarr;</a>
           <a class="case-link" href="/rfcai/labeler/">Browse the dataset &rarr;</a>
         </div>
