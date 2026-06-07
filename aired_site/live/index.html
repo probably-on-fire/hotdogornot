@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-18X7NQTYYB"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-18X7NQTYYB');
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Live Scan Monitor — AI Red</title>
+<link rel="icon" href="/logo-transparent.png">
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#14181d; --line:#222a31;
+    --text:#e8eef2; --muted:#8a97a3; --accent:#e23b3b; --ok:#33c46b;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--text);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    padding:24px 16px 40px; min-height:100%;
+  }
+  header{display:flex;align-items:center;gap:10px;margin-bottom:18px}
+  header img{height:30px;width:auto}
+  header h1{font-size:18px;font-weight:600;margin:0;letter-spacing:.2px}
+  header .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);
+    box-shadow:0 0 0 0 rgba(51,196,107,.5);}
+  header .dot.live{background:var(--ok);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(51,196,107,.45)}
+    70%{box-shadow:0 0 0 8px rgba(51,196,107,0)}100%{box-shadow:0 0 0 0 rgba(51,196,107,0)}}
+  .card{
+    width:100%; max-width:560px; background:var(--panel);
+    border:1px solid var(--line); border-radius:16px; overflow:hidden;
+    box-shadow:0 12px 40px rgba(0,0,0,.4);
+  }
+  .imgwrap{
+    position:relative; width:100%; aspect-ratio:1/1; background:#000;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .imgwrap img{width:100%;height:100%;object-fit:contain;display:block}
+  .imgwrap .empty{color:var(--muted);font-size:14px;text-align:center;padding:24px}
+  .meta{padding:18px 20px}
+  .spec{font-size:26px;font-weight:700;margin:0 0 2px}
+  .conf{color:var(--muted);font-size:14px;margin:0 0 14px}
+  .row{display:flex;justify-content:space-between;align-items:baseline;
+    padding:9px 0;border-top:1px solid var(--line);font-size:14px}
+  .row .k{color:var(--muted)}
+  .row .v{font-variant-numeric:tabular-nums}
+  .ago{font-weight:600}
+  footer{margin-top:18px;color:var(--muted);font-size:12px;text-align:center}
+  footer a{color:var(--muted)}
+  .stale .spec{color:var(--muted)}
+</style>
+</head>
+<body>
+  <header>
+    <img src="/logo-transparent.png" alt="AI Red">
+    <h1>Live Scan Monitor</h1>
+    <span class="dot" id="dot"></span>
+  </header>
+
+  <div class="card" id="card">
+    <div class="imgwrap">
+      <img id="scan" alt="latest scan" style="display:none">
+      <div class="empty" id="empty">Waiting for the first scan…</div>
+    </div>
+    <div class="meta">
+      <p class="spec" id="spec">—</p>
+      <p class="conf" id="conf"></p>
+      <div class="row"><span class="k">Last scan</span><span class="v ago" id="ago">—</span></div>
+      <div class="row"><span class="k">Captured</span><span class="v" id="when">—</span></div>
+      <div class="row"><span class="k">Size</span><span class="v" id="size">—</span></div>
+    </div>
+  </div>
+
+  <footer>
+    Auto-refreshes every 60s · updates whenever the app scans a connector<br>
+    <a href="https://aired.com/">aired.com</a>
+  </footer>
+
+<script>
+  var INFO = "/rfcai/labeler/live/info";
+  var IMG  = "/rfcai/labeler/live/latest.jpg";
+  var lastTs = 0;       // image mtime we currently display
+  var lastAgeBase = 0;  // age_seconds at last fetch
+  var lastFetchMs = 0;  // performance.now() at last fetch
+
+  function fmtAge(sec){
+    sec = Math.max(0, Math.floor(sec));
+    if (sec < 60)   return sec + "s ago";
+    var m = Math.floor(sec/60);
+    if (m < 60)     return m + (m===1?" minute ago":" minutes ago");
+    var h = Math.floor(m/60);
+    if (h < 24)     return h + (h===1?" hour ago":" hours ago");
+    var d = Math.floor(h/24);
+    return d + (d===1?" day ago":" days ago");
+  }
+  function fmtWhen(ts){
+    if(!ts) return "—";
+    try { return new Date(ts*1000).toLocaleString(); } catch(e){ return "—"; }
+  }
+
+  function tick(){
+    if(!lastFetchMs) return;
+    var elapsed = (performance.now() - lastFetchMs)/1000;
+    var age = lastAgeBase + elapsed;
+    document.getElementById("ago").textContent = fmtAge(age);
+    // "live" indicator green if a scan happened in the last 2 minutes
+    var dot = document.getElementById("dot");
+    if (age < 120) dot.classList.add("live"); else dot.classList.remove("live");
+    document.getElementById("card").classList.toggle("stale", age >= 600);
+  }
+
+  function refresh(){
+    fetch(INFO, {cache:"no-store"}).then(function(r){return r.json();}).then(function(d){
+      var img = document.getElementById("scan");
+      var empty = document.getElementById("empty");
+      if(!d || !d.available){
+        img.style.display="none"; empty.style.display="block";
+        empty.textContent = "Waiting for the first scan…";
+        document.getElementById("spec").textContent = "—";
+        return;
+      }
+      lastAgeBase = d.age_seconds || 0;
+      lastFetchMs = performance.now();
+      // Only swap the <img> src when the underlying scan actually changed,
+      // so a watched page doesn't flicker every minute.
+      if (d.ts && d.ts !== lastTs){
+        lastTs = d.ts;
+        img.onload = function(){ img.style.display="block"; empty.style.display="none"; };
+        img.src = IMG + "?t=" + Math.floor(d.ts);
+      } else if (lastTs){
+        img.style.display="block"; empty.style.display="none";
+      }
+      var genderWord = d.gender === "M" ? "Male" : (d.gender === "F" ? "Female" : "");
+      var fam = (typeof d.spec === "object" && d.spec) ? d.spec.display_name : d.spec;
+      fam = fam || d.family || "";
+      document.getElementById("spec").textContent =
+        (fam + " " + genderWord).trim() || "(unknown)";
+      var conf = (typeof d.confidence === "number")
+        ? "Confidence " + (d.confidence*100).toFixed(1) + "%"
+        : "";
+      document.getElementById("conf").textContent = conf;
+      document.getElementById("when").textContent = fmtWhen(d.ts);
+      document.getElementById("size").textContent =
+        (d.width && d.height) ? (d.width + " × " + d.height + " px") : "—";
+      tick();
+    }).catch(function(){ /* keep showing last good state */ });
+  }
+
+  refresh();
+  setInterval(refresh, 60000); // poll every 1 minute
+  setInterval(tick, 1000);     // smooth "time ago" counter
+</script>
+</body>
+</html>
